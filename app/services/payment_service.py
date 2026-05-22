@@ -49,7 +49,7 @@ class PaymentService:
             },
             "store": {
                 "name": "Prepa",
-                "tagline": "Ton assistant de révision",
+                "tagline": "Ton assistant de revision",
                 "phone": settings.whatsapp_number,
             },
             "actions": {
@@ -65,12 +65,24 @@ class PaymentService:
         }
 
         async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.post(
-                f"{PAYDUNYA_BASE_URL}/softorder/create",
-                json=payload,
-                headers=HEADERS,
-            )
-            data = response.json()
+            try:
+                response = await client.post(
+                    f"{PAYDUNYA_BASE_URL}/softorder/create",
+                    json=payload,
+                    headers=HEADERS,
+                )
+                print(f"PayDunya status: {response.status_code}")
+                print(f"PayDunya response: {response.text[:300]}")
+
+                if not response.text.strip():
+                    return {"success": False, "error": "Reponse vide de PayDunya"}
+
+                data = response.json()
+
+            except httpx.TimeoutException:
+                return {"success": False, "error": "Timeout PayDunya"}
+            except Exception as e:
+                return {"success": False, "error": str(e)}
 
         if data.get("response_code") == "00":
             return {
@@ -91,7 +103,7 @@ class PaymentService:
         payment_method: str = None,
         raw_data: dict = None,
     ) -> Subscription:
-        """Active le plan Pro après paiement confirmé."""
+        """Active le plan Pro apres paiement confirme."""
         from app.services.config_service import config_service
 
         amount = await config_service.get_int("plan_pro_price_fcfa")
@@ -110,21 +122,23 @@ class PaymentService:
         )
         db.add(subscription)
 
-        # Met à jour le plan utilisateur
         user.plan = "pro"
         await db.flush()
 
-        print(f"Pro activé pour {user.phone_number}")
+        print(f"Pro active pour {user.phone_number}")
         return subscription
 
     async def verify_payment(self, token: str) -> dict:
-        """Vérifie le statut d'un paiement PayDunya."""
+        """Verifie le statut d'un paiement PayDunya."""
         async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.get(
-                f"{PAYDUNYA_BASE_URL}/softorder/details/{token}",
-                headers=HEADERS,
-            )
-            return response.json()
+            try:
+                response = await client.get(
+                    f"{PAYDUNYA_BASE_URL}/softorder/details/{token}",
+                    headers=HEADERS,
+                )
+                return response.json()
+            except Exception as e:
+                return {"error": str(e)}
 
 
 payment_service = PaymentService()

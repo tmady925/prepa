@@ -8,10 +8,8 @@ settings = get_settings()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Démarrage
     await connect_redis()
     yield
-    # Arrêt
     await disconnect_redis()
 
 
@@ -33,6 +31,6 @@ async def health():
     return {"status": "ok"}
 
 
-# Routers — on les ajoute au fur et à mesure
-from app.api.v1.endpoints import webhook
+from app.api.v1.endpoints import webhook, payments
 app.include_router(webhook.router, prefix="/api/v1")
+app.include_router(payments.router, prefix="/api/v1")

@@ -35,6 +35,13 @@ class Settings(BaseSettings):
     anthropic_api_key: str = ""
     mistral_api_key: str = ""
 
+    # PayDunya
+    paydunya_master_key: str = ""
+    paydunya_private_key: str = ""
+    paydunya_public_key: str = ""
+    paydunya_token: str = ""
+    paydunya_mode: str = "test"
+
     # LLM routing
     llm_default_free_provider: str = "mistral"
     llm_default_pro_provider: str = "openai"

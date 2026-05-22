@@ -9,6 +9,7 @@ from app.services.user_service import user_service
 from app.services.whatsapp.sender import whatsapp_sender
 from app.services.whatsapp.messages import messages
 from app.services.llm.service import call_llm
+from app.repositories.message_repository import message_repo
 
 settings = get_settings()
 router = APIRouter()
@@ -48,12 +49,12 @@ def detect_complexity(text: str) -> int:
     text_lower = text.lower()
 
     complex_keywords = [
-        "démontre", "prouve", "développe", "explique en détail",
-        "comment résoudre", "dissertation", "synthèse", "analyse"
+        "demontre", "prouve", "developpe", "explique en detail",
+        "comment resoudre", "dissertation", "synthese", "analyse"
     ]
     medium_keywords = [
-        "explique", "pourquoi", "comment", "calcule", "résous",
-        "exercice", "exemple", "différence"
+        "explique", "pourquoi", "comment", "calcule", "resous",
+        "exercice", "exemple", "difference"
     ]
 
     if any(k in text_lower for k in complex_keywords):
@@ -166,7 +167,7 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession):
         if not chosen:
             await whatsapp_sender.send_text(
                 phone,
-                "Réponds avec les numéros séparés par des virgules. Ex: *1,2,4*"
+                "Reponds avec les numeros separes par des virgules. Ex: *1,2,4*"
             )
             return
         user = await user_service.set_subjects(db, user, chosen)
@@ -189,10 +190,32 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession):
             )
 
     elif step == "done":
+        # Vérifie le quota
+        quota = await user_service.check_quota(user)
+        if not quota["allowed"]:
+            await whatsapp_sender.send_buttons(
+                phone,
+                messages.quota_reached(user.name or "ami", user.referral_code or ""),
+                messages.QUOTA_BUTTONS,
+            )
+            return
+
+        # Sauvegarde le message entrant
+        await message_repo.save(
+            db=db,
+            user_id=user.id,
+            direction="inbound",
+            content=text,
+            intent="question_cours" if detect_complexity(text) >= 2 else "simple",
+        )
+
+        # Récupère l'historique
+        history = await message_repo.get_history(db, user.id, limit=10)
+
         # Envoie un accusé de réception
         await whatsapp_sender.send_text(phone, "⏳ Je réfléchis...")
 
-        # Appelle l'IA
+        # Appelle l'IA avec l'historique
         response = await call_llm(
             user_message=text,
             user_plan=user.plan,
@@ -200,10 +223,20 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession):
             subject="",
             series=user.series or "",
             complexity=detect_complexity(text),
+            history=history,
+        )
+
+        # Sauvegarde la réponse IA
+        await message_repo.save(
+            db=db,
+            user_id=user.id,
+            direction="outbound",
+            content=response.text,
+            llm_provider=response.provider,
+            from_cache=response.from_cache,
         )
 
         # Envoie la réponse
         await whatsapp_sender.send_text(phone, response.text)
 
-        # Log
-        print(f"IA ({response.provider}) → {phone}: {response.text[:80]}...")
+        print(f"IA ({response.provider}) -> {phone}: {response.text[:80]}...")

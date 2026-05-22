@@ -1,5 +1,6 @@
 import hashlib
 import hmac
+from datetime import datetime
 from fastapi import APIRouter, Request, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.settings import get_settings
@@ -7,6 +8,7 @@ from app.db.database import get_db
 from app.services.user_service import user_service
 from app.services.whatsapp.sender import whatsapp_sender
 from app.services.whatsapp.messages import messages
+from app.services.llm.service import call_llm
 
 settings = get_settings()
 router = APIRouter()
@@ -41,6 +43,26 @@ async def webhook_receive(
     return {"status": "ok"}
 
 
+def detect_complexity(text: str) -> int:
+    """Détecte la complexité d'un message sur une échelle de 1 à 3."""
+    text_lower = text.lower()
+
+    complex_keywords = [
+        "démontre", "prouve", "développe", "explique en détail",
+        "comment résoudre", "dissertation", "synthèse", "analyse"
+    ]
+    medium_keywords = [
+        "explique", "pourquoi", "comment", "calcule", "résous",
+        "exercice", "exemple", "différence"
+    ]
+
+    if any(k in text_lower for k in complex_keywords):
+        return 3
+    if any(k in text_lower for k in medium_keywords):
+        return 2
+    return 1
+
+
 async def process_message(message: dict, db: AsyncSession):
     phone = message.get("from")
     msg_type = message.get("type", "text")
@@ -69,10 +91,11 @@ async def process_message(message: dict, db: AsyncSession):
     if user.status == "active":
         quota = await user_service.check_quota(user)
         if not quota["allowed"]:
-            await whatsapp_sender.send_text(phone, messages.quota_reached(
-                user.name or "ami",
-                user.referral_code or ""
-            ))
+            await whatsapp_sender.send_buttons(
+                phone,
+                messages.quota_reached(user.name or "ami", user.referral_code or ""),
+                messages.QUOTA_BUTTONS,
+            )
             return
 
     # Route selon l'étape d'onboarding
@@ -141,13 +164,15 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession):
             if s.strip() in subject_map
         ]
         if not chosen:
-            await whatsapp_sender.send_text(phone, "Réponds avec les numéros séparés par des virgules. Ex: *1,2,4*")
+            await whatsapp_sender.send_text(
+                phone,
+                "Réponds avec les numéros séparés par des virgules. Ex: *1,2,4*"
+            )
             return
         user = await user_service.set_subjects(db, user, chosen)
         await whatsapp_sender.send_text(phone, messages.ask_exam_date())
 
     elif step == "exam_date":
-        from datetime import datetime
         try:
             exam_date = datetime.strptime(text, "%d/%m/%Y")
             user = await user_service.set_exam_date(db, user, exam_date)
@@ -164,8 +189,21 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession):
             )
 
     elif step == "done":
-        # Élève actif — on répondra avec l'IA dans la prochaine étape
-        await whatsapp_sender.send_text(
-            phone,
-            f"Tu as écrit : _{text}_\n\n_(La réponse IA arrive bientôt !)_"
+        # Envoie un accusé de réception
+        await whatsapp_sender.send_text(phone, "⏳ Je réfléchis...")
+
+        # Appelle l'IA
+        response = await call_llm(
+            user_message=text,
+            user_plan=user.plan,
+            exam_type=user.exam_type or "",
+            subject="",
+            series=user.series or "",
+            complexity=detect_complexity(text),
         )
+
+        # Envoie la réponse
+        await whatsapp_sender.send_text(phone, response.text)
+
+        # Log
+        print(f"IA ({response.provider}) → {phone}: {response.text[:80]}...")

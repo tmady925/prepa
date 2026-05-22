@@ -1,28 +1,19 @@
 import hashlib
 import hmac
-from fastapi import APIRouter, Request, HTTPException, Depends
+from fastapi import APIRouter, Request, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.settings import get_settings
 from app.db.database import get_db
 from app.services.user_service import user_service
+from app.services.whatsapp.sender import whatsapp_sender
+from app.services.whatsapp.messages import messages
 
 settings = get_settings()
 router = APIRouter()
 
 
-def verify_webhook_signature(payload: bytes, signature: str) -> bool:
-    """Vérifie que le message vient bien de 360dialog."""
-    expected = hmac.new(
-        settings.whatsapp_webhook_secret.encode(),
-        payload,
-        hashlib.sha256,
-    ).hexdigest()
-    return hmac.compare_digest(expected, signature)
-
-
 @router.get("/webhook")
 async def webhook_verify(request: Request):
-    """Vérification du webhook par 360dialog."""
     return {"status": "ok"}
 
 
@@ -31,12 +22,9 @@ async def webhook_receive(
     request: Request,
     db: AsyncSession = Depends(get_db),
 ):
-    """Point d'entrée de tous les messages WhatsApp."""
-    payload = await request.body()
     data = await request.json()
 
-    # Extrait les messages
-    messages = (
+    incoming = (
         data.get("messages") or
         data.get("entry", [{}])[0]
         .get("changes", [{}])[0]
@@ -44,27 +32,23 @@ async def webhook_receive(
         .get("messages", [])
     )
 
-    if not messages:
+    if not incoming:
         return {"status": "no_messages"}
 
-    for message in messages:
+    for message in incoming:
         await process_message(message, db)
 
     return {"status": "ok"}
 
 
 async def process_message(message: dict, db: AsyncSession):
-    """Traite un message entrant."""
     phone = message.get("from")
     msg_type = message.get("type", "text")
 
     if not phone:
         return
 
-    # Récupère ou crée l'élève
-    user, created = await user_service.get_or_create(db, phone)
-
-    # Extrait le texte
+    # Texte du message
     text = ""
     if msg_type == "text":
         text = message.get("text", {}).get("body", "").strip()
@@ -78,8 +62,110 @@ async def process_message(message: dict, db: AsyncSession):
     if not text:
         return
 
-    print(f"Message reçu de {phone}: {text}")
-    print(f"Élève: {user.name or 'Nouveau'} | Étape: {user.onboarding_step}")
+    # Récupère ou crée l'élève
+    user, created = await user_service.get_or_create(db, phone)
+
+    # Vérifie le quota avant tout
+    if user.status == "active":
+        quota = await user_service.check_quota(user)
+        if not quota["allowed"]:
+            await whatsapp_sender.send_text(phone, messages.quota_reached(
+                user.name or "ami",
+                user.referral_code or ""
+            ))
+            return
+
+    # Route selon l'étape d'onboarding
+    await handle_onboarding(phone, text, user, db)
 
     # Incrémente le compteur
     await user_service.increment_message_count(db, user)
+
+
+async def handle_onboarding(phone: str, text: str, user, db: AsyncSession):
+    step = user.onboarding_step
+
+    if step == "start":
+        await whatsapp_sender.send_text(phone, messages.WELCOME)
+        user.onboarding_step = "name"
+        await db.flush()
+
+    elif step == "name":
+        user = await user_service.set_name(db, user, text)
+        await whatsapp_sender.send_buttons(
+            phone,
+            messages.ask_exam(user.name),
+            messages.EXAM_BUTTONS,
+        )
+
+    elif step == "exam":
+        exam_map = {
+            "exam_bac": "bac_senegal",
+            "exam_bfem": "bfem",
+            "exam_concours": "concours",
+        }
+        exam_type = exam_map.get(text, text)
+        user = await user_service.set_exam(db, user, exam_type)
+
+        if exam_type == "bac_senegal":
+            await whatsapp_sender.send_list(
+                phone,
+                messages.ask_series_bac(user.name),
+                messages.SERIES_BAC_LIST["button"],
+                messages.SERIES_BAC_LIST["sections"],
+            )
+        else:
+            user.onboarding_step = "subjects"
+            await db.flush()
+            await whatsapp_sender.send_text(phone, messages.ask_subjects(user.name))
+
+    elif step == "series":
+        series_map = {
+            "serie_s1": "S1", "serie_s2": "S2", "serie_s3": "S3",
+            "serie_l1": "L1", "serie_l2": "L2",
+            "serie_t": "T", "serie_steg": "STEG",
+        }
+        series = series_map.get(text, text.upper())
+        user = await user_service.set_series(db, user, series)
+        await whatsapp_sender.send_text(phone, messages.ask_subjects(user.name))
+
+    elif step == "subjects":
+        subject_map = {
+            "1": "maths", "2": "physique", "3": "svt",
+            "4": "francais", "5": "philosophie",
+            "6": "histoire_geo", "7": "anglais",
+        }
+        chosen = [
+            subject_map[s.strip()]
+            for s in text.split(",")
+            if s.strip() in subject_map
+        ]
+        if not chosen:
+            await whatsapp_sender.send_text(phone, "Réponds avec les numéros séparés par des virgules. Ex: *1,2,4*")
+            return
+        user = await user_service.set_subjects(db, user, chosen)
+        await whatsapp_sender.send_text(phone, messages.ask_exam_date())
+
+    elif step == "exam_date":
+        from datetime import datetime
+        try:
+            exam_date = datetime.strptime(text, "%d/%m/%Y")
+            user = await user_service.set_exam_date(db, user, exam_date)
+            user = await user_service.complete_onboarding(db, user)
+            days_left = (exam_date - datetime.now()).days
+            await whatsapp_sender.send_text(
+                phone,
+                messages.onboarding_complete(user.name, days_left)
+            )
+        except ValueError:
+            await whatsapp_sender.send_text(
+                phone,
+                "Format invalide. Utilise *JJ/MM/AAAA*\nExemple : *15/06/2026*"
+            )
+
+    elif step == "done":
+        # Élève actif — on répondra avec l'IA dans la prochaine étape
+        await whatsapp_sender.send_text(
+            phone,
+            f"Tu as écrit : _{text}_\n\n_(La réponse IA arrive bientôt !)_"
+        )

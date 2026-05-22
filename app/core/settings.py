@@ -34,6 +34,7 @@ class Settings(BaseSettings):
     openai_api_key: str = ""
     anthropic_api_key: str = ""
     mistral_api_key: str = ""
+    groq_api_key: str = ""
 
     # PayDunya
     paydunya_master_key: str = ""

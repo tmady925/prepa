@@ -1,7 +1,8 @@
 import uuid
-from sqlalchemy import String, Integer, Boolean, DateTime, ForeignKey
-from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from datetime import datetime
+from sqlalchemy import String, Integer, Boolean, DateTime, ForeignKey, Text
+from sqlalchemy.dialects.postgresql import UUID, JSONB
+from sqlalchemy.orm import Mapped, mapped_column
 from app.models.base import Base, TimestampMixin
 
 
@@ -24,15 +25,19 @@ class User(Base, TimestampMixin):
     # Contexte examen
     exam_type: Mapped[str | None] = mapped_column(String(50))
     series: Mapped[str | None] = mapped_column(String(20))
-    exam_date: Mapped[str | None] = mapped_column(DateTime(timezone=True))
+    exam_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    # Matières choisies pendant onboarding
+    subjects: Mapped[list | None] = mapped_column(JSONB)
 
     # Quotas
     daily_messages_used: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     daily_messages_bonus: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
-    quota_reset_at: Mapped[str | None] = mapped_column(DateTime(timezone=True))
+    quota_reset_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     # Engagement
     streak_days: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    streak_last_active: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     total_messages: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     engagement_score: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
 
@@ -43,7 +48,7 @@ class User(Base, TimestampMixin):
     )
 
     # Upsell
-    last_upsell_shown_at: Mapped[str | None] = mapped_column(DateTime(timezone=True))
+    last_upsell_shown_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     upsell_refused_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
 
     # Meta

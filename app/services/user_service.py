@@ -24,7 +24,6 @@ class UserService:
         return result.scalar_one_or_none()
 
     async def get_or_create(self, db: AsyncSession, phone: str) -> tuple[User, bool]:
-        """Retourne (user, created). Created=True si nouvel élève."""
         user = await self.get_by_phone(db, phone)
         if user:
             return user, False
@@ -77,13 +76,8 @@ class UserService:
         return user
 
     async def check_quota(self, user: User) -> dict:
-        """
-        Vérifie si l'élève peut envoyer un message.
-        Retourne {"allowed": bool, "used": int, "limit": int, "bonus": int}
-        """
         daily_limit = await config_service.get_int("free_messages_per_day")
 
-        # Pro = illimité
         if user.plan == "pro":
             return {"allowed": True, "used": user.daily_messages_used, "limit": -1, "bonus": 0}
 
@@ -98,10 +92,8 @@ class UserService:
         }
 
     async def increment_message_count(self, db: AsyncSession, user: User) -> User:
-        """Incrémente le compteur et remet à zéro si nouveau jour."""
         now = datetime.now(ZoneInfo("Africa/Dakar"))
 
-        # Reset si nouveau jour
         if user.quota_reset_at is None or now >= user.quota_reset_at:
             user.daily_messages_used = 0
             tomorrow = now.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
@@ -124,24 +116,25 @@ class UserService:
             last = user.streak_last_active.date()
             delta = (today - last).days
             if delta == 0:
-                pass  # même jour, streak inchangé
+                pass
             elif delta == 1:
-                user.streak_days += 1  # jour suivant
+                user.streak_days += 1
             else:
-                user.streak_days = 1  # streak cassé
+                user.streak_days = 1
 
         user.streak_last_active = now
 
     async def _update_engagement_score(self, user: User) -> None:
         score = 0
 
-        if user.streak_days >= 5:   score += 25
-        if user.streak_days >= 3:   score += 10
-        if user.total_messages >= 20: score += 10
+        if user.streak_days >= 5:        score += 25
+        if user.streak_days >= 3:        score += 10
+        if user.total_messages >= 20:    score += 10
         if user.daily_messages_used >= 8: score += 20
 
         if user.exam_date:
-            days_left = (user.exam_date - datetime.now(ZoneInfo("Africa/Dakar"))).days
+            exam_date = user.exam_date.replace(tzinfo=None)
+            days_left = (exam_date - datetime.now()).days
             if days_left <= 30: score += 25
             if days_left <= 7:  score += 15
 
@@ -172,7 +165,6 @@ class UserService:
     async def apply_referral(
         self, db: AsyncSession, new_user: User, referral_code: str
     ) -> bool:
-        """Associe un parrain au nouvel élève."""
         result = await db.execute(
             select(User).where(User.referral_code == referral_code)
         )

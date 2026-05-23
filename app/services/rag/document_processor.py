@@ -3,8 +3,8 @@ Traitement des documents pour le RAG.
 Supporte PDF (natif + scanné), Word, Images.
 """
 import io
-import os
 import re
+import platform
 import pytesseract
 import fitz  # pymupdf
 import cv2
@@ -13,11 +13,21 @@ from PIL import Image
 from docx import Document as DocxDocument
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
-# Chemin Tesseract sur Windows
-pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
+# Chemin Tesseract selon l'OS
+if platform.system() == "Windows":
+    pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
+# Sur Linux (Render/prod), tesseract est dans le PATH automatiquement
 
 CHUNK_SIZE = 400
 CHUNK_OVERLAP = 50
+
+# Tesseract disponible ?
+TESSERACT_AVAILABLE = True
+try:
+    pytesseract.get_tesseract_version()
+except Exception:
+    TESSERACT_AVAILABLE = False
+    print("Tesseract non disponible — OCR désactivé")
 
 
 class DocumentProcessor:
@@ -66,10 +76,13 @@ class DocumentProcessor:
             # Essaie d'extraire le texte natif
             text = page.get_text("text").strip()
 
-            # Si peu de texte → page scannée → OCR
+            # Si peu de texte → page scannée → OCR si disponible
             if len(text) < 50:
-                has_ocr = True
-                text = self._ocr_pdf_page(page)
+                if TESSERACT_AVAILABLE:
+                    has_ocr = True
+                    text = self._ocr_pdf_page(page)
+                else:
+                    print(f"Page {page_num} scannée mais Tesseract non disponible — ignorée")
 
             if text:
                 pages_text.append(text)
@@ -121,6 +134,15 @@ class DocumentProcessor:
 
     async def _process_image(self, file_bytes: bytes) -> dict:
         """Traite une image avec OCR."""
+        if not TESSERACT_AVAILABLE:
+            return {
+                "text": "",
+                "chunks": [],
+                "page_count": 1,
+                "has_ocr": False,
+                "error": "Tesseract non disponible sur ce serveur",
+            }
+
         image_array = np.frombuffer(file_bytes, np.uint8)
         img = cv2.imdecode(image_array, cv2.IMREAD_COLOR)
         text = self._ocr_image(img)
@@ -137,38 +159,25 @@ class DocumentProcessor:
 
     def _ocr_pdf_page(self, page) -> str:
         """OCR sur une page PDF scannée."""
-        # Rend la page en image haute résolution
-        mat = fitz.Matrix(2.0, 2.0)  # 2x zoom pour meilleure qualité
+        mat = fitz.Matrix(2.0, 2.0)
         pix = page.get_pixmap(matrix=mat)
         img_bytes = pix.tobytes("png")
-
         image_array = np.frombuffer(img_bytes, np.uint8)
         img = cv2.imdecode(image_array, cv2.IMREAD_COLOR)
         return self._ocr_image(img)
 
     def _ocr_image(self, img: np.ndarray) -> str:
         """OCR avec prétraitement pour améliorer les scans flous."""
-        # Conversion en niveaux de gris
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-
-        # Débruitage
         denoised = cv2.fastNlMeansDenoising(gray, h=10)
-
-        # Amélioration du contraste
         clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
         enhanced = clahe.apply(denoised)
-
-        # Binarisation adaptative — gère les scans inégaux
         binary = cv2.adaptiveThreshold(
             enhanced, 255,
             cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
             cv2.THRESH_BINARY, 11, 2
         )
-
-        # Conversion PIL pour pytesseract
         pil_img = Image.fromarray(binary)
-
-        # OCR en français
         text = pytesseract.image_to_string(
             pil_img,
             lang="fra",
@@ -178,15 +187,10 @@ class DocumentProcessor:
 
     def _clean_text(self, text: str) -> str:
         """Nettoie le texte extrait."""
-        # Supprime les caractères de contrôle
         text = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]', '', text)
-        # Normalise les espaces
         text = re.sub(r' +', ' ', text)
-        # Normalise les sauts de ligne
         text = re.sub(r'\n{3,}', '\n\n', text)
-        # Supprime les lignes vides en début/fin
-        text = text.strip()
-        return text
+        return text.strip()
 
 
 document_processor = DocumentProcessor()

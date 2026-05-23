@@ -12,6 +12,7 @@ from app.services.llm.service import call_llm
 from app.repositories.message_repository import message_repo
 from app.services.media_processor import media_processor
 from app.services.storage_service import storage_service
+from app.services.rag.detector import subject_detector
 from app.db.redis import get_redis
 
 settings = get_settings()
@@ -285,16 +286,32 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession):
 
         await whatsapp_sender.send_text(phone, "⏳ Je réfléchis...")
 
-        # Appelle l'IA avec RAG
+        # Détecte matière et chapitre automatiquement
+        detection = await subject_detector.detect(
+            text,
+            {
+                "exam_type": user.exam_type,
+                "serie": user.series,
+                "matiere": user.subjects[0] if user.subjects else None,
+            }
+        )
+        detected_matiere = detection.get("matiere") or ""
+        detected_chapitre = detection.get("chapitre") or ""
+
+        print(f"Détection: {detected_matiere}/{detected_chapitre} ({detection.get('confiance')})")
+
+        # Appelle l'IA avec RAG granulaire
         response = await call_llm(
             user_message=text,
             user_plan=user.plan,
             exam_type=user.exam_type or "",
-            subject="",
+            subject=detected_matiere,
             series=user.series or "",
             complexity=detect_complexity(text),
             history=history,
             db=db,
+            chapitre=detected_chapitre,
+            detection=detection,
         )
 
         await message_repo.save(

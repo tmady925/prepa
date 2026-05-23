@@ -42,6 +42,8 @@ def build_messages(
     series: str = "",
     history: list = None,
     rag_context: str = "",
+    chapitre: str = "",
+    detection: dict = None,
 ) -> list:
     """Construit la liste de messages pour le LLM."""
 
@@ -52,21 +54,46 @@ def build_messages(
         context += f"Série : {series}. "
     if subject:
         context += f"Matière : {subject}. "
+    if chapitre:
+        context += f"Chapitre : {chapitre.replace('_', ' ').title()}. "
+
+    # Contexte de détection
+    detection_context = ""
+    if detection:
+        type_demande = detection.get("type_demande")
+        niveau = detection.get("niveau_question", "intermediaire")
+        mots_cles = detection.get("mots_cles", [])
+
+        if type_demande == "exercice":
+            detection_context += "\nL'élève demande un exercice d'entraînement — fournis un exercice complet avec corrigé."
+        elif type_demande == "correction":
+            detection_context += "\nL'élève soumet une réponse à corriger — analyse sa réponse et corrige avec bienveillance."
+        elif type_demande == "methode":
+            detection_context += "\nL'élève veut comprendre la méthode — explique étape par étape."
+
+        if niveau == "debutant":
+            detection_context += "\nNiveau débutant détecté — utilise des analogies simples et des exemples concrets."
+        elif niveau == "avance":
+            detection_context += "\nNiveau avancé détecté — tu peux aller plus loin dans les détails."
+
+        if mots_cles:
+            detection_context += f"\nConcepts clés identifiés : {', '.join(mots_cles[:5])}."
 
     system = SYSTEM_PROMPT
     if context:
         system += f"\n\nContexte élève : {context}"
-
+    if detection_context:
+        system += f"\n\nAnalyse de la demande :{detection_context}"
     if rag_context:
         system += f"\n\nExtrait du programme officiel sénégalais :\n{rag_context}\n\nBase ta réponse sur ces extraits officiels."
 
-    messages = [{"role": "system", "content": system}]
+    msgs = [{"role": "system", "content": system}]
 
     if history:
-        messages.extend(history[-10:])
+        msgs.extend(history[-10:])
 
-    messages.append({"role": "user", "content": user_message})
-    return messages
+    msgs.append({"role": "user", "content": user_message})
+    return msgs
 
 
 async def call_llm(
@@ -78,8 +105,10 @@ async def call_llm(
     complexity: int = 1,
     history: list = None,
     db=None,
+    chapitre: str = "",
+    detection: dict = None,
 ) -> LLMResponse:
-    """Point d'entrée principal pour appeler l'IA avec RAG."""
+    """Point d'entrée principal pour appeler l'IA avec RAG granulaire."""
 
     # 1. Choisit le provider
     request = LLMRequest(
@@ -98,9 +127,9 @@ async def call_llm(
     if cached:
         return LLMResponse(text=cached, provider=provider_name, from_cache=True)
 
-    # 3. Récupère le contexte RAG si db disponible
+    # 3. Récupère le contexte RAG granulaire
     rag_context = ""
-    if db and (exam_type or series or subject):
+    if db and (exam_type or series or subject or chapitre):
         try:
             from app.services.rag.search_service import search_service
             rag_context = await search_service.build_context(
@@ -109,15 +138,19 @@ async def call_llm(
                 exam_type=exam_type or None,
                 series=series or None,
                 subject=subject or None,
-                top_k=3,
+                chapitre=chapitre or None,
+                top_k=5,
             )
             if rag_context:
-                print(f"RAG: contexte trouve ({len(rag_context)} chars)")
+                print(f"RAG: contexte trouve ({len(rag_context)} chars) — {subject}/{chapitre}")
         except Exception as e:
             print(f"RAG error: {e}")
 
-    # 4. Construit les messages avec contexte RAG
-    msgs = build_messages(user_message, exam_type, subject, series, history, rag_context)
+    # 4. Construit les messages avec contexte complet
+    msgs = build_messages(
+        user_message, exam_type, subject, series,
+        history, rag_context, chapitre, detection
+    )
 
     # 5. Appelle le provider avec fallback
     providers_to_try = _get_fallback_chain(provider_name)

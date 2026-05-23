@@ -4,7 +4,7 @@ from sqlalchemy.ext.asyncio import create_async_engine
 from alembic import context
 from app.core.settings import get_settings
 from app.models.base import Base
-from app.models import user, config as config_model, subscription, message
+from app.models import user, config as config_model, subscription, message, document
 
 settings = get_settings()
 

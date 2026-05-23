@@ -1,3 +1,4 @@
+import re
 import base64
 import httpx
 from app.core.settings import get_settings
@@ -14,14 +15,31 @@ HEADERS = {
 
 class WhatsAppSender:
 
+    def _clean_for_whatsapp(self, text: str) -> str:
+        """Nettoie le texte pour WhatsApp — supprime Markdown et LaTeX."""
+        # Headers ### → *Titre*
+        text = re.sub(r'^#{1,6}\s+(.+)$', r'*\1*', text, flags=re.MULTILINE)
+        # **gras** → *gras*
+        text = re.sub(r'\*\*(.+?)\*\*', r'*\1*', text)
+        # \( formule \) → formule
+        text = re.sub(r'\\\(\s*(.+?)\s*\\\)', r'\1', text, flags=re.DOTALL)
+        # \[ formule \] → formule
+        text = re.sub(r'\\\[\s*(.+?)\s*\\\]', r'\1', text, flags=re.DOTALL)
+        # Séparateurs ---
+        text = re.sub(r'^---+$', '', text, flags=re.MULTILINE)
+        # Lignes vides multiples
+        text = re.sub(r'\n{3,}', '\n\n', text)
+        return text.strip()
+
     async def send_text(self, phone: str, text: str) -> dict:
         """Envoie un message texte simple."""
+        cleaned = self._clean_for_whatsapp(text)
         payload = {
             "messaging_product": "whatsapp",
             "recipient_type": "individual",
             "to": phone,
             "type": "text",
-            "text": {"body": text},
+            "text": {"body": cleaned},
         }
         return await self._send(payload)
 

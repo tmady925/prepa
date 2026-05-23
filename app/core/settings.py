@@ -44,6 +44,11 @@ class Settings(BaseSettings):
     paydunya_token: str = ""
     paydunya_mode: str = "test"
 
+    # Cloudinary
+    cloudinary_cloud_name: str = ""
+    cloudinary_api_key: str = ""
+    cloudinary_api_secret: str = ""
+
     # LLM routing
     llm_default_free_provider: str = "mistral"
     llm_default_pro_provider: str = "openai"

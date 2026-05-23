@@ -11,6 +11,7 @@ from app.services.whatsapp.messages import messages
 from app.services.llm.service import call_llm
 from app.repositories.message_repository import message_repo
 from app.services.media_processor import media_processor
+from app.services.storage_service import storage_service
 from app.db.redis import get_redis
 
 settings = get_settings()
@@ -234,12 +235,16 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession):
             from_cache=response.from_cache,
         )
 
-        # Traite la réponse — texte + images si nécessaire
+        # Traite la réponse — texte + images via Cloudinary
         blocks = await media_processor.process(response.text)
         for block in blocks:
             if block["type"] == "text":
                 await whatsapp_sender.send_text(phone, block["content"])
             elif block["type"] == "image":
-                await whatsapp_sender.send_image_bytes(phone, block["content"])
+                url = await storage_service.upload_image(block["content"])
+                if url:
+                    await whatsapp_sender.send_image_url(phone, url)
+                else:
+                    print("Upload Cloudinary échoué — image ignorée")
 
         print(f"IA ({response.provider}) -> {phone}: {response.text[:80]}...")

@@ -5,7 +5,7 @@ from fastapi import APIRouter, Request, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.settings import get_settings
 from app.db.database import get_db
-from app.services.user_service import user_service
+from app.services.user_service import user_service, generate_referral_code
 from app.services.whatsapp.sender import whatsapp_sender
 from app.services.whatsapp.messages import messages
 from app.services.llm.service import call_llm
@@ -73,6 +73,69 @@ def detect_complexity(text: str) -> int:
     if any(k in text_lower for k in medium_keywords):
         return 2
     return 1
+
+
+def detect_command(text: str) -> str | None:
+    """Détecte les commandes spéciales."""
+    commands = {
+        "/aide": "aide",
+        "/help": "aide",
+        "aide": "aide",
+        "/progression": "progression",
+        "/stats": "progression",
+        "progression": "progression",
+        "/inviter": "inviter",
+        "/invite": "inviter",
+        "inviter": "inviter",
+        "/plan": "plan",
+        "/pro": "plan",
+        "plan": "plan",
+        "action_invite": "inviter",
+        "action_pro": "plan",
+    }
+    return commands.get(text.lower().strip())
+
+
+async def handle_command(command: str, phone: str, user, db: AsyncSession):
+    """Gère les commandes spéciales."""
+    if command == "aide":
+        days_left = 0
+        if user.exam_date:
+            exam_date = user.exam_date.replace(tzinfo=None)
+            days_left = max(0, (exam_date - datetime.now()).days)
+        await whatsapp_sender.send_text(
+            phone,
+            messages.help_message(user.name or "ami", days_left)
+        )
+
+    elif command == "progression":
+        await whatsapp_sender.send_text(
+            phone,
+            messages.progression_message(user)
+        )
+
+    elif command == "inviter":
+        if not user.referral_code:
+            user.referral_code = generate_referral_code(user.name or "")
+            await db.flush()
+        await whatsapp_sender.send_text(
+            phone,
+            messages.invite_message(user)
+        )
+
+    elif command == "plan":
+        msg = messages.plan_message(user)
+        if user.plan != "pro":
+            await whatsapp_sender.send_buttons(
+                phone,
+                msg,
+                [
+                    {"id": "action_pro", "title": "Passer Pro ⭐"},
+                    {"id": "action_invite", "title": "Inviter des amis"},
+                ]
+            )
+        else:
+            await whatsapp_sender.send_text(phone, msg)
 
 
 async def process_message(message: dict, db: AsyncSession):
@@ -204,6 +267,14 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession):
             )
             return
 
+        # Détecte les commandes spéciales
+        command = detect_command(text)
+        if command:
+            await handle_command(command, phone, user, db)
+            await user_service.increment_message_count(db, user)
+            return
+
+        # Sauvegarde le message entrant
         await message_repo.save(
             db=db,
             user_id=user.id,

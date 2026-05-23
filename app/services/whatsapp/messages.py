@@ -2,6 +2,7 @@
 Tous les messages envoyés aux élèves.
 Centralisés ici pour faciliter les modifications et traductions futures.
 """
+from datetime import datetime
 
 
 class Messages:
@@ -114,6 +115,76 @@ class Messages:
         {"id": "action_invite", "title": "Inviter des amis"},
         {"id": "action_pro", "title": "Passer Pro ⭐"},
     ]
+
+    # ── Commandes spéciales ────────────────────────────────────────
+
+    def help_message(self, name: str, days_left: int = 0) -> str:
+        return (
+            f"👋 Bonjour *{name}* ! Voici ce que tu peux faire :\n\n"
+            "*Questions de cours*\n"
+            "Pose n'importe quelle question sur tes matières\n\n"
+            "*Exercices*\n"
+            "« Donne-moi un exercice de maths »\n\n"
+            "*Correction*\n"
+            "« Corrige cet exercice : ... »\n\n"
+            "*Commandes*\n"
+            "/progression — voir ton avancement\n"
+            "/inviter — gagner des messages gratuits\n"
+            "/plan — changer ton abonnement\n"
+            "/aide — afficher ce menu\n\n"
+            f"_Il te reste *{days_left} jours* avant ton examen_ 📅"
+        )
+
+    def progression_message(self, user) -> str:
+        days_left = 0
+        if user.exam_date:
+            exam_date = user.exam_date.replace(tzinfo=None)
+            days_left = max(0, (exam_date - datetime.now()).days)
+
+        streak_emoji = "🔥" if user.streak_days >= 3 else "📅"
+        plan_emoji = "⭐" if user.plan == "pro" else "🆓"
+
+        return (
+            f"📊 *Ta progression, {user.name}*\n\n"
+            f"{streak_emoji} Streak : *{user.streak_days} jours* consécutifs\n"
+            f"💬 Messages total : *{user.total_messages}*\n"
+            f"📚 Exercices faits : *{user.total_exercises_done}*\n"
+            f"🎯 Score engagement : *{user.engagement_score}/100*\n"
+            f"{plan_emoji} Plan : *{user.plan.upper()}*\n\n"
+            f"⏳ Il te reste *{days_left} jours* avant ton examen\n\n"
+            f"{'Continue comme ça ! 💪' if user.streak_days >= 3 else 'Reviens demain pour garder ta flamme ! 🔥'}"
+        )
+
+    def invite_message(self, user) -> str:
+        return (
+            f"🎁 *Invite tes amis et gagne des messages gratuits !*\n\n"
+            f"Ton code de parrainage : *{user.referral_code}*\n\n"
+            f"Comment ça marche :\n"
+            f"1️⃣ Partage ce message à tes amis\n"
+            f"2️⃣ Ils s'inscrivent avec ton code\n"
+            f"3️⃣ Tu gagnes *20 messages* par ami actif\n"
+            f"4️⃣ Tu gagnes *50 messages* si ton ami passe Pro\n\n"
+            f"📤 Message à partager :\n"
+            f"_« Salut ! J'utilise Prepa pour réviser mon {user.exam_type or 'examen'}. "
+            f"C'est vraiment bien ! Inscris-toi avec mon code *{user.referral_code}* »_"
+        )
+
+    def plan_message(self, user) -> str:
+        if user.plan == "pro":
+            return (
+                f"⭐ Tu es déjà *Prepa Pro* !\n\n"
+                f"Tu révises sans limite jusqu'à la fin de ton abonnement.\n\n"
+                f"Tape */progression* pour voir tes stats."
+            )
+        return (
+            f"💡 *Passe Prepa Pro et révise sans limite !*\n\n"
+            f"✅ Messages illimités\n"
+            f"✅ LLM plus puissant\n"
+            f"✅ Corrections détaillées\n"
+            f"✅ Priorité de réponse\n\n"
+            f"💰 Seulement *500 FCFA/mois*\n\n"
+            f"Paiement via Wave, Orange Money ou Free Money 🔒"
+        )
 
     # ── Erreurs ───────────────────────────────────────────────────
 

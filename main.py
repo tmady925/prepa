@@ -31,7 +31,8 @@ async def health():
     return {"status": "ok"}
 
 
-from app.api.v1.endpoints import webhook, payments, admin
+from app.api.v1.endpoints import webhook, payments, admin, tasks
 app.include_router(webhook.router, prefix="/api/v1")
 app.include_router(payments.router, prefix="/api/v1")
 app.include_router(admin.router, prefix="/api/v1")
+app.include_router(tasks.router, prefix="/api/v1")

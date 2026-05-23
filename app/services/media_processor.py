@@ -8,28 +8,12 @@ from app.services.image_generator import image_generator
 
 class MediaProcessor:
 
-    # Patterns LaTeX à détecter
-    LATEX_PATTERNS = [
-        r'\$\$(.+?)\$\$',           # $$formule$$
-        r'\$([^\$]+?)\$',           # $formule$
-        r'\\\((.+?)\\\)',           # \( formule \)
-        r'\\\[(.+?)\\\]',           # \[ formule \]
-        r'\[FORMULE:\s*(.+?)\]',    # [FORMULE: formule]
-        r'\[GRAPHE:\s*(.+?)\]',     # [GRAPHE: ...]
-        r'\[TABLEAU:\s*(.+?)\]',    # [TABLEAU: ...]
-        r'\[CHRONO:\s*(.+?)\]',     # [CHRONO: ...]
-        r'\[SCHEMA:\s*(.+?)\]',     # [SCHEMA: ...]
-    ]
-
     async def process(self, text: str) -> list[dict]:
         """
         Analyse le texte et retourne une liste de blocs à envoyer.
         Chaque bloc est : {"type": "text"|"image", "content": ...}
         """
         blocks = []
-
-        # Cherche toutes les occurrences de balises spéciales
-        all_matches = []
 
         # Balises explicites
         explicit_patterns = {
@@ -40,25 +24,25 @@ class MediaProcessor:
             "schema":  r'\[SCHEMA:\s*(.+?)\]',
         }
 
+        all_matches = []
         for tag, pattern in explicit_patterns.items():
             for m in re.finditer(pattern, text, re.DOTALL):
                 all_matches.append((m.start(), m.end(), tag, m.group(1).strip(), m.group(0)))
 
-        # Formules LaTeX inline et block
-        latex_patterns = [
+        # Formules LaTeX block $$...$$ et \[...\]
+        latex_block_patterns = [
             r'\$\$(.+?)\$\$',
             r'\\\[(.+?)\\\]',
         ]
-        for pattern in latex_patterns:
+        for pattern in latex_block_patterns:
             for m in re.finditer(pattern, text, re.DOTALL):
                 formula = m.group(1).strip()
                 if len(formula) > 3:
                     all_matches.append((m.start(), m.end(), "formule", formula, m.group(0)))
 
-        # Si aucune balise trouvée — cherche les formules inline simples
-        # et collecte toutes ensemble en une seule image
+        # Formules LaTeX inline $...$ et \(...\)
         inline_patterns = [
-            r'\$([^\$\n]{2,50}?)\$',
+            r'\$([^\$\n]{2,80}?)\$',
             r'\\\((.+?)\\\)',
         ]
         inline_formulas = []
@@ -70,9 +54,12 @@ class MediaProcessor:
                     inline_formulas.append(formula)
                     inline_positions.append((m.start(), m.end(), m.group(0)))
 
-        # Pas de balises spéciales mais des formules inline
+        # Détecte les commandes LaTeX sans délimiteurs ex: \frac{d}{dx}
+        raw_latex_pattern = r'\\(?:frac|sqrt|sum|int|lim|infty|times|left|right|cdot|alpha|beta|theta|pi|Delta|Sigma)\s*(?:\{[^}]*\})*'
+        raw_latex_matches = list(re.finditer(raw_latex_pattern, text))
+
+        # Cas 1 : formules inline trouvées sans balises explicites
         if not all_matches and inline_formulas:
-            # Nettoie le texte
             clean_text = text
             for _, _, original in inline_positions:
                 clean_text = clean_text.replace(original, "")
@@ -81,26 +68,43 @@ class MediaProcessor:
             if clean_text:
                 blocks.append({"type": "text", "content": clean_text})
 
-            # Génère une seule image avec toutes les formules
             unique_formulas = list(dict.fromkeys(inline_formulas))[:6]
             try:
-                img = await image_generator.formula_to_image(
-                    unique_formulas,
-                    title="Formules"
-                )
+                img = await image_generator.formula_to_image(unique_formulas, title="Formules")
                 blocks.append({"type": "image", "content": img})
             except Exception as e:
-                print(f"Erreur génération formules: {e}")
+                print(f"Erreur génération formules inline: {e}")
 
             return blocks
 
-        # Pas de formules du tout — texte simple nettoyé
+        # Cas 2 : commandes LaTeX brutes sans délimiteurs
+        if not all_matches and not inline_formulas and raw_latex_matches:
+            # Extrait les formules brutes et nettoie le texte
+            raw_formulas = []
+            clean_text = text
+            for m in raw_latex_matches:
+                raw_formulas.append(m.group(0).strip())
+                clean_text = clean_text.replace(m.group(0), "")
+
+            clean_text = self._clean_text(clean_text)
+            if clean_text:
+                blocks.append({"type": "text", "content": clean_text})
+
+            unique_formulas = list(dict.fromkeys(raw_formulas))[:6]
+            try:
+                img = await image_generator.formula_to_image(unique_formulas, title="Formules")
+                blocks.append({"type": "image", "content": img})
+            except Exception as e:
+                print(f"Erreur génération formules brutes: {e}")
+
+            return blocks
+
+        # Cas 3 : pas de formules du tout
         if not all_matches:
             return [{"type": "text", "content": self._clean_text(text)}]
 
-        # Trie par position
+        # Cas 4 : balises explicites ou blocs LaTeX
         all_matches.sort(key=lambda x: x[0])
-        # Déduplique les overlaps
         deduplicated = []
         last_end = 0
         for match in all_matches:
@@ -110,23 +114,19 @@ class MediaProcessor:
 
         last_end = 0
         for start, end, tag, content, original in deduplicated:
-            # Texte avant la balise
             if start > last_end:
                 txt = self._clean_text(text[last_end:start])
                 if txt:
                     blocks.append({"type": "text", "content": txt})
 
-            # Génère l'image
             img_bytes = await self._generate(tag, content)
             if img_bytes:
                 blocks.append({"type": "image", "content": img_bytes})
             else:
-                # Fallback texte si image échoue
-                blocks.append({"type": "text", "content": content})
+                blocks.append({"type": "text", "content": self._clean_text(content)})
 
             last_end = end
 
-        # Texte après la dernière balise
         if last_end < len(text):
             txt = self._clean_text(text[last_end:])
             if txt:
@@ -140,11 +140,27 @@ class MediaProcessor:
         text = re.sub(r'^#{1,6}\s+(.+)$', r'*\1*', text, flags=re.MULTILINE)
         # **gras** → *gras*
         text = re.sub(r'\*\*(.+?)\*\*', r'*\1*', text)
-        # Supprime LaTeX inline résiduel
+        # LaTeX inline résiduel
         text = re.sub(r'\\\(\s*(.+?)\s*\\\)', r'\1', text, flags=re.DOTALL)
         text = re.sub(r'\\\[\s*(.+?)\s*\\\]', r'\1', text, flags=re.DOTALL)
         text = re.sub(r'\$\$(.+?)\$\$', r'\1', text, flags=re.DOTALL)
         text = re.sub(r'\$([^\$]+?)\$', r'\1', text)
+        # Commandes LaTeX sans délimiteurs → texte lisible
+        text = re.sub(r'\\frac\{(.+?)\}\{(.+?)\}', r'(\1)/(\2)', text)
+        text = re.sub(r'\\times', r'×', text)
+        text = re.sub(r'\\left\(', r'(', text)
+        text = re.sub(r'\\right\)', r')', text)
+        text = re.sub(r'\\sqrt\{(.+?)\}', r'√(\1)', text)
+        text = re.sub(r'\\cdot', r'·', text)
+        text = re.sub(r'\\alpha', r'α', text)
+        text = re.sub(r'\\beta', r'β', text)
+        text = re.sub(r'\\theta', r'θ', text)
+        text = re.sub(r'\\pi', r'π', text)
+        text = re.sub(r'\\infty', r'∞', text)
+        text = re.sub(r'\\Delta', r'Δ', text)
+        text = re.sub(r'\\Sigma', r'Σ', text)
+        text = re.sub(r'\^\{([^}]+)\}', r'^\1', text)
+        text = re.sub(r'_\{([^}]+)\}', r'_\1', text)
         # Séparateurs
         text = re.sub(r'^---+$', '', text, flags=re.MULTILINE)
         # Lignes vides multiples

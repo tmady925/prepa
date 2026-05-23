@@ -51,10 +51,7 @@ async def get_users(
     offset: int = 0,
 ):
     result = await db.execute(
-        select(User)
-        .order_by(User.created_at.desc())
-        .limit(limit)
-        .offset(offset)
+        select(User).order_by(User.created_at.desc()).limit(limit).offset(offset)
     )
     users = result.scalars().all()
     return [
@@ -93,7 +90,6 @@ async def get_config(
             "default": default,
             "is_custom": db_val is not None,
         })
-
     return config_list
 
 
@@ -106,10 +102,8 @@ async def update_config(
     data = await request.json()
     key = data.get("key")
     value = data.get("value")
-
     if not key or value is None:
         raise HTTPException(status_code=400, detail="key et value requis")
-
     await config_service.set(key, value, updated_by="admin")
     return {"status": "ok", "key": key, "value": value}
 
@@ -142,10 +136,69 @@ async def activate_pro_admin(
     user = result.scalar_one_or_none()
     if not user:
         raise HTTPException(status_code=404, detail="Utilisateur non trouvé")
-
     from app.services.payment_service import payment_service
     await payment_service.activate_pro(db=db, user=user, paydunya_token="admin_manual")
     await db.commit()
+    return {"status": "ok"}
+
+
+@router.post("/admin/documents/upload")
+async def upload_document(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    _: bool = Depends(verify_admin),
+):
+    """Upload et indexe un document depuis l'admin."""
+    from app.services.rag.indexing_service import indexing_service
+    import base64
+
+    data = await request.json()
+    filename = data.get("filename", "document")
+    file_b64 = data.get("file_b64", "")
+    title = data.get("title", filename)
+    exam_type = data.get("exam_type") or None
+    series = data.get("series") or None
+    subject = data.get("subject") or None
+    doc_type = data.get("doc_type", "cours")
+
+    if not file_b64:
+        raise HTTPException(status_code=400, detail="Fichier manquant")
+
+    file_bytes = base64.b64decode(file_b64)
+
+    result = await indexing_service.index_document(
+        db=db,
+        file_bytes=file_bytes,
+        filename=filename,
+        title=title,
+        exam_type=exam_type,
+        series=series,
+        subject=subject,
+        doc_type=doc_type,
+        uploaded_by="admin",
+    )
+    return result
+
+
+@router.get("/admin/documents")
+async def get_documents(
+    db: AsyncSession = Depends(get_db),
+    _: bool = Depends(verify_admin),
+):
+    from app.services.rag.indexing_service import indexing_service
+    return await indexing_service.get_documents(db)
+
+
+@router.delete("/admin/documents/{document_id}")
+async def delete_document(
+    document_id: str,
+    db: AsyncSession = Depends(get_db),
+    _: bool = Depends(verify_admin),
+):
+    from app.services.rag.indexing_service import indexing_service
+    success = await indexing_service.delete_document(db, document_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Document non trouvé")
     return {"status": "ok"}
 
 
@@ -187,9 +240,14 @@ DASHBOARD_HTML = """
         .badge.pro { background: #fef3c7; color: #92400e; }
         .badge.free { background: #e0e7ff; color: #3730a3; }
         .badge.active { background: #d1fae5; color: #065f46; }
+        .badge.indexed { background: #d1fae5; color: #065f46; }
         .badge.onboarding { background: #fce7f3; color: #9d174d; }
+        .badge.processing { background: #fef3c7; color: #92400e; }
+        .badge.error { background: #fee2e2; color: #991b1b; }
         .btn-sm { background: #6366f1; color: white; border: none; padding: 4px 10px; border-radius: 6px; cursor: pointer; font-size: 11px; }
         .btn-sm:hover { background: #4f46e5; }
+        .btn-danger { background: #ef4444; }
+        .btn-danger:hover { background: #dc2626; }
         .config-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; }
         .config-item { background: #0f0f1a; border: 1px solid #2d2d4e; border-radius: 8px; padding: 14px; display: flex; justify-content: space-between; align-items: center; gap: 12px; }
         .config-key { font-size: 12px; color: #94a3b8; font-family: monospace; }
@@ -200,6 +258,7 @@ DASHBOARD_HTML = """
         .dot.default { background: #4b5563; }
         .loading { color: #94a3b8; text-align: center; padding: 40px; }
         .toast { position: fixed; bottom: 24px; right: 24px; background: #10b981; color: white; padding: 12px 20px; border-radius: 10px; font-size: 14px; display: none; z-index: 1000; }
+        select { background: #0f0f1a; border: 1px solid #3d3d6e; color: #e2e8f0; padding: 6px; border-radius: 6px; font-size: 12px; }
     </style>
 </head>
 <body>
@@ -246,10 +305,11 @@ async function loadDashboard() {
     document.getElementById('content').innerHTML = '<div class="loading">Chargement...</div>';
 
     try {
-        const [stats, users, configs] = await Promise.all([
+        const [stats, users, configs, docs] = await Promise.all([
             api('/admin/stats'),
             api('/admin/users?limit=20'),
             api('/admin/config'),
+            api('/admin/documents'),
         ]);
 
         document.getElementById('content').innerHTML = `
@@ -278,6 +338,95 @@ async function loadDashboard() {
                         </div>
                     `).join('')}
                 </div>
+            </div>
+
+            <div class="section">
+                <h2>📚 Documents RAG</h2>
+                <div style="margin-bottom:16px;display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap">
+                    <div>
+                        <div style="font-size:11px;color:#94a3b8;margin-bottom:4px">Fichier (PDF/Word)</div>
+                        <input type="file" id="docFile" accept=".pdf,.docx,.doc" style="background:#0f0f1a;border:1px solid #3d3d6e;color:#e2e8f0;padding:6px;border-radius:6px;font-size:12px"/>
+                    </div>
+                    <div>
+                        <div style="font-size:11px;color:#94a3b8;margin-bottom:4px">Titre</div>
+                        <input type="text" id="docTitle" placeholder="Titre du document" style="background:#0f0f1a;border:1px solid #3d3d6e;color:#e2e8f0;padding:6px 10px;border-radius:6px;font-size:12px;width:160px"/>
+                    </div>
+                    <div>
+                        <div style="font-size:11px;color:#94a3b8;margin-bottom:4px">Examen</div>
+                        <select id="docExam">
+                            <option value="">-- Examen --</option>
+                            <option value="bac_senegal">BAC Sénégal</option>
+                            <option value="bfem">BFEM</option>
+                            <option value="concours">Concours</option>
+                        </select>
+                    </div>
+                    <div>
+                        <div style="font-size:11px;color:#94a3b8;margin-bottom:4px">Série</div>
+                        <select id="docSeries">
+                            <option value="">-- Série --</option>
+                            <option value="S1">S1</option>
+                            <option value="S2">S2</option>
+                            <option value="S3">S3</option>
+                            <option value="L1">L1</option>
+                            <option value="L2">L2</option>
+                            <option value="T">T</option>
+                        </select>
+                    </div>
+                    <div>
+                        <div style="font-size:11px;color:#94a3b8;margin-bottom:4px">Matière</div>
+                        <select id="docSubject">
+                            <option value="">-- Matière --</option>
+                            <option value="maths">Maths</option>
+                            <option value="physique">Physique</option>
+                            <option value="svt">SVT</option>
+                            <option value="francais">Français</option>
+                            <option value="philosophie">Philosophie</option>
+                            <option value="histoire_geo">Histoire-Géo</option>
+                            <option value="anglais">Anglais</option>
+                        </select>
+                    </div>
+                    <div>
+                        <div style="font-size:11px;color:#94a3b8;margin-bottom:4px">Type</div>
+                        <select id="docType">
+                            <option value="cours">Cours</option>
+                            <option value="annale">Annale</option>
+                            <option value="fiche">Fiche</option>
+                            <option value="exercice">Exercice</option>
+                        </select>
+                    </div>
+                    <button class="btn-sm" onclick="uploadDocument()" style="padding:8px 16px">⬆️ Indexer</button>
+                </div>
+                <div id="uploadStatus" style="font-size:12px;color:#94a3b8;margin-bottom:12px"></div>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Titre</th>
+                            <th>Examen</th>
+                            <th>Série</th>
+                            <th>Matière</th>
+                            <th>Type</th>
+                            <th>Pages</th>
+                            <th>Chunks</th>
+                            <th>Statut</th>
+                            <th>Action</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${docs.map(d => `
+                            <tr>
+                                <td>${d.title}</td>
+                                <td>${d.exam_type || '—'}</td>
+                                <td>${d.series || '—'}</td>
+                                <td>${d.subject || '—'}</td>
+                                <td>${d.doc_type || '—'}</td>
+                                <td>${d.page_count}</td>
+                                <td>${d.chunk_count}</td>
+                                <td><span class="badge ${d.status}">${d.status}</span></td>
+                                <td><button class="btn-sm btn-danger" onclick="deleteDocument('${d.id}')">🗑</button></td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
             </div>
 
             <div class="section">
@@ -331,7 +480,7 @@ async function saveConfig(key) {
     if (val === 'false') parsed = false;
     try {
         await api('/admin/config', 'POST', { key, value: parsed });
-        showToast(`${key} mis à jour → ${parsed}`);
+        showToast(key + ' mis à jour');
     } catch (e) {
         showToast('Erreur', true);
     }
@@ -352,6 +501,56 @@ async function activatePro(userId) {
         showToast('Plan Pro activé');
         loadDashboard();
     } catch (e) {
+        showToast('Erreur', true);
+    }
+}
+
+async function uploadDocument() {
+    const file = document.getElementById('docFile').files[0];
+    if (!file) { showToast('Sélectionne un fichier', true); return; }
+
+    const status = document.getElementById('uploadStatus');
+    status.textContent = '⏳ Lecture du fichier...';
+
+    const reader = new FileReader();
+    reader.onload = async (e) => {
+        const b64 = e.target.result.split(',')[1];
+        status.textContent = '⏳ Indexation en cours... (peut prendre 1-2 minutes)';
+
+        try {
+            const result = await api('/admin/documents/upload', 'POST', {
+                filename: file.name,
+                file_b64: b64,
+                title: document.getElementById('docTitle').value || file.name,
+                exam_type: document.getElementById('docExam').value,
+                series: document.getElementById('docSeries').value,
+                subject: document.getElementById('docSubject').value,
+                doc_type: document.getElementById('docType').value,
+            });
+
+            if (result.success) {
+                status.textContent = '✅ Indexé: ' + result.chunks + ' chunks, ' + result.pages + ' pages';
+                showToast('Document indexé avec succès');
+                loadDashboard();
+            } else {
+                status.textContent = '❌ Erreur: ' + result.error;
+                showToast('Erreur indexation', true);
+            }
+        } catch(e) {
+            status.textContent = '❌ Erreur serveur';
+            showToast('Erreur', true);
+        }
+    };
+    reader.readAsDataURL(file);
+}
+
+async function deleteDocument(docId) {
+    if (!confirm('Supprimer ce document et tous ses chunks ?')) return;
+    try {
+        await api('/admin/documents/' + docId, 'DELETE');
+        showToast('Document supprimé');
+        loadDashboard();
+    } catch(e) {
         showToast('Erreur', true);
     }
 }

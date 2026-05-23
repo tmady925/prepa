@@ -7,7 +7,7 @@ from app.core.settings import get_settings
 from app.models.user import User
 from app.models.subscription import Subscription
 from app.models.message import Message
-from app.services.config_service import config_service
+from app.services.config_service import config_service, DEFAULTS
 
 settings = get_settings()
 router = APIRouter()
@@ -84,10 +84,8 @@ async def get_config(
     result = await db.execute(select(PlatformConfig).order_by(PlatformConfig.key))
     configs = result.scalars().all()
 
-    defaults = config_service.DEFAULTS
     config_list = []
-
-    for key, default in defaults.items():
+    for key, default in DEFAULTS.items():
         db_val = next((c.value for c in configs if c.key == key and c.scope == "global"), None)
         config_list.append({
             "key": key,
@@ -192,8 +190,6 @@ DASHBOARD_HTML = """
         .badge.onboarding { background: #fce7f3; color: #9d174d; }
         .btn-sm { background: #6366f1; color: white; border: none; padding: 4px 10px; border-radius: 6px; cursor: pointer; font-size: 11px; }
         .btn-sm:hover { background: #4f46e5; }
-        .btn-danger { background: #ef4444; }
-        .btn-danger:hover { background: #dc2626; }
         .config-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; }
         .config-item { background: #0f0f1a; border: 1px solid #2d2d4e; border-radius: 8px; padding: 14px; display: flex; justify-content: space-between; align-items: center; gap: 12px; }
         .config-key { font-size: 12px; color: #94a3b8; font-family: monospace; }
@@ -276,7 +272,7 @@ async function loadDashboard() {
                                 <span class="config-key">${c.key}</span>
                             </div>
                             <div class="config-value">
-                                <input type="text" value="${c.value}" id="cfg_${c.key}" />
+                                <input type="text" value="${c.value}" id="cfg_${c.key.replace(/[^a-z0-9]/gi, '_')}" />
                                 <button class="btn-sm" onclick="saveConfig('${c.key}')">✓</button>
                             </div>
                         </div>
@@ -327,7 +323,8 @@ async function loadDashboard() {
 }
 
 async function saveConfig(key) {
-    const val = document.getElementById('cfg_' + key).value;
+    const safeKey = key.replace(/[^a-z0-9]/gi, '_');
+    const val = document.getElementById('cfg_' + safeKey).value;
     let parsed = val;
     if (!isNaN(val) && val !== '') parsed = Number(val);
     if (val === 'true') parsed = true;

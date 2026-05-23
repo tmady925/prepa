@@ -10,6 +10,7 @@ from app.services.whatsapp.sender import whatsapp_sender
 from app.services.whatsapp.messages import messages
 from app.services.llm.service import call_llm
 from app.repositories.message_repository import message_repo
+from app.db.redis import get_redis
 
 settings = get_settings()
 router = APIRouter()
@@ -38,16 +39,25 @@ async def webhook_receive(
     if not incoming:
         return {"status": "no_messages"}
 
+    redis = await get_redis()
+
     for message in incoming:
+        msg_id = message.get("id", "")
+        if msg_id:
+            cache_key = f"processed_msg:{msg_id}"
+            already_processed = await redis.get(cache_key)
+            if already_processed:
+                print(f"Message {msg_id} déjà traité, ignoré")
+                continue
+            await redis.setex(cache_key, 300, "1")
+
         await process_message(message, db)
 
     return {"status": "ok"}
 
 
 def detect_complexity(text: str) -> int:
-    """Détecte la complexité d'un message sur une échelle de 1 à 3."""
     text_lower = text.lower()
-
     complex_keywords = [
         "demontre", "prouve", "developpe", "explique en detail",
         "comment resoudre", "dissertation", "synthese", "analyse"
@@ -56,7 +66,6 @@ def detect_complexity(text: str) -> int:
         "explique", "pourquoi", "comment", "calcule", "resous",
         "exercice", "exemple", "difference"
     ]
-
     if any(k in text_lower for k in complex_keywords):
         return 3
     if any(k in text_lower for k in medium_keywords):
@@ -71,7 +80,6 @@ async def process_message(message: dict, db: AsyncSession):
     if not phone:
         return
 
-    # Texte du message
     text = ""
     if msg_type == "text":
         text = message.get("text", {}).get("body", "").strip()
@@ -85,10 +93,8 @@ async def process_message(message: dict, db: AsyncSession):
     if not text:
         return
 
-    # Récupère ou crée l'élève
     user, created = await user_service.get_or_create(db, phone)
 
-    # Vérifie le quota avant tout
     if user.status == "active":
         quota = await user_service.check_quota(user)
         if not quota["allowed"]:
@@ -99,10 +105,7 @@ async def process_message(message: dict, db: AsyncSession):
             )
             return
 
-    # Route selon l'étape d'onboarding
     await handle_onboarding(phone, text, user, db)
-
-    # Incrémente le compteur
     await user_service.increment_message_count(db, user)
 
 
@@ -190,7 +193,6 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession):
             )
 
     elif step == "done":
-        # Vérifie le quota
         quota = await user_service.check_quota(user)
         if not quota["allowed"]:
             await whatsapp_sender.send_buttons(
@@ -200,7 +202,6 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession):
             )
             return
 
-        # Sauvegarde le message entrant
         await message_repo.save(
             db=db,
             user_id=user.id,
@@ -209,13 +210,10 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession):
             intent="question_cours" if detect_complexity(text) >= 2 else "simple",
         )
 
-        # Récupère l'historique
         history = await message_repo.get_history(db, user.id, limit=10)
 
-        # Envoie un accusé de réception
         await whatsapp_sender.send_text(phone, "⏳ Je réfléchis...")
 
-        # Appelle l'IA avec l'historique
         response = await call_llm(
             user_message=text,
             user_plan=user.plan,
@@ -226,7 +224,6 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession):
             history=history,
         )
 
-        # Sauvegarde la réponse IA
         await message_repo.save(
             db=db,
             user_id=user.id,
@@ -236,7 +233,5 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession):
             from_cache=response.from_cache,
         )
 
-        # Envoie la réponse
         await whatsapp_sender.send_text(phone, response.text)
-
         print(f"IA ({response.provider}) -> {phone}: {response.text[:80]}...")

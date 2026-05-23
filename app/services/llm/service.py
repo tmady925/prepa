@@ -34,12 +34,14 @@ Pour les schémas conceptuels :
 
 N'utilise ces balises QUE quand c'est vraiment utile pour comprendre."""
 
+
 def build_messages(
     user_message: str,
     exam_type: str = "",
     subject: str = "",
     series: str = "",
     history: list = None,
+    rag_context: str = "",
 ) -> list:
     """Construit la liste de messages pour le LLM."""
 
@@ -55,9 +57,11 @@ def build_messages(
     if context:
         system += f"\n\nContexte élève : {context}"
 
+    if rag_context:
+        system += f"\n\nExtrait du programme officiel sénégalais :\n{rag_context}\n\nBase ta réponse sur ces extraits officiels."
+
     messages = [{"role": "system", "content": system}]
 
-    # Historique (max 5 derniers échanges)
     if history:
         messages.extend(history[-10:])
 
@@ -73,8 +77,9 @@ async def call_llm(
     series: str = "",
     complexity: int = 1,
     history: list = None,
+    db=None,
 ) -> LLMResponse:
-    """Point d'entrée principal pour appeler l'IA."""
+    """Point d'entrée principal pour appeler l'IA avec RAG."""
 
     # 1. Choisit le provider
     request = LLMRequest(
@@ -91,16 +96,30 @@ async def call_llm(
     cache_key = semantic_cache.make_key(user_message, provider_name)
     cached = await semantic_cache.get(cache_key)
     if cached:
-        return LLMResponse(
-            text=cached,
-            provider=provider_name,
-            from_cache=True,
-        )
+        return LLMResponse(text=cached, provider=provider_name, from_cache=True)
 
-    # 3. Construit les messages
-    msgs = build_messages(user_message, exam_type, subject, series, history)
+    # 3. Récupère le contexte RAG si db disponible
+    rag_context = ""
+    if db and (exam_type or series or subject):
+        try:
+            from app.services.rag.search_service import search_service
+            rag_context = await search_service.build_context(
+                db=db,
+                query=user_message,
+                exam_type=exam_type or None,
+                series=series or None,
+                subject=subject or None,
+                top_k=3,
+            )
+            if rag_context:
+                print(f"RAG: contexte trouve ({len(rag_context)} chars)")
+        except Exception as e:
+            print(f"RAG error: {e}")
 
-    # 4. Appelle le provider avec fallback
+    # 4. Construit les messages avec contexte RAG
+    msgs = build_messages(user_message, exam_type, subject, series, history, rag_context)
+
+    # 5. Appelle le provider avec fallback
     providers_to_try = _get_fallback_chain(provider_name)
 
     for pname in providers_to_try:
@@ -109,7 +128,6 @@ async def call_llm(
             continue
         try:
             text = await provider.complete(msgs, max_tokens)
-            # Met en cache
             await semantic_cache.set(cache_key, text)
             return LLMResponse(text=text, provider=pname)
         except Exception as e:

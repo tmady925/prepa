@@ -76,7 +76,6 @@ def detect_complexity(text: str) -> int:
 
 
 def detect_command(text: str) -> str | None:
-    """Détecte les commandes spéciales."""
     commands = {
         "/aide": "aide",
         "/help": "aide",
@@ -97,7 +96,6 @@ def detect_command(text: str) -> str | None:
 
 
 async def handle_command(command: str, phone: str, user, db: AsyncSession):
-    """Gère les commandes spéciales."""
     if command == "aide":
         days_left = 0
         if user.exam_date:
@@ -287,6 +285,7 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession):
 
         await whatsapp_sender.send_text(phone, "⏳ Je réfléchis...")
 
+        # Appelle l'IA avec RAG
         response = await call_llm(
             user_message=text,
             user_plan=user.plan,
@@ -295,6 +294,7 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession):
             series=user.series or "",
             complexity=detect_complexity(text),
             history=history,
+            db=db,
         )
 
         await message_repo.save(
@@ -316,6 +316,6 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession):
                 if url:
                     await whatsapp_sender.send_image_url(phone, url)
                 else:
-                    print("Upload Cloudinary échoué — image ignorée")
+                    print("Upload Cloudinary echoue — image ignoree")
 
         print(f"IA ({response.provider}) -> {phone}: {response.text[:80]}...")

@@ -17,6 +17,8 @@ class Settings(BaseSettings):
     app_port: int = 8000
     app_base_url: str = "http://localhost:8000"
 
+    admin_secret_key: str = "prepa_admin_2026"
+
     # Database
     database_url: str = ""
 

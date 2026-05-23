@@ -104,6 +104,11 @@ class UserService:
 
         await self._update_streak(db, user, now)
         await self._update_engagement_score(user)
+
+        # Vérifie le parrainage à chaque message
+        from app.services.referral_service import referral_service
+        await referral_service.check_and_activate(db, user)
+
         await db.flush()
         return user
 
@@ -127,9 +132,9 @@ class UserService:
     async def _update_engagement_score(self, user: User) -> None:
         score = 0
 
-        if user.streak_days >= 5:        score += 25
-        if user.streak_days >= 3:        score += 10
-        if user.total_messages >= 20:    score += 10
+        if user.streak_days >= 5:         score += 25
+        if user.streak_days >= 3:         score += 10
+        if user.total_messages >= 20:     score += 10
         if user.daily_messages_used >= 8: score += 20
 
         if user.exam_date:
@@ -165,6 +170,7 @@ class UserService:
     async def apply_referral(
         self, db: AsyncSession, new_user: User, referral_code: str
     ) -> bool:
+        """Associe un parrain au nouvel élève via son code."""
         result = await db.execute(
             select(User).where(User.referral_code == referral_code)
         )

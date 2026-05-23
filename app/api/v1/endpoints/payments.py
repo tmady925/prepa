@@ -4,6 +4,7 @@ from sqlalchemy import select
 from app.db.database import get_db
 from app.models.user import User
 from app.services.payment_service import payment_service
+from app.services.referral_service import referral_service
 from app.services.whatsapp.sender import whatsapp_sender
 
 router = APIRouter()
@@ -18,12 +19,10 @@ async def paydunya_webhook(
     data = await request.json()
     print(f"PayDunya webhook: {data}")
 
-    # Vérifie que le paiement est complété
     status = data.get("status", "")
     if status.lower() != "completed":
         return {"status": "ignored"}
 
-    # Récupère les données custom
     custom = data.get("custom_data", {})
     phone = custom.get("phone")
     plan = custom.get("plan", "pro")
@@ -33,7 +32,6 @@ async def paydunya_webhook(
     if not phone:
         return {"status": "no_phone"}
 
-    # Trouve l'utilisateur
     result = await db.execute(
         select(User).where(User.phone_number == phone)
     )
@@ -50,6 +48,12 @@ async def paydunya_webhook(
         payment_method=payment_method,
         raw_data=data,
     )
+
+    # Bonus parrainage si filleul passe Pro
+    activated = await referral_service.activate_paid_bonus(db=db, user=user)
+    if activated:
+        print(f"Bonus parrainage payant activé pour filleul {phone}")
+
     await db.commit()
 
     # Notifie l'élève sur WhatsApp
@@ -83,7 +87,6 @@ async def create_payment(
     invoice = await payment_service.create_invoice(user=user, plan="pro")
 
     if invoice["success"]:
-        # Envoie le lien via WhatsApp
         await whatsapp_sender.send_text(
             phone,
             f"💳 Voici ton lien de paiement Prepa Pro :\n\n"

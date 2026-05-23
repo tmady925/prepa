@@ -13,6 +13,7 @@ from app.repositories.message_repository import message_repo
 from app.services.media_processor import media_processor
 from app.services.storage_service import storage_service
 from app.services.rag.detector import subject_detector
+from app.services.rag.mastery_service import mastery_service
 from app.db.redis import get_redis
 
 settings = get_settings()
@@ -84,6 +85,8 @@ def detect_command(text: str) -> str | None:
         "/progression": "progression",
         "/stats": "progression",
         "progression": "progression",
+        "/profil": "profil",
+        "profil": "profil",
         "/inviter": "inviter",
         "/invite": "inviter",
         "inviter": "inviter",
@@ -112,6 +115,44 @@ async def handle_command(command: str, phone: str, user, db: AsyncSession):
             phone,
             messages.progression_message(user)
         )
+
+    elif command == "profil":
+        # Affiche le profil cognitif détaillé
+        profile = await mastery_service.get_student_profile(db, user.id)
+        if not profile:
+            await whatsapp_sender.send_text(
+                phone,
+                f"📊 *Ton profil, {user.name}*\n\n"
+                "Tu n'as pas encore travaillé de chapitres.\n\n"
+                "Pose une question de cours pour commencer ! 🚀"
+            )
+        else:
+            msg = f"📊 *Carte du savoir, {user.name}*\n\n"
+            level_emoji = {0: "🔴", 0.3: "🟡", 0.6: "🟢"}
+
+            for matiere, chapitres in profile.items():
+                msg += f"*{matiere.upper()}*\n"
+                for chapitre, data in chapitres.items():
+                    level = data["level"]
+                    if level < 0.3:
+                        emoji = "🔴"
+                        label = "À renforcer"
+                    elif level < 0.6:
+                        emoji = "🟡"
+                        label = "En cours"
+                    else:
+                        emoji = "🟢"
+                        label = "Maîtrisé"
+
+                    chapitre_label = chapitre.replace("_", " ").title()
+                    msg += f"  {emoji} {chapitre_label} — {label} ({int(level*100)}%)\n"
+
+                    if data.get("weak_points"):
+                        msg += f"     ⚠️ {', '.join(data['weak_points'][:2])}\n"
+                msg += "\n"
+
+            msg += "Tape */aide* pour voir les commandes disponibles."
+            await whatsapp_sender.send_text(phone, msg)
 
     elif command == "inviter":
         if not user.referral_code:
@@ -297,10 +338,11 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession):
         )
         detected_matiere = detection.get("matiere") or ""
         detected_chapitre = detection.get("chapitre") or ""
+        detection["user_id"] = str(user.id)
 
         print(f"Détection: {detected_matiere}/{detected_chapitre} ({detection.get('confiance')})")
 
-        # Appelle l'IA avec RAG granulaire
+        # Appelle l'IA avec RAG granulaire + profil élève
         response = await call_llm(
             user_message=text,
             user_plan=user.plan,
@@ -322,6 +364,20 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession):
             llm_provider=response.provider,
             from_cache=response.from_cache,
         )
+
+        # Met à jour le profil cognitif de l'élève
+        if detected_matiere and detected_chapitre:
+            try:
+                await mastery_service.update_after_interaction(
+                    db=db,
+                    user_id=user.id,
+                    matiere=detected_matiere,
+                    chapitre=detected_chapitre,
+                    detection=detection,
+                    response_text=response.text,
+                )
+            except Exception as e:
+                print(f"Mastery update error: {e}")
 
         # Traite la réponse — texte + images via Cloudinary
         blocks = await media_processor.process(response.text)

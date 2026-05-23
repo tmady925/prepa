@@ -2,6 +2,7 @@ from app.services.llm.router import LLMRouter, LLMRequest, LLMResponse
 from app.services.llm.providers import PROVIDERS
 from app.services.llm.cache import semantic_cache
 from app.services.config_service import config_service
+import uuid
 
 llm_router = LLMRouter()
 
@@ -44,6 +45,7 @@ def build_messages(
     rag_context: str = "",
     chapitre: str = "",
     detection: dict = None,
+    mastery_context: str = "",
 ) -> list:
     """Construit la liste de messages pour le LLM."""
 
@@ -82,6 +84,8 @@ def build_messages(
     system = SYSTEM_PROMPT
     if context:
         system += f"\n\nContexte élève : {context}"
+    if mastery_context:
+        system += f"\n\nProfil cognitif élève : {mastery_context}"
     if detection_context:
         system += f"\n\nAnalyse de la demande :{detection_context}"
     if rag_context:
@@ -108,7 +112,7 @@ async def call_llm(
     chapitre: str = "",
     detection: dict = None,
 ) -> LLMResponse:
-    """Point d'entrée principal pour appeler l'IA avec RAG granulaire."""
+    """Point d'entrée principal pour appeler l'IA avec RAG granulaire + profil cognitif."""
 
     # 1. Choisit le provider
     request = LLMRequest(
@@ -146,13 +150,31 @@ async def call_llm(
         except Exception as e:
             print(f"RAG error: {e}")
 
-    # 4. Construit les messages avec contexte complet
+    # 4. Récupère le profil cognitif de l'élève
+    mastery_context = ""
+    if db and subject and chapitre and detection:
+        try:
+            user_id_str = detection.get("user_id")
+            if user_id_str:
+                from app.services.rag.mastery_service import mastery_service
+                mastery_context = await mastery_service.get_chapter_context(
+                    db=db,
+                    user_id=uuid.UUID(user_id_str),
+                    matiere=subject,
+                    chapitre=chapitre,
+                )
+                if mastery_context:
+                    print(f"Mastery: {mastery_context}")
+        except Exception as e:
+            print(f"Mastery context error: {e}")
+
+    # 5. Construit les messages avec contexte complet
     msgs = build_messages(
         user_message, exam_type, subject, series,
-        history, rag_context, chapitre, detection
+        history, rag_context, chapitre, detection, mastery_context
     )
 
-    # 5. Appelle le provider avec fallback
+    # 6. Appelle le provider avec fallback
     providers_to_try = _get_fallback_chain(provider_name)
 
     for pname in providers_to_try:

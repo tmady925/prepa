@@ -148,11 +148,20 @@ async def upload_document(
     db: AsyncSession = Depends(get_db),
     _: bool = Depends(verify_admin),
 ):
-    """Upload et indexe un document depuis l'admin."""
+    """Upload et indexe un document depuis l'admin. Max 10MB."""
     from app.services.rag.indexing_service import indexing_service
     import base64
 
-    data = await request.json()
+    # Vérifie la taille avant de lire
+    content_length = request.headers.get("content-length")
+    if content_length and int(content_length) > 15 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="Fichier trop grand (max 10MB). Utilise le script local.")
+
+    try:
+        data = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Requête invalide")
+
     filename = data.get("filename", "document")
     file_b64 = data.get("file_b64", "")
     title = data.get("title", filename)
@@ -164,7 +173,14 @@ async def upload_document(
     if not file_b64:
         raise HTTPException(status_code=400, detail="Fichier manquant")
 
-    file_bytes = base64.b64decode(file_b64)
+    try:
+        file_bytes = base64.b64decode(file_b64)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Fichier invalide")
+
+    # Vérifie la taille du fichier décodé
+    if len(file_bytes) > 10 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="Fichier trop grand (max 10MB). Utilise le script local.")
 
     result = await indexing_service.index_document(
         db=db,
@@ -294,7 +310,7 @@ async function api(path, method = 'GET', body = null) {
     };
     if (body) opts.body = JSON.stringify(body);
     const res = await fetch('/api/v1' + path, opts);
-    if (!res.ok) throw new Error('Erreur API');
+    if (!res.ok) throw new Error('Erreur API ' + res.status);
     return res.json();
 }
 
@@ -342,6 +358,7 @@ async function loadDashboard() {
 
             <div class="section">
                 <h2>📚 Documents RAG</h2>
+                <p style="font-size:11px;color:#94a3b8;margin-bottom:12px">Max 10MB par fichier. Pour les fichiers plus grands, utilise le script local : <code style="background:#0f0f1a;padding:2px 6px;border-radius:4px">python scripts/index_documents.py</code></p>
                 <div style="margin-bottom:16px;display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap">
                     <div>
                         <div style="font-size:11px;color:#94a3b8;margin-bottom:4px">Fichier (PDF/Word)</div>
@@ -509,24 +526,52 @@ async function uploadDocument() {
     const file = document.getElementById('docFile').files[0];
     if (!file) { showToast('Sélectionne un fichier', true); return; }
 
+    if (file.size > 10 * 1024 * 1024) {
+        showToast('Fichier trop grand (max 10MB). Utilise le script local.', true);
+        document.getElementById('uploadStatus').textContent = '❌ Fichier trop grand (max 10MB). Utilise : python scripts/index_documents.py';
+        return;
+    }
+
     const status = document.getElementById('uploadStatus');
-    status.textContent = '⏳ Lecture du fichier...';
+    status.textContent = '⏳ Lecture du fichier (' + (file.size / 1024 / 1024).toFixed(1) + ' MB)...';
 
     const reader = new FileReader();
     reader.onload = async (e) => {
         const b64 = e.target.result.split(',')[1];
-        status.textContent = '⏳ Indexation en cours... (peut prendre 1-2 minutes)';
+        status.textContent = '⏳ Indexation en cours... (peut prendre 2-3 minutes)';
 
         try {
-            const result = await api('/admin/documents/upload', 'POST', {
-                filename: file.name,
-                file_b64: b64,
-                title: document.getElementById('docTitle').value || file.name,
-                exam_type: document.getElementById('docExam').value,
-                series: document.getElementById('docSeries').value,
-                subject: document.getElementById('docSubject').value,
-                doc_type: document.getElementById('docType').value,
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 300000);
+
+            const res = await fetch('/api/v1/admin/documents/upload', {
+                method: 'POST',
+                headers: {
+                    'X-Admin-Key': API_KEY,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    filename: file.name,
+                    file_b64: b64,
+                    title: document.getElementById('docTitle').value || file.name,
+                    exam_type: document.getElementById('docExam').value,
+                    series: document.getElementById('docSeries').value,
+                    subject: document.getElementById('docSubject').value,
+                    doc_type: document.getElementById('docType').value,
+                }),
+                signal: controller.signal,
             });
+
+            clearTimeout(timeoutId);
+
+            if (res.status === 413) {
+                status.textContent = '❌ Fichier trop grand. Utilise le script local.';
+                showToast('Fichier trop grand', true);
+                return;
+            }
+
+            if (!res.ok) throw new Error('Erreur serveur ' + res.status);
+            const result = await res.json();
 
             if (result.success) {
                 status.textContent = '✅ Indexé: ' + result.chunks + ' chunks, ' + result.pages + ' pages';
@@ -537,7 +582,11 @@ async function uploadDocument() {
                 showToast('Erreur indexation', true);
             }
         } catch(e) {
-            status.textContent = '❌ Erreur serveur';
+            if (e.name === 'AbortError') {
+                status.textContent = '❌ Timeout — fichier trop complexe, utilise le script local';
+            } else {
+                status.textContent = '❌ Erreur: ' + e.message;
+            }
             showToast('Erreur', true);
         }
     };

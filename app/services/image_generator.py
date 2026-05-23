@@ -6,12 +6,11 @@ import io
 import re
 import numpy as np
 import matplotlib
-matplotlib.use('Agg')  # Mode sans interface graphique
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 from matplotlib import rcParams
-from sympy import *
-from sympy.parsing.latex import parse_latex
+from sympy import symbols, sympify, lambdify
 from PIL import Image
 
 # Style global
@@ -22,10 +21,30 @@ rcParams['axes.facecolor'] = '#F8F9FA'
 
 class ImageGenerator:
 
+    def _clean_latex(self, formula: str) -> str:
+        """Nettoie une formule LaTeX avant rendu."""
+        # Supprime les délimiteurs $ résiduels
+        formula = re.sub(r'^\$+|\$+$', '', formula.strip())
+        # Supprime \( \) résiduels
+        formula = re.sub(r'^\\\(|\\\)$', '', formula.strip())
+        # Supprime \[ \] résiduels
+        formula = re.sub(r'^\\\[|\\\]$', '', formula.strip())
+        return formula.strip()
+
     # ── Formules mathématiques ─────────────────────────────────────────
 
     async def formula_to_image(self, latex_formulas: list[str], title: str = "") -> bytes:
         """Génère une image propre avec une ou plusieurs formules LaTeX."""
+        # Nettoie les formules
+        cleaned = []
+        for f in latex_formulas:
+            f = self._clean_latex(f)
+            if f:
+                cleaned.append(f)
+        if not cleaned:
+            cleaned = [""]
+        latex_formulas = cleaned
+
         n = len(latex_formulas)
         fig_height = max(2, 1.2 * n + (0.8 if title else 0))
         fig, ax = plt.subplots(figsize=(8, fig_height))
@@ -41,17 +60,23 @@ class ImageGenerator:
 
         for i, formula in enumerate(latex_formulas):
             y = y_start - i * step * 1.5
-            # Fond coloré pour chaque formule
             ax.add_patch(mpatches.FancyBboxPatch(
                 (0.05, y - 0.08), 0.9, 0.18,
                 boxstyle="round,pad=0.02",
                 facecolor='#EEF2FF', edgecolor='#6366F1', linewidth=1.5,
                 transform=ax.transAxes
             ))
-            ax.text(0.5, y, f"${formula}$",
-                    transform=ax.transAxes,
-                    fontsize=16, ha='center', va='center',
-                    color='#1e1b4b')
+            try:
+                ax.text(0.5, y, f"${formula}$",
+                        transform=ax.transAxes,
+                        fontsize=16, ha='center', va='center',
+                        color='#1e1b4b')
+            except Exception:
+                # Fallback texte simple si LaTeX invalide
+                ax.text(0.5, y, formula,
+                        transform=ax.transAxes,
+                        fontsize=14, ha='center', va='center',
+                        color='#1e1b4b')
 
         plt.tight_layout()
         return self._fig_to_bytes(fig)
@@ -105,42 +130,27 @@ class ImageGenerator:
         signs: list[str],
         title: str = "Tableau de variations",
     ) -> bytes:
-        """
-        Génère un tableau de variations.
-        x_values = [-inf, -1, 0, 2, +inf]
-        fx_values = ["+inf", 3, 0, -2, "+inf"]
-        signs = ["+", "-", "+"]
-        """
         fig, ax = plt.subplots(figsize=(10, 3.5))
         ax.axis('off')
 
         n_cols = len(x_values)
-        n_rows = 3
 
-        # Données du tableau
-        rows = [
-            ["x"] + [str(v) for v in x_values],
-            ["f'(x)"] + [" "] + [s for s in signs for _ in (0,)] + [" "],
-            ["f(x)"] + [str(v) for v in fx_values],
-        ]
-
-        # Ajuste la ligne des signes
         sign_row = ["f'(x)", " "]
         for s in signs:
             sign_row.append(s)
             sign_row.append(" ")
-        rows[1] = sign_row[:n_cols + 1]
 
-        table = ax.table(
-            cellText=rows,
-            loc='center',
-            cellLoc='center',
-        )
+        rows = [
+            ["x"] + [str(v) for v in x_values],
+            sign_row[:n_cols + 1],
+            ["f(x)"] + [str(v) for v in fx_values],
+        ]
+
+        table = ax.table(cellText=rows, loc='center', cellLoc='center')
         table.auto_set_font_size(False)
         table.set_fontsize(13)
         table.scale(1.2, 2.5)
 
-        # Style des cellules
         for (row, col), cell in table.get_celld().items():
             if col == 0:
                 cell.set_facecolor('#6366F1')
@@ -152,8 +162,7 @@ class ImageGenerator:
                 cell.set_facecolor('#F8F9FF')
             cell.set_edgecolor('#C7D2FE')
 
-        ax.set_title(title, fontsize=14, fontweight='bold',
-                     color='#1a1a2e', pad=20)
+        ax.set_title(title, fontsize=14, fontweight='bold', color='#1a1a2e', pad=20)
         plt.tight_layout()
         return self._fig_to_bytes(fig)
 
@@ -165,7 +174,6 @@ class ImageGenerator:
         rows: list[list],
         title: str = "",
     ) -> bytes:
-        """Génère un tableau de données propre."""
         fig_height = max(2.5, 0.5 * len(rows) + 1.5)
         fig, ax = plt.subplots(figsize=(10, fig_height))
         ax.axis('off')
@@ -191,29 +199,19 @@ class ImageGenerator:
             cell.set_edgecolor('#E0E7FF')
 
         if title:
-            ax.set_title(title, fontsize=14, fontweight='bold',
-                         color='#1a1a2e', pad=15)
+            ax.set_title(title, fontsize=14, fontweight='bold', color='#1a1a2e', pad=15)
 
         plt.tight_layout()
         return self._fig_to_bytes(fig)
 
     # ── Chronologie ────────────────────────────────────────────────────
 
-    async def timeline(
-        self,
-        events: list[dict],
-        title: str = "Chronologie",
-    ) -> bytes:
-        """
-        Génère une chronologie.
-        events = [{"date": "1960", "event": "Indépendance du Sénégal"}, ...]
-        """
+    async def timeline(self, events: list[dict], title: str = "Chronologie") -> bytes:
         n = len(events)
         fig_height = max(4, 0.8 * n + 2)
         fig, ax = plt.subplots(figsize=(10, fig_height))
         ax.axis('off')
 
-        # Ligne centrale
         ax.plot([0.5, 0.5], [0.05, 0.95], color='#6366F1',
                 linewidth=3, transform=ax.transAxes, zorder=1)
 
@@ -222,95 +220,66 @@ class ImageGenerator:
         for i, event in enumerate(events):
             y = 0.9 - i * step
             side = "left" if i % 2 == 0 else "right"
-
-            # Point sur la timeline
             ax.plot(0.5, y, 'o', color='#6366F1', markersize=12,
                     transform=ax.transAxes, zorder=2)
 
-            if side == "left":
-                ax.annotate(
-                    f"{event['date']}\n{event['event']}",
-                    xy=(0.5, y), xytext=(0.05, y),
-                    textcoords=ax.transAxes,
-                    xycoords=ax.transAxes,
-                    fontsize=10, ha='right', va='center',
-                    color='#1e1b4b',
-                    bbox=dict(boxstyle='round,pad=0.4', facecolor='#EEF2FF',
-                              edgecolor='#6366F1', linewidth=1),
-                    arrowprops=dict(arrowstyle='->', color='#6366F1'),
-                )
-            else:
-                ax.annotate(
-                    f"{event['date']}\n{event['event']}",
-                    xy=(0.5, y), xytext=(0.95, y),
-                    textcoords=ax.transAxes,
-                    xycoords=ax.transAxes,
-                    fontsize=10, ha='left', va='center',
-                    color='#1e1b4b',
-                    bbox=dict(boxstyle='round,pad=0.4', facecolor='#FFF7ED',
-                              edgecolor='#F59E0B', linewidth=1),
-                    arrowprops=dict(arrowstyle='->', color='#F59E0B'),
-                )
+            xytext = (0.05, y) if side == "left" else (0.95, y)
+            ha = "right" if side == "left" else "left"
+            color = '#6366F1' if side == "left" else '#F59E0B'
+            facecolor = '#EEF2FF' if side == "left" else '#FFF7ED'
 
-        ax.set_title(title, fontsize=14, fontweight='bold',
-                     color='#1a1a2e', pad=15)
+            ax.annotate(
+                f"{event['date']}\n{event['event']}",
+                xy=(0.5, y), xytext=xytext,
+                textcoords=ax.transAxes, xycoords=ax.transAxes,
+                fontsize=10, ha=ha, va='center', color='#1e1b4b',
+                bbox=dict(boxstyle='round,pad=0.4', facecolor=facecolor,
+                          edgecolor=color, linewidth=1),
+                arrowprops=dict(arrowstyle='->', color=color),
+            )
+
+        ax.set_title(title, fontsize=14, fontweight='bold', color='#1a1a2e', pad=15)
         plt.tight_layout()
         return self._fig_to_bytes(fig)
 
-    # ── Schéma texte / mind map simple ────────────────────────────────
+    # ── Schéma conceptuel ──────────────────────────────────────────────
 
-    async def concept_map(
-        self,
-        central: str,
-        branches: list[dict],
-        title: str = "",
-    ) -> bytes:
-        """
-        Génère un schéma conceptuel simple.
-        branches = [{"label": "Définition", "detail": "..."}, ...]
-        """
+    async def concept_map(self, central: str, branches: list[dict], title: str = "") -> bytes:
         fig, ax = plt.subplots(figsize=(10, 7))
         ax.axis('off')
         ax.set_xlim(0, 10)
         ax.set_ylim(0, 7)
 
-        # Noeud central
         ax.add_patch(mpatches.FancyBboxPatch(
             (3.5, 2.8), 3, 1.4,
             boxstyle="round,pad=0.1",
             facecolor='#6366F1', edgecolor='#4338CA', linewidth=2
         ))
         ax.text(5, 3.5, central, ha='center', va='center',
-                fontsize=13, fontweight='bold', color='white', wrap=True)
+                fontsize=13, fontweight='bold', color='white')
 
-        colors = ['#10B981', '#F59E0B', '#EF4444', '#3B82F6',
-                  '#8B5CF6', '#EC4899']
-        n = len(branches)
-        angles = np.linspace(0, 2 * np.pi, n, endpoint=False)
+        colors = ['#10B981', '#F59E0B', '#EF4444', '#3B82F6', '#8B5CF6', '#EC4899']
+        angles = np.linspace(0, 2 * np.pi, len(branches), endpoint=False)
 
         for i, (branch, angle) in enumerate(zip(branches, angles)):
             x = 5 + 3.2 * np.cos(angle)
             y = 3.5 + 2.2 * np.sin(angle)
+            c = colors[i % len(colors)]
 
-            # Ligne de connexion
             ax.annotate("", xy=(x, y), xytext=(5, 3.5),
-                        arrowprops=dict(arrowstyle='->', color=colors[i % len(colors)],
-                                        lw=1.5))
+                        arrowprops=dict(arrowstyle='->', color=c, lw=1.5))
 
-            # Boîte de branche
-            text = f"{branch['label']}\n{branch.get('detail', '')}"
             ax.add_patch(mpatches.FancyBboxPatch(
                 (x - 1.2, y - 0.4), 2.4, 0.8,
                 boxstyle="round,pad=0.05",
-                facecolor=colors[i % len(colors)] + '22',
-                edgecolor=colors[i % len(colors)], linewidth=1.5
+                facecolor=c + '22', edgecolor=c, linewidth=1.5
             ))
+            text = f"{branch['label']}\n{branch.get('detail', '')}"
             ax.text(x, y, text, ha='center', va='center',
-                    fontsize=9, color='#1e1b4b', wrap=True)
+                    fontsize=9, color='#1e1b4b')
 
         if title:
-            ax.set_title(title, fontsize=14, fontweight='bold',
-                         color='#1a1a2e', pad=15)
+            ax.set_title(title, fontsize=14, fontweight='bold', color='#1a1a2e', pad=15)
 
         plt.tight_layout()
         return self._fig_to_bytes(fig)
@@ -318,16 +287,13 @@ class ImageGenerator:
     # ── Utilitaires ────────────────────────────────────────────────────
 
     def _fig_to_bytes(self, fig) -> bytes:
-        """Convertit une figure matplotlib en bytes PNG."""
         buf = io.BytesIO()
-        fig.savefig(buf, format='png', dpi=150, bbox_inches='tight',
-                    facecolor='white')
+        fig.savefig(buf, format='png', dpi=150, bbox_inches='tight', facecolor='white')
         plt.close(fig)
         buf.seek(0)
         return buf.read()
 
     def extract_latex(self, text: str) -> list[str]:
-        """Extrait les formules LaTeX d'un texte."""
         patterns = [
             r'\$\$(.+?)\$\$',
             r'\$(.+?)\$',
@@ -341,7 +307,6 @@ class ImageGenerator:
         return list(set(formulas))
 
     def has_math(self, text: str) -> bool:
-        """Détecte si un texte contient des formules mathématiques."""
         return bool(self.extract_latex(text))
 
 

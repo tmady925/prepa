@@ -10,6 +10,7 @@ from app.services.whatsapp.sender import whatsapp_sender
 from app.services.whatsapp.messages import messages
 from app.services.llm.service import call_llm
 from app.repositories.message_repository import message_repo
+from app.services.media_processor import media_processor
 from app.db.redis import get_redis
 
 settings = get_settings()
@@ -233,5 +234,12 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession):
             from_cache=response.from_cache,
         )
 
-        await whatsapp_sender.send_text(phone, response.text)
+        # Traite la réponse — texte + images si nécessaire
+        blocks = await media_processor.process(response.text)
+        for block in blocks:
+            if block["type"] == "text":
+                await whatsapp_sender.send_text(phone, block["content"])
+            elif block["type"] == "image":
+                await whatsapp_sender.send_image_bytes(phone, block["content"])
+
         print(f"IA ({response.provider}) -> {phone}: {response.text[:80]}...")

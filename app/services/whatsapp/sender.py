@@ -1,3 +1,4 @@
+import base64
 import httpx
 from app.core.settings import get_settings
 
@@ -21,6 +22,36 @@ class WhatsAppSender:
             "to": phone,
             "type": "text",
             "text": {"body": text},
+        }
+        return await self._send(payload)
+
+    async def send_image_bytes(self, phone: str, image_bytes: bytes, caption: str = "") -> dict:
+        """Envoie une image en base64 via WhatsApp."""
+        image_b64 = base64.b64encode(image_bytes).decode('utf-8')
+        payload = {
+            "messaging_product": "whatsapp",
+            "recipient_type": "individual",
+            "to": phone,
+            "type": "image",
+            "image": {
+                "data": image_b64,
+                "mime_type": "image/png",
+                "caption": caption,
+            },
+        }
+        return await self._send(payload)
+
+    async def send_image_url(self, phone: str, url: str, caption: str = "") -> dict:
+        """Envoie une image via URL publique."""
+        payload = {
+            "messaging_product": "whatsapp",
+            "recipient_type": "individual",
+            "to": phone,
+            "type": "image",
+            "image": {
+                "link": url,
+                "caption": caption,
+            },
         }
         return await self._send(payload)
 

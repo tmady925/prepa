@@ -156,17 +156,20 @@ class Messages:
         )
 
     def invite_message(self, user) -> str:
+        from app.core.settings import get_settings
+        settings = get_settings()
+        code = user.referral_code or ""
+        wa_number = settings.whatsapp_number.replace("+", "").replace(" ", "")
+        wa_link = f"https://wa.me/{wa_number}?text=PREPA-{code}"
+
         return (
             f"🎁 *Invite tes amis et gagne des messages gratuits !*\n\n"
-            f"Ton code de parrainage : *{user.referral_code}*\n\n"
-            f"Comment ça marche :\n"
-            f"1️⃣ Partage ce message à tes amis\n"
-            f"2️⃣ Ils s'inscrivent avec ton code\n"
-            f"3️⃣ Tu gagnes *20 messages* par ami actif\n"
-            f"4️⃣ Tu gagnes *50 messages* si ton ami passe Pro\n\n"
-            f"📤 Message à partager :\n"
-            f"_« Salut ! J'utilise Prepa pour réviser mon {user.exam_type or 'examen'}. "
-            f"C'est vraiment bien ! Inscris-toi avec mon code *{user.referral_code}* »_"
+            f"Partage ce lien à tes amis :\n"
+            f"{wa_link}\n\n"
+            f"Quand ils cliquent et s'inscrivent avec ton lien :\n"
+            f"✅ Tu gagnes *20 messages* par ami actif\n"
+            f"✅ Tu gagnes *50 messages* si ton ami passe Pro\n\n"
+            f"Ton code : *{code}*"
         )
 
     def plan_message(self, user) -> str:

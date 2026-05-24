@@ -170,13 +170,25 @@ class UserService:
     async def apply_referral(
         self, db: AsyncSession, new_user: User, referral_code: str
     ) -> bool:
-        """Associe un parrain au nouvel élève via son code."""
+        """
+        Associe un parrain au nouvel élève via son code.
+        Le code peut être le code brut (MAD-JAIQQ) ou avec préfixe (PREPA-MAD-JAIQQ).
+        """
+        # Nettoie le code — supprime le préfixe PREPA- si présent
+        code = referral_code.upper().strip()
+        if code.startswith("PREPA-"):
+            code = code[6:]
+
         result = await db.execute(
-            select(User).where(User.referral_code == referral_code)
+            select(User).where(User.referral_code == code)
         )
         referrer = result.scalar_one_or_none()
 
         if not referrer or referrer.id == new_user.id:
+            return False
+
+        # Vérifie que le parrainage n'existe pas déjà
+        if new_user.referred_by_id:
             return False
 
         from app.models.subscription import Referral

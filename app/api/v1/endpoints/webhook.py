@@ -2,6 +2,7 @@ import hashlib
 import hmac
 from datetime import datetime
 from fastapi import APIRouter, Request, Depends
+from sqlalchemy import select as sa_select
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.settings import get_settings
 from app.db.database import get_db
@@ -15,6 +16,7 @@ from app.services.storage_service import storage_service
 from app.services.rag.detector import subject_detector
 from app.services.rag.mastery_service import mastery_service
 from app.db.redis import get_redis
+from app.models.user import User as UserModel
 
 settings = get_settings()
 router = APIRouter()
@@ -117,7 +119,6 @@ async def handle_command(command: str, phone: str, user, db: AsyncSession):
         )
 
     elif command == "profil":
-        # Affiche le profil cognitif détaillé
         profile = await mastery_service.get_student_profile(db, user.id)
         if not profile:
             await whatsapp_sender.send_text(
@@ -128,8 +129,6 @@ async def handle_command(command: str, phone: str, user, db: AsyncSession):
             )
         else:
             msg = f"📊 *Carte du savoir, {user.name}*\n\n"
-            level_emoji = {0: "🔴", 0.3: "🟡", 0.6: "🟢"}
-
             for matiere, chapitres in profile.items():
                 msg += f"*{matiere.upper()}*\n"
                 for chapitre, data in chapitres.items():
@@ -143,14 +142,11 @@ async def handle_command(command: str, phone: str, user, db: AsyncSession):
                     else:
                         emoji = "🟢"
                         label = "Maîtrisé"
-
                     chapitre_label = chapitre.replace("_", " ").title()
                     msg += f"  {emoji} {chapitre_label} — {label} ({int(level*100)}%)\n"
-
                     if data.get("weak_points"):
                         msg += f"     ⚠️ {', '.join(data['weak_points'][:2])}\n"
                 msg += "\n"
-
             msg += "Tape */aide* pour voir les commandes disponibles."
             await whatsapp_sender.send_text(phone, msg)
 
@@ -199,6 +195,25 @@ async def process_message(message: dict, db: AsyncSession):
         return
 
     user, created = await user_service.get_or_create(db, phone)
+
+    # Détecte un code de parrainage dans le premier message
+    if created and text.upper().startswith("PREPA-"):
+        code = text.strip().upper().replace("PREPA-", "")
+        applied = await user_service.apply_referral(db, user, code)
+        if applied:
+            print(f"Parrainage auto détecté: {code}")
+            # Notifie le parrain
+            if user.referred_by_id:
+                result = await db.execute(
+                    sa_select(UserModel).where(UserModel.id == user.referred_by_id)
+                )
+                referrer = result.scalar_one_or_none()
+                if referrer:
+                    await whatsapp_sender.send_text(
+                        referrer.phone_number,
+                        f"🎉 Un ami vient de s'inscrire avec ton lien !\n\n"
+                        f"Tu gagneras *20 messages bonus* quand il sera actif 💪"
+                    )
 
     if user.status == "active":
         quota = await user_service.check_quota(user)

@@ -29,7 +29,7 @@ class Settings(BaseSettings):
 
     # WhatsApp
     whatsapp_api_key: str = ""
-    whatsapp_number: str = ""
+    whatsapp_number: str = "221789939028"
     whatsapp_webhook_secret: str = ""
     whatsapp_base_url: str = "https://waba.360dialog.io/v1"
 

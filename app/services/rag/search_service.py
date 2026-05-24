@@ -120,7 +120,7 @@ class SearchService:
             bm25 = bm25_scores.get(chunk.id, 0)
 
             # Pondération : 70% sémantique + 30% BM25
-            hybrid_score = 0.7 * sem + 0.3 * bm25
+            hybrid_score = 0.8 * sem + 0.2 * bm25
 
             if sem >= min_similarity or (bm25 > 0.5 and sem >= 0.3):
                 scored.append({

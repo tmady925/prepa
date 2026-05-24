@@ -202,7 +202,6 @@ async def process_message(message: dict, db: AsyncSession):
         applied = await user_service.apply_referral(db, user, code)
         if applied:
             print(f"Parrainage auto détecté: {code}")
-            # Notifie le parrain
             if user.referred_by_id:
                 result = await db.execute(
                     sa_select(UserModel).where(UserModel.id == user.referred_by_id)
@@ -354,16 +353,160 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession):
         detected_matiere = detection.get("matiere") or ""
         detected_chapitre = detection.get("chapitre") or ""
 
-        # Fallback matière — utilise la première matière de l'élève
+        # Fallback matière
         if not detected_matiere and user.subjects:
             detected_matiere = user.subjects[0]
             print(f"Fallback matière: {detected_matiere}")
 
         detection["user_id"] = str(user.id)
-
         print(f"Détection: {detected_matiere}/{detected_chapitre} ({detection.get('confiance')})")
 
-        # Appelle l'IA avec RAG granulaire + profil élève
+        # ── Mode exercice ─────────────────────────────────────────────
+        conv_state = user.conversation_state or {}
+
+        # L'élève répond à un exercice en cours
+        if conv_state.get("awaiting_answer"):
+            from app.services.rag.exercise_generator import exercise_generator
+
+            analysis = await exercise_generator.analyze_answer(
+                db=db,
+                user_id=user.id,
+                matiere=conv_state.get("matiere", detected_matiere),
+                chapitre=conv_state.get("chapitre", detected_chapitre),
+                exercise_text=conv_state.get("exercise_text", ""),
+                student_answer=text,
+                exercise_type=conv_state.get("exercise_type", ""),
+                hints_asked=conv_state.get("hints_asked", 0),
+            )
+
+            score = analysis.get("score", 0)
+            correct = analysis.get("correct", False)
+            encouragement = analysis.get("encouragement", "Continue ! 💪")
+            correction = analysis.get("correction", "")
+            points_forts = analysis.get("points_forts", [])
+            erreurs = analysis.get("erreurs", [])
+            prochain = analysis.get("prochain_conseil", "")
+
+            score_emoji = "🟢" if score >= 70 else "🟡" if score >= 40 else "🔴"
+
+            response_text = f"{score_emoji} *Score : {score}/100*\n\n"
+
+            if points_forts:
+                response_text += "*Points forts :*\n"
+                for p in points_forts[:2]:
+                    response_text += f"- {p}\n"
+                response_text += "\n"
+
+            if erreurs:
+                response_text += "*Points à corriger :*\n"
+                for e in erreurs[:2]:
+                    response_text += f"- {e}\n"
+                response_text += "\n"
+
+            response_text += f"*Correction :*\n{correction}\n\n"
+            response_text += encouragement
+
+            if prochain:
+                response_text += f"\n\n💡 *Conseil :* {prochain}"
+
+            # Réinitialise l'état
+            user.conversation_state = {}
+            await db.flush()
+
+            await message_repo.save(
+                db=db,
+                user_id=user.id,
+                direction="outbound",
+                content=response_text,
+                llm_provider="exercise_analyzer",
+                from_cache=False,
+            )
+
+            blocks = await media_processor.process(response_text)
+            for block in blocks:
+                if block["type"] == "text":
+                    await whatsapp_sender.send_text(phone, block["content"])
+                elif block["type"] == "image":
+                    url = await storage_service.upload_image(block["content"])
+                    if url:
+                        await whatsapp_sender.send_image_url(phone, url)
+
+            print(f"Correction exercice -> {phone}: score={score}")
+            return
+
+        # L'élève demande un indice pendant un exercice
+        if conv_state.get("exercise_text") and any(
+            kw in text.lower() for kw in [
+                "indice", "aide", "hint", "help",
+                "je sais pas", "je ne sais pas", "bloque", "bloqué"
+            ]
+        ):
+            conv_state["hints_asked"] = conv_state.get("hints_asked", 0) + 1
+            user.conversation_state = conv_state
+            await db.flush()
+
+            hint_prompt = (
+                f"L'élève demande un indice pour cet exercice :\n"
+                f"{conv_state.get('exercise_text', '')}\n\n"
+                f"Donne UN seul indice utile sans donner la réponse. "
+                f"Sois encourageant et concis."
+            )
+            response = await call_llm(
+                user_message=hint_prompt,
+                user_plan=user.plan,
+                exam_type=user.exam_type or "",
+                subject=conv_state.get("matiere", ""),
+                series=user.series or "",
+                complexity=1,
+                history=[],
+                db=None,
+            )
+            await whatsapp_sender.send_text(
+                phone,
+                f"💡 *Indice {conv_state['hints_asked']} :*\n\n{response.text}"
+            )
+            return
+
+        # Demande d'exercice → génère un nouvel exercice
+        if detection.get("type_demande") == "exercice" and detected_matiere and detected_chapitre:
+            from app.services.rag.exercise_generator import exercise_generator
+
+            exercise_data = await exercise_generator.generate_exercise(
+                db=db,
+                user_id=user.id,
+                matiere=detected_matiere,
+                chapitre=detected_chapitre,
+                exam_type=user.exam_type or "bac_senegal",
+                serie=user.series or "S2",
+            )
+
+            if exercise_data and exercise_data.get("text"):
+                user.conversation_state = {
+                    "awaiting_answer": True,
+                    "exercise_text": exercise_data["text"],
+                    "exercise_type": exercise_data["type"],
+                    "matiere": detected_matiere,
+                    "chapitre": detected_chapitre,
+                    "hints_asked": 0,
+                    "niveau": exercise_data["niveau"],
+                    "started_at": datetime.now().isoformat(),
+                }
+                await db.flush()
+
+                await message_repo.save(
+                    db=db,
+                    user_id=user.id,
+                    direction="outbound",
+                    content=exercise_data["text"],
+                    llm_provider="exercise_generator",
+                    from_cache=False,
+                )
+
+                await whatsapp_sender.send_text(phone, exercise_data["text"])
+                print(f"Exercice généré -> {phone}: {detected_matiere}/{detected_chapitre} niveau={exercise_data['niveau']}")
+                return
+
+        # ── Mode normal — appel LLM ───────────────────────────────────
         response = await call_llm(
             user_message=text,
             user_plan=user.plan,
@@ -386,7 +529,7 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession):
             from_cache=response.from_cache,
         )
 
-        # Met à jour le profil cognitif de l'élève
+        # Met à jour le profil cognitif
         if detected_matiere and detected_chapitre:
             try:
                 await mastery_service.update_after_interaction(

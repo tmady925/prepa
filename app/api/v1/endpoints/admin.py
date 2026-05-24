@@ -148,14 +148,12 @@ async def upload_document(
     db: AsyncSession = Depends(get_db),
     _: bool = Depends(verify_admin),
 ):
-    """Upload et indexe un document depuis l'admin. Max 10MB."""
     from app.services.rag.indexing_service import indexing_service
     import base64
 
-    # Vérifie la taille avant de lire
     content_length = request.headers.get("content-length")
     if content_length and int(content_length) > 15 * 1024 * 1024:
-        raise HTTPException(status_code=413, detail="Fichier trop grand (max 10MB). Utilise le script local.")
+        raise HTTPException(status_code=413, detail="Fichier trop grand (max 10MB).")
 
     try:
         data = await request.json()
@@ -178,9 +176,8 @@ async def upload_document(
     except Exception:
         raise HTTPException(status_code=400, detail="Fichier invalide")
 
-    # Vérifie la taille du fichier décodé
     if len(file_bytes) > 10 * 1024 * 1024:
-        raise HTTPException(status_code=413, detail="Fichier trop grand (max 10MB). Utilise le script local.")
+        raise HTTPException(status_code=413, detail="Fichier trop grand (max 10MB).")
 
     result = await indexing_service.index_document(
         db=db,
@@ -218,6 +215,44 @@ async def delete_document(
     return {"status": "ok"}
 
 
+# ── NOTIFICATIONS ─────────────────────────────────────────────────────
+
+@router.post("/admin/notifications/count")
+async def notifications_count(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    _: bool = Depends(verify_admin),
+):
+    from app.services.notification_service import notification_service
+    data = await request.json()
+    count = await notification_service.count_targets(
+        db=db,
+        filter_type=data.get("filter_type", "all"),
+        exam_type=data.get("exam_type"),
+        series=data.get("series"),
+    )
+    return {"count": count}
+
+
+@router.post("/admin/notifications/send")
+async def notifications_send(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    _: bool = Depends(verify_admin),
+):
+    from app.services.notification_service import notification_service
+    data = await request.json()
+    result = await notification_service.send_campaign(
+        db=db,
+        filter_type=data.get("filter_type", "all"),
+        message_type=data.get("message_type", "custom"),
+        custom_message=data.get("custom_message"),
+        exam_type=data.get("exam_type"),
+        series=data.get("series"),
+    )
+    return result
+
+
 # ── DASHBOARD HTML ────────────────────────────────────────────────────
 
 @router.get("/admin", response_class=HTMLResponse)
@@ -238,7 +273,7 @@ DASHBOARD_HTML = """
         .header { background: #1a1a2e; padding: 20px 32px; border-bottom: 1px solid #2d2d4e; display: flex; justify-content: space-between; align-items: center; }
         .header h1 { font-size: 22px; font-weight: 700; color: #818cf8; }
         .header .auth { display: flex; gap: 12px; align-items: center; }
-        .header input { background: #2d2d4e; border: 1px solid #3d3d6e; color: #e2e8f0; padding: 8px 14px; border-radius: 8px; font-size: 14px; width: 240px; }
+        .header input[type=password] { background: #2d2d4e; border: 1px solid #3d3d6e; color: #e2e8f0; padding: 8px 14px; border-radius: 8px; font-size: 14px; width: 240px; }
         .header button { background: #6366f1; color: white; border: none; padding: 8px 18px; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: 600; }
         .header button:hover { background: #4f46e5; }
         .container { max-width: 1200px; margin: 0 auto; padding: 32px; }
@@ -264,6 +299,8 @@ DASHBOARD_HTML = """
         .btn-sm:hover { background: #4f46e5; }
         .btn-danger { background: #ef4444; }
         .btn-danger:hover { background: #dc2626; }
+        .btn-green { background: #10b981; }
+        .btn-green:hover { background: #059669; }
         .config-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; }
         .config-item { background: #0f0f1a; border: 1px solid #2d2d4e; border-radius: 8px; padding: 14px; display: flex; justify-content: space-between; align-items: center; gap: 12px; }
         .config-key { font-size: 12px; color: #94a3b8; font-family: monospace; }
@@ -275,6 +312,13 @@ DASHBOARD_HTML = """
         .loading { color: #94a3b8; text-align: center; padding: 40px; }
         .toast { position: fixed; bottom: 24px; right: 24px; background: #10b981; color: white; padding: 12px 20px; border-radius: 10px; font-size: 14px; display: none; z-index: 1000; }
         select { background: #0f0f1a; border: 1px solid #3d3d6e; color: #e2e8f0; padding: 6px; border-radius: 6px; font-size: 12px; }
+        textarea { background: #0f0f1a; border: 1px solid #3d3d6e; color: #e2e8f0; padding: 10px; border-radius: 8px; font-size: 13px; width: 100%; resize: vertical; font-family: inherit; }
+        .notif-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+        .notif-preview { background: #0f0f1a; border: 1px solid #2d2d4e; border-radius: 8px; padding: 16px; min-height: 120px; font-size: 13px; line-height: 1.6; white-space: pre-wrap; }
+        .target-badge { background: #6366f1; color: white; padding: 4px 12px; border-radius: 20px; font-size: 13px; font-weight: 600; display: inline-block; margin-left: 8px; }
+        .variables-hint { background: #1e1e38; border-radius: 6px; padding: 10px 14px; font-size: 11px; color: #94a3b8; margin-bottom: 12px; }
+        .variables-hint code { background: #2d2d4e; padding: 1px 5px; border-radius: 3px; color: #818cf8; }
+        @media (max-width: 768px) { .notif-grid { grid-template-columns: 1fr; } }
     </style>
 </head>
 <body>
@@ -339,6 +383,86 @@ async function loadDashboard() {
             </div>
 
             <div class="section">
+                <h2>📣 Notifications WhatsApp</h2>
+                <div class="variables-hint">
+                    Variables disponibles :
+                    <code>{nom}</code> <code>{streak}</code> <code>{jours_restants}</code>
+                    <code>{plan}</code> <code>{exam}</code> <code>{serie}</code> <code>{messages}</code>
+                </div>
+                <div class="notif-grid">
+                    <div>
+                        <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:12px">
+                            <div>
+                                <div style="font-size:11px;color:#94a3b8;margin-bottom:4px">Audience</div>
+                                <select id="notifFilter" onchange="updateCount()">
+                                    <option value="all">Tous les élèves</option>
+                                    <option value="inactive_24h">Inactifs 24h</option>
+                                    <option value="inactive_7d">Inactifs 7 jours</option>
+                                    <option value="before_exam_7d">Examen dans 7 jours</option>
+                                    <option value="before_exam_30d">Examen dans 30 jours</option>
+                                    <option value="free_users">Plan Gratuit</option>
+                                    <option value="pro_users">Plan Pro</option>
+                                </select>
+                            </div>
+                            <div>
+                                <div style="font-size:11px;color:#94a3b8;margin-bottom:4px">Examen</div>
+                                <select id="notifExam" onchange="updateCount()">
+                                    <option value="">Tous</option>
+                                    <option value="bac_senegal">BAC Sénégal</option>
+                                    <option value="bfem">BFEM</option>
+                                    <option value="concours">Concours</option>
+                                </select>
+                            </div>
+                            <div>
+                                <div style="font-size:11px;color:#94a3b8;margin-bottom:4px">Série</div>
+                                <select id="notifSeries" onchange="updateCount()">
+                                    <option value="">Toutes</option>
+                                    <option value="S1">S1</option>
+                                    <option value="S2">S2</option>
+                                    <option value="L1">L1</option>
+                                    <option value="L2">L2</option>
+                                </select>
+                            </div>
+                            <div style="display:flex;align-items:flex-end">
+                                <div>
+                                    <div style="font-size:11px;color:#94a3b8;margin-bottom:4px">Destinataires</div>
+                                    <div id="targetCount" class="target-badge">—</div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div style="margin-bottom:8px">
+                            <div style="font-size:11px;color:#94a3b8;margin-bottom:4px">Message <span style="color:#4b5563">(utilise les variables ci-dessus)</span></div>
+                            <textarea id="notifMessage" rows="8" placeholder="Écris ton message ici...&#10;&#10;Exemple :&#10;👋 Salut {nom} !&#10;&#10;Il te reste {jours_restants} jours avant ton examen.&#10;Révise avec moi aujourd'hui ! 📚" oninput="updatePreview()"></textarea>
+                        </div>
+
+                        <div style="display:flex;gap:8px;margin-top:12px">
+                            <button class="btn-sm" onclick="updatePreview()" style="padding:8px 14px">👁 Aperçu</button>
+                            <button class="btn-sm btn-green" onclick="sendNotification()" style="padding:8px 14px">📤 Envoyer</button>
+                        </div>
+                        <div id="notifStatus" style="margin-top:10px;font-size:12px;color:#94a3b8"></div>
+                    </div>
+
+                    <div>
+                        <div style="font-size:11px;color:#94a3b8;margin-bottom:8px">Aperçu du message</div>
+                        <div class="notif-preview" id="notifPreview">
+                            <span style="color:#4b5563">L'aperçu apparaîtra ici...</span>
+                        </div>
+                        <div style="margin-top:16px">
+                            <div style="font-size:11px;color:#94a3b8;margin-bottom:8px">Messages prédéfinis</div>
+                            <div style="display:flex;flex-direction:column;gap:6px">
+                                <button class="btn-sm" onclick="useTemplate('motivation')" style="text-align:left;padding:6px 10px">🔥 Motivation streak</button>
+                                <button class="btn-sm" onclick="useTemplate('rappel')" style="text-align:left;padding:6px 10px">📚 Rappel révision</button>
+                                <button class="btn-sm" onclick="useTemplate('urgence')" style="text-align:left;padding:6px 10px">⚠️ Urgence examen</button>
+                                <button class="btn-sm" onclick="useTemplate('upsell')" style="text-align:left;padding:6px 10px">⭐ Passage Pro</button>
+                                <button class="btn-sm" onclick="useTemplate('weekend')" style="text-align:left;padding:6px 10px">🌟 Message weekend</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="section">
                 <h2>⚙️ Configuration plateforme</h2>
                 <div class="config-grid">
                     ${configs.map(c => `
@@ -358,7 +482,7 @@ async function loadDashboard() {
 
             <div class="section">
                 <h2>📚 Documents RAG</h2>
-                <p style="font-size:11px;color:#94a3b8;margin-bottom:12px">Max 10MB par fichier. Pour les fichiers plus grands, utilise le script local : <code style="background:#0f0f1a;padding:2px 6px;border-radius:4px">python scripts/index_documents.py</code></p>
+                <p style="font-size:11px;color:#94a3b8;margin-bottom:12px">Max 10MB par fichier. Pour les fichiers plus grands : <code style="background:#0f0f1a;padding:2px 6px;border-radius:4px">python scripts/index_documents.py</code></p>
                 <div style="margin-bottom:16px;display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap">
                     <div>
                         <div style="font-size:11px;color:#94a3b8;margin-bottom:4px">Fichier (PDF/Word)</div>
@@ -366,7 +490,7 @@ async function loadDashboard() {
                     </div>
                     <div>
                         <div style="font-size:11px;color:#94a3b8;margin-bottom:4px">Titre</div>
-                        <input type="text" id="docTitle" placeholder="Titre du document" style="background:#0f0f1a;border:1px solid #3d3d6e;color:#e2e8f0;padding:6px 10px;border-radius:6px;font-size:12px;width:160px"/>
+                        <input type="text" id="docTitle" placeholder="Titre" style="background:#0f0f1a;border:1px solid #3d3d6e;color:#e2e8f0;padding:6px 10px;border-radius:6px;font-size:12px;width:140px"/>
                     </div>
                     <div>
                         <div style="font-size:11px;color:#94a3b8;margin-bottom:4px">Examen</div>
@@ -407,6 +531,9 @@ async function loadDashboard() {
                         <select id="docType">
                             <option value="cours">Cours</option>
                             <option value="annale">Annale</option>
+                            <option value="correction">Correction</option>
+                            <option value="serie">Série</option>
+                            <option value="devoir">Devoir</option>
                             <option value="fiche">Fiche</option>
                             <option value="exercice">Exercice</option>
                         </select>
@@ -433,8 +560,8 @@ async function loadDashboard() {
                             <tr>
                                 <td>${d.title}</td>
                                 <td>${d.exam_type || '—'}</td>
-                                <td>${d.series || '—'}</td>
-                                <td>${d.subject || '—'}</td>
+                                <td>${d.serie || '—'}</td>
+                                <td>${d.matiere || '—'}</td>
                                 <td>${d.doc_type || '—'}</td>
                                 <td>${d.page_count}</td>
                                 <td>${d.chunk_count}</td>
@@ -475,7 +602,7 @@ async function loadDashboard() {
                                 <td>${u.engagement_score}/100</td>
                                 <td style="display:flex;gap:6px">
                                     <button class="btn-sm" onclick="resetQuota('${u.id}')">Reset quota</button>
-                                    ${u.plan !== 'pro' ? `<button class="btn-sm" onclick="activatePro('${u.id}')">→ Pro</button>` : ''}
+                                    ${u.plan !== 'pro' ? '<button class="btn-sm" onclick="activatePro(\'' + u.id + '\')">→ Pro</button>' : ''}
                                 </td>
                             </tr>
                         `).join('')}
@@ -483,10 +610,88 @@ async function loadDashboard() {
                 </table>
             </div>
         `;
+
+        // Charge le nombre de destinataires initial
+        updateCount();
+
     } catch (e) {
         document.getElementById('content').innerHTML = '<div class="loading">Clé invalide ou erreur serveur</div>';
     }
 }
+
+// ── Notifications ──────────────────────────────────────────────────
+
+const TEMPLATES = {
+    motivation: "🔥 Salut {nom} !\\n\\nTon streak de *{streak} jours* est impressionnant !\\n\\nContinue comme ça — il te reste *{jours_restants} jours* avant ton examen.\\n\\nPose-moi une question pour continuer ta révision ! 💪",
+    rappel: "📚 Salut {nom} !\\n\\nN'oublie pas de réviser aujourd'hui.\\n\\nIl te reste *{jours_restants} jours* avant ton {exam}.\\n\\nTape */profil* pour voir ta progression 📊",
+    urgence: "⚠️ *{nom}* — Plus que *{jours_restants} jours* avant ton examen !\\n\\nC'est le moment de tout donner. Je suis là pour t'aider à réviser chaque chapitre.\\n\\nDis-moi sur quoi tu veux travailler aujourd'hui 🎯",
+    upsell: "⭐ *{nom}*, passe *Prepa Pro* et révise sans limite !\\n\\n✅ Messages illimités\\n✅ Réponses plus détaillées\\n✅ Priorité de traitement\\n\\n💰 Seulement *500 FCFA/mois*\\n\\nTape */plan* pour en savoir plus 🚀",
+    weekend: "🌟 Bon weekend *{nom}* !\\n\\nProfite du weekend pour réviser sans pression.\\n*{jours_restants} jours* avant ton examen — un peu de révision aujourd'hui fait toute la différence !\\n\\nJe suis disponible 24h/24 📚",
+};
+
+function useTemplate(type) {
+    document.getElementById('notifMessage').value = TEMPLATES[type] || '';
+    updatePreview();
+}
+
+function updatePreview() {
+    const msg = document.getElementById('notifMessage').value;
+    const preview = msg
+        .replace(/\{nom\}/g, 'Fatou')
+        .replace(/\{streak\}/g, '5')
+        .replace(/\{jours_restants\}/g, '42')
+        .replace(/\{plan\}/g, 'FREE')
+        .replace(/\{exam\}/g, 'BAC')
+        .replace(/\{serie\}/g, 'S2')
+        .replace(/\{messages\}/g, '28')
+        .replace(/\\n/g, '\\n');
+
+    document.getElementById('notifPreview').textContent = preview || 'Aperçu du message...';
+}
+
+async function updateCount() {
+    if (!API_KEY) return;
+    try {
+        const data = await api('/admin/notifications/count', 'POST', {
+            filter_type: document.getElementById('notifFilter')?.value || 'all',
+            exam_type: document.getElementById('notifExam')?.value || null,
+            series: document.getElementById('notifSeries')?.value || null,
+        });
+        const el = document.getElementById('targetCount');
+        if (el) el.textContent = data.count + ' élèves';
+    } catch(e) {
+        const el = document.getElementById('targetCount');
+        if (el) el.textContent = '—';
+    }
+}
+
+async function sendNotification() {
+    const msg = document.getElementById('notifMessage').value.trim();
+    if (!msg) { showToast('Écris un message', true); return; }
+
+    const count = document.getElementById('targetCount').textContent;
+    if (!confirm('Envoyer ce message à ' + count + ' ?')) return;
+
+    const status = document.getElementById('notifStatus');
+    status.textContent = '⏳ Envoi en cours...';
+
+    try {
+        const result = await api('/admin/notifications/send', 'POST', {
+            filter_type: document.getElementById('notifFilter').value,
+            message_type: 'custom',
+            custom_message: msg,
+            exam_type: document.getElementById('notifExam').value || null,
+            series: document.getElementById('notifSeries').value || null,
+        });
+        status.textContent = '✅ Envoyé à ' + result.sent + ' élèves' + (result.failed > 0 ? ' (' + result.failed + ' échecs)' : '');
+        showToast('Notifications envoyées : ' + result.sent);
+    } catch(e) {
+        status.textContent = '❌ Erreur envoi';
+        showToast('Erreur', true);
+    }
+}
+
+// ── Config ─────────────────────────────────────────────────────────
 
 async function saveConfig(key) {
     const safeKey = key.replace(/[^a-z0-9]/gi, '_');
@@ -522,23 +727,25 @@ async function activatePro(userId) {
     }
 }
 
+// ── Documents ──────────────────────────────────────────────────────
+
 async function uploadDocument() {
     const file = document.getElementById('docFile').files[0];
     if (!file) { showToast('Sélectionne un fichier', true); return; }
 
     if (file.size > 10 * 1024 * 1024) {
-        showToast('Fichier trop grand (max 10MB). Utilise le script local.', true);
-        document.getElementById('uploadStatus').textContent = '❌ Fichier trop grand (max 10MB). Utilise : python scripts/index_documents.py';
+        showToast('Fichier trop grand (max 10MB)', true);
+        document.getElementById('uploadStatus').textContent = '❌ Max 10MB. Utilise : python scripts/index_documents.py';
         return;
     }
 
     const status = document.getElementById('uploadStatus');
-    status.textContent = '⏳ Lecture du fichier (' + (file.size / 1024 / 1024).toFixed(1) + ' MB)...';
+    status.textContent = '⏳ Lecture (' + (file.size / 1024 / 1024).toFixed(1) + ' MB)...';
 
     const reader = new FileReader();
     reader.onload = async (e) => {
         const b64 = e.target.result.split(',')[1];
-        status.textContent = '⏳ Indexation en cours... (peut prendre 2-3 minutes)';
+        status.textContent = '⏳ Indexation en cours...';
 
         try {
             const controller = new AbortController();
@@ -546,10 +753,7 @@ async function uploadDocument() {
 
             const res = await fetch('/api/v1/admin/documents/upload', {
                 method: 'POST',
-                headers: {
-                    'X-Admin-Key': API_KEY,
-                    'Content-Type': 'application/json'
-                },
+                headers: { 'X-Admin-Key': API_KEY, 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     filename: file.name,
                     file_b64: b64,
@@ -565,28 +769,23 @@ async function uploadDocument() {
             clearTimeout(timeoutId);
 
             if (res.status === 413) {
-                status.textContent = '❌ Fichier trop grand. Utilise le script local.';
+                status.textContent = '❌ Fichier trop grand.';
                 showToast('Fichier trop grand', true);
                 return;
             }
+            if (!res.ok) throw new Error('Erreur ' + res.status);
 
-            if (!res.ok) throw new Error('Erreur serveur ' + res.status);
             const result = await res.json();
-
             if (result.success) {
-                status.textContent = '✅ Indexé: ' + result.chunks + ' chunks, ' + result.pages + ' pages';
-                showToast('Document indexé avec succès');
+                status.textContent = '✅ ' + result.chunks + ' chunks, ' + result.pages + ' pages';
+                showToast('Document indexé');
                 loadDashboard();
             } else {
-                status.textContent = '❌ Erreur: ' + result.error;
+                status.textContent = '❌ ' + result.error;
                 showToast('Erreur indexation', true);
             }
         } catch(e) {
-            if (e.name === 'AbortError') {
-                status.textContent = '❌ Timeout — fichier trop complexe, utilise le script local';
-            } else {
-                status.textContent = '❌ Erreur: ' + e.message;
-            }
+            status.textContent = e.name === 'AbortError' ? '❌ Timeout' : '❌ ' + e.message;
             showToast('Erreur', true);
         }
     };

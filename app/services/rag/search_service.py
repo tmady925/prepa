@@ -1,8 +1,8 @@
 """
-Service de recherche sémantique dans la base vectorielle.
-Supporte filtres granulaires : exam_type, series, matiere, chapitre.
-Stratégie : recherche stricte d'abord, fallback élargi si pas de résultats.
+Service de recherche hybride — sémantique + BM25.
+Cascade de fallback si pas assez de résultats.
 """
+import re
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_, or_
 from app.models.document import DocumentChunk
@@ -23,11 +23,8 @@ class SearchService:
         min_similarity: float = 0.4,
     ) -> list[dict]:
         """
-        Recherche les chunks les plus pertinents.
-        Stratégie en cascade :
-        1. Recherche stricte (tous les filtres)
-        2. Si < 3 résultats → élargit sans chapitre
-        3. Si encore < 3 → élargit sans matière
+        Recherche hybride : sémantique + BM25.
+        Cascade : strict → sans chapitre → sans matière.
         """
         query_embedding = await embedding_service.embed_text(query)
         if not query_embedding:
@@ -35,15 +32,11 @@ class SearchService:
 
         # Tentative 1 — filtres complets
         results = await self._search_with_filters(
-            db, query_embedding,
-            exam_type=exam_type,
-            series=series,
-            subject=subject,
-            chapitre=chapitre,
-            top_k=top_k,
-            min_similarity=min_similarity,
+            db, query_embedding, query,
+            exam_type=exam_type, series=series,
+            subject=subject, chapitre=chapitre,
+            top_k=top_k, min_similarity=min_similarity,
         )
-
         if len(results) >= 3:
             return results
 
@@ -51,13 +44,10 @@ class SearchService:
         if chapitre:
             print(f"RAG: fallback sans chapitre (trouvé {len(results)})")
             results2 = await self._search_with_filters(
-                db, query_embedding,
-                exam_type=exam_type,
-                series=series,
-                subject=subject,
-                chapitre=None,
-                top_k=top_k,
-                min_similarity=min_similarity,
+                db, query_embedding, query,
+                exam_type=exam_type, series=series,
+                subject=subject, chapitre=None,
+                top_k=top_k, min_similarity=min_similarity,
             )
             if len(results2) > len(results):
                 results = results2
@@ -69,13 +59,10 @@ class SearchService:
         if subject:
             print(f"RAG: fallback sans matiere (trouvé {len(results)})")
             results3 = await self._search_with_filters(
-                db, query_embedding,
-                exam_type=exam_type,
-                series=series,
-                subject=None,
-                chapitre=None,
-                top_k=top_k,
-                min_similarity=min_similarity,
+                db, query_embedding, query,
+                exam_type=exam_type, series=series,
+                subject=None, chapitre=None,
+                top_k=top_k, min_similarity=min_similarity,
             )
             if len(results3) > len(results):
                 results = results3
@@ -86,6 +73,7 @@ class SearchService:
         self,
         db: AsyncSession,
         query_embedding: list[float],
+        query_text: str,
         exam_type: str = None,
         series: str = None,
         subject: str = None,
@@ -93,13 +81,12 @@ class SearchService:
         top_k: int = 5,
         min_similarity: float = 0.4,
     ) -> list[dict]:
-        """Recherche avec filtres spécifiques."""
+        """Recherche hybride sémantique + BM25 avec filtres."""
         filters = [DocumentChunk.embedding.isnot(None)]
 
         if exam_type:
             filters.append(DocumentChunk.exam_type == exam_type)
         if series:
-            # Cherche la série exacte OU null (documents transversaux)
             filters.append(
                 or_(DocumentChunk.serie == series, DocumentChunk.serie.is_(None))
             )
@@ -115,17 +102,32 @@ class SearchService:
         if not chunks:
             return []
 
-        scored = []
+        # Score sémantique
+        semantic_scores = {}
         for chunk in chunks:
             if not chunk.embedding:
                 continue
-            similarity = embedding_service.cosine_similarity(
-                query_embedding, chunk.embedding
-            )
-            if similarity >= min_similarity:
+            sim = embedding_service.cosine_similarity(query_embedding, chunk.embedding)
+            semantic_scores[chunk.id] = sim
+
+        # Score BM25
+        bm25_scores = self._bm25_score(query_text, chunks)
+
+        # Score hybride combiné
+        scored = []
+        for chunk in chunks:
+            sem = semantic_scores.get(chunk.id, 0)
+            bm25 = bm25_scores.get(chunk.id, 0)
+
+            # Pondération : 70% sémantique + 30% BM25
+            hybrid_score = 0.7 * sem + 0.3 * bm25
+
+            if sem >= min_similarity or (bm25 > 0.5 and sem >= 0.3):
                 scored.append({
                     "content": chunk.content,
-                    "similarity": similarity,
+                    "similarity": hybrid_score,
+                    "semantic_score": sem,
+                    "bm25_score": bm25,
                     "exam_type": chunk.exam_type,
                     "serie": chunk.serie,
                     "matiere": chunk.matiere,
@@ -138,6 +140,38 @@ class SearchService:
 
         scored.sort(key=lambda x: x["similarity"], reverse=True)
         return scored[:top_k]
+
+    def _bm25_score(self, query: str, chunks: list) -> dict:
+        """Calcule les scores BM25 pour chaque chunk."""
+        try:
+            from rank_bm25 import BM25Okapi
+
+            # Tokenise
+            def tokenize(text: str) -> list[str]:
+                text = text.lower()
+                text = re.sub(r'[^\w\s]', ' ', text)
+                return [t for t in text.split() if len(t) > 2]
+
+            corpus = [tokenize(c.content) for c in chunks]
+            query_tokens = tokenize(query)
+
+            if not query_tokens or not any(corpus):
+                return {}
+
+            bm25 = BM25Okapi(corpus)
+            scores = bm25.get_scores(query_tokens)
+
+            # Normalise entre 0 et 1
+            max_score = max(scores) if max(scores) > 0 else 1
+            normalized = scores / max_score
+
+            return {
+                chunk.id: float(normalized[i])
+                for i, chunk in enumerate(chunks)
+            }
+        except Exception as e:
+            print(f"BM25 error: {e}")
+            return {}
 
     async def build_context(
         self,
@@ -165,7 +199,6 @@ class SearchService:
 
         context_parts = []
         for i, r in enumerate(results, 1):
-            # Métadonnées du chunk
             meta = []
             if r.get("matiere"):
                 meta.append(r["matiere"])
@@ -178,7 +211,7 @@ class SearchService:
 
             meta_str = " · ".join(meta) if meta else "Programme officiel"
             context_parts.append(
-                f"[Source {i} — {meta_str} — similarité {r['similarity']:.2f}]\n{r['content']}"
+                f"[Source {i} — {meta_str} — score {r['similarity']:.2f}]\n{r['content']}"
             )
 
         return "\n\n---\n\n".join(context_parts)

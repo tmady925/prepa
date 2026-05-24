@@ -46,6 +46,7 @@ def build_messages(
     chapitre: str = "",
     detection: dict = None,
     mastery_context: str = "",
+    exercise_context: str = "",
 ) -> list:
     """Construit la liste de messages pour le LLM."""
 
@@ -86,6 +87,8 @@ def build_messages(
         system += f"\n\nContexte élève : {context}"
     if mastery_context:
         system += f"\n\nProfil cognitif élève : {mastery_context}"
+    if exercise_context:
+        system += f"\n\nTypes d'exercices connus sur ce chapitre :\n{exercise_context}"
     if detection_context:
         system += f"\n\nAnalyse de la demande :{detection_context}"
     if rag_context:
@@ -112,7 +115,7 @@ async def call_llm(
     chapitre: str = "",
     detection: dict = None,
 ) -> LLMResponse:
-    """Point d'entrée principal pour appeler l'IA avec RAG granulaire + profil cognitif."""
+    """Point d'entrée principal pour appeler l'IA avec RAG granulaire + profil cognitif + cerveau."""
 
     # 1. Choisit le provider
     request = LLMRequest(
@@ -168,13 +171,30 @@ async def call_llm(
         except Exception as e:
             print(f"Mastery context error: {e}")
 
-    # 5. Construit les messages avec contexte complet
+    # 5. Récupère le contexte des types d'exercices depuis le cerveau
+    exercise_context = ""
+    if db and subject and chapitre:
+        try:
+            from app.services.rag.brain_service import brain_service
+            exercise_context = await brain_service.get_exercise_context(
+                db=db,
+                matiere=subject,
+                chapitre=chapitre,
+                query=user_message,
+            )
+            if exercise_context:
+                print(f"Exercise context: {len(exercise_context)} chars")
+        except Exception as e:
+            print(f"Exercise context error: {e}")
+
+    # 6. Construit les messages avec contexte complet
     msgs = build_messages(
         user_message, exam_type, subject, series,
-        history, rag_context, chapitre, detection, mastery_context
+        history, rag_context, chapitre, detection,
+        mastery_context, exercise_context,
     )
 
-    # 6. Appelle le provider avec fallback
+    # 7. Appelle le provider avec fallback
     providers_to_try = _get_fallback_chain(provider_name)
 
     for pname in providers_to_try:

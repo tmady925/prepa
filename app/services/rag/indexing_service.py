@@ -22,6 +22,11 @@ class IndexingService:
         subject: str = None,
         doc_type: str = "cours",
         uploaded_by: str = "admin",
+        chapitre: str = None,
+        pays: str = "senegal",
+        annee: int = None,
+        niveau: int = 2,
+        source: str = None,
     ) -> dict:
         """
         Indexe un document complet.
@@ -29,6 +34,7 @@ class IndexingService:
         2. Découpe en chunks
         3. Génère les embeddings
         4. Sauvegarde en base
+        5. Lance l'analyse cerveau automatiquement
         """
         ext = filename.lower().split(".")[-1]
 
@@ -37,10 +43,15 @@ class IndexingService:
             title=title,
             filename=filename,
             file_type=ext,
+            pays=pays,
             exam_type=exam_type,
             serie=series,
             matiere=subject,
+            chapitre=chapitre,
             doc_type=doc_type,
+            annee=annee,
+            niveau=niveau,
+            source=source,
             status="processing",
             uploaded_by=uploaded_by,
         )
@@ -72,7 +83,7 @@ class IndexingService:
             embeddings = await embedding_service.embed_batch(chunks)
             print(f"  → {len(embeddings)} embeddings générés")
 
-            # Sauvegarde les chunks
+            # Sauvegarde les chunks avec métadonnées granulaires
             for i, (chunk, embedding) in enumerate(zip(chunks, embeddings)):
                 if not embedding:
                     continue
@@ -80,9 +91,14 @@ class IndexingService:
                     document_id=doc.id,
                     content=chunk,
                     chunk_index=i,
+                    pays=pays,
                     exam_type=exam_type,
                     serie=series,
                     matiere=subject,
+                    chapitre=chapitre,
+                    doc_type=doc_type,
+                    annee=annee,
+                    niveau=niveau,
                     embedding=embedding,
                 )
                 db.add(doc_chunk)
@@ -95,6 +111,18 @@ class IndexingService:
 
             await db.commit()
             print(f"  ✅ Document indexé : {len(chunks)} chunks")
+
+            # Analyse automatique par le cerveau
+            if subject and exam_type:
+                try:
+                    from app.services.rag.brain_service import brain_service
+                    await brain_service.analyze_document(
+                        db=db,
+                        document_id=str(doc.id),
+                    )
+                    print(f"  🧠 Analyse cerveau terminée")
+                except Exception as e:
+                    print(f"  Brain analysis error: {e}")
 
             return {
                 "success": True,
@@ -135,9 +163,12 @@ class IndexingService:
                 "title": d.title,
                 "filename": d.filename,
                 "exam_type": d.exam_type,
-                "series": d.series,
-                "subject": d.subject,
+                "serie": d.serie,
+                "matiere": d.matiere,
+                "chapitre": d.chapitre,
                 "doc_type": d.doc_type,
+                "annee": d.annee,
+                "niveau": d.niveau,
                 "status": d.status,
                 "page_count": d.page_count,
                 "chunk_count": d.chunk_count,

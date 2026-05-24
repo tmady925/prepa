@@ -38,8 +38,8 @@ class IndexingService:
             filename=filename,
             file_type=ext,
             exam_type=exam_type,
-            series=series,
-            subject=subject,
+            serie=series,
+            matiere=subject,
             doc_type=doc_type,
             status="processing",
             uploaded_by=uploaded_by,
@@ -81,8 +81,8 @@ class IndexingService:
                     content=chunk,
                     chunk_index=i,
                     exam_type=exam_type,
-                    series=series,
-                    subject=subject,
+                    serie=series,
+                    matiere=subject,
                     embedding=embedding,
                 )
                 db.add(doc_chunk)

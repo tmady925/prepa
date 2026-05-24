@@ -87,12 +87,16 @@ class SubjectDetector:
 
         # Essaie le LLM en premier
         result = await self._detect_with_llm(text, user_context)
-        if result and result.get("confiance", 0) >= 0.5:
+        # N'accepter le résultat LLM que s'il a une matière ET confiance suffisante
+        if result and result.get("confiance", 0) >= 0.5 and result.get("matiere"):
             print(f"Détection LLM: {result['matiere']}/{result['chapitre']} ({result['confiance']})")
             return result
 
-        # Fallback keywords
-        print("Fallback détection keywords")
+        # Fallback keywords (si LLM échoue ou retourne matiere=None)
+        if result and result.get("matiere") is None:
+            print(f"Fallback keywords (LLM retourna matiere=None avec confiance {result.get('confiance')})")
+        else:
+            print("Fallback détection keywords")
         return self._detect_with_keywords(text, user_context)
 
     async def _detect_with_llm(self, text: str, user_context: dict) -> dict | None:

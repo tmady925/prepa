@@ -353,6 +353,12 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession):
         )
         detected_matiere = detection.get("matiere") or ""
         detected_chapitre = detection.get("chapitre") or ""
+
+        # Fallback matière — utilise la première matière de l'élève
+        if not detected_matiere and user.subjects:
+            detected_matiere = user.subjects[0]
+            print(f"Fallback matière: {detected_matiere}")
+
         detection["user_id"] = str(user.id)
 
         print(f"Détection: {detected_matiere}/{detected_chapitre} ({detection.get('confiance')})")

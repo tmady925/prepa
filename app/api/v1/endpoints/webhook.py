@@ -1,5 +1,3 @@
-import hashlib
-import hmac
 import json
 from datetime import datetime
 from fastapi import APIRouter, Request, Depends
@@ -35,16 +33,11 @@ async def webhook_receive(
 ):
     body = await request.body()
 
-    # Vérification signature HMAC 360dialog (si secret configuré)
+    # ── Vérification signature Wasender ───────────────────────────────
     if settings.whatsapp_webhook_secret:
-        signature = request.headers.get("X-Hub-Signature-256", "")
-        expected = "sha256=" + hmac.new(
-            settings.whatsapp_webhook_secret.encode(),
-            body,
-            hashlib.sha256,
-        ).hexdigest()
-        if not hmac.compare_digest(signature, expected):
-            print(f"Webhook: signature invalide — {signature[:20]}...")
+        signature = request.headers.get("X-Webhook-Signature", "")
+        if signature != settings.whatsapp_webhook_secret:
+            print(f"Webhook: signature invalide")
             return {"status": "invalid_signature"}
 
     data = json.loads(body)

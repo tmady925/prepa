@@ -1,5 +1,6 @@
 """
 Service d'indexation des documents dans la base vectorielle.
+Supporte pgvector natif + fallback JSONB.
 """
 import uuid
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -33,10 +34,17 @@ class IndexingService:
         1. Extrait le texte
         2. Découpe en chunks
         3. Génère les embeddings
-        4. Sauvegarde en base
+        4. Sauvegarde en base (pgvector + JSONB)
         5. Lance l'analyse cerveau automatiquement
         """
         ext = filename.lower().split(".")[-1]
+
+        # Détecte pgvector avant indexation
+        use_pgvector = await embedding_service.check_pgvector(db)
+        if use_pgvector:
+            print("  → Mode pgvector activé ✅")
+        else:
+            print("  → Mode JSONB (fallback)")
 
         # Crée l'entrée document
         doc = Document(
@@ -83,10 +91,12 @@ class IndexingService:
             embeddings = await embedding_service.embed_batch(chunks)
             print(f"  → {len(embeddings)} embeddings générés")
 
-            # Sauvegarde les chunks avec métadonnées granulaires
+            # Sauvegarde les chunks
+            saved = 0
             for i, (chunk, embedding) in enumerate(zip(chunks, embeddings)):
                 if not embedding:
                     continue
+
                 doc_chunk = DocumentChunk(
                     document_id=doc.id,
                     content=chunk,
@@ -99,18 +109,27 @@ class IndexingService:
                     doc_type=doc_type,
                     annee=annee,
                     niveau=niveau,
-                    embedding=embedding,
+                    embedding=embedding,  # JSONB — toujours sauvegardé
                 )
+
+                # pgvector — sauvegarde en parallèle si disponible
+                if use_pgvector:
+                    try:
+                        doc_chunk.embedding_vector = embedding
+                    except Exception as e:
+                        print(f"  pgvector set error: {e}")
+
                 db.add(doc_chunk)
+                saved += 1
 
             # Met à jour le document
             doc.status = "indexed"
             doc.page_count = result["page_count"]
-            doc.chunk_count = len(chunks)
+            doc.chunk_count = saved
             doc.has_ocr = result["has_ocr"]
 
             await db.commit()
-            print(f"  ✅ Document indexé : {len(chunks)} chunks")
+            print(f"  ✅ Document indexé : {saved} chunks {'(pgvector)' if use_pgvector else '(JSONB)'}")
 
             # Analyse automatique par le cerveau
             if subject and exam_type:
@@ -127,9 +146,10 @@ class IndexingService:
             return {
                 "success": True,
                 "document_id": str(doc.id),
-                "chunks": len(chunks),
+                "chunks": saved,
                 "pages": result["page_count"],
                 "has_ocr": result["has_ocr"],
+                "pgvector": use_pgvector,
             }
 
         except Exception as e:

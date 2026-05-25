@@ -1,15 +1,29 @@
 """
 Service de recherche hybride — sémantique + BM25.
+Mode pgvector : requête SQL native avec index HNSW (ultra-rapide)
+Mode JSONB : calcul cosinus Python (fallback)
 Cascade de fallback si pas assez de résultats.
 """
 import re
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, and_, or_
+from sqlalchemy import select, and_, or_, text
 from app.models.document import DocumentChunk
 from app.services.rag.embedding_service import embedding_service
 
 
 class SearchService:
+
+    def __init__(self):
+        self._pgvector_available = None
+
+    async def _check_pgvector(self, db: AsyncSession) -> bool:
+        """Vérifie pgvector une seule fois puis cache le résultat."""
+        if self._pgvector_available is not None:
+            return self._pgvector_available
+        self._pgvector_available = await embedding_service.check_pgvector(db)
+        return self._pgvector_available
+
+    # ── Entrée principale ─────────────────────────────────────────────
 
     async def search(
         self,
@@ -30,12 +44,15 @@ class SearchService:
         if not query_embedding:
             return []
 
+        use_pgvector = await self._check_pgvector(db)
+
         # Tentative 1 — filtres complets
         results = await self._search_with_filters(
             db, query_embedding, query,
             exam_type=exam_type, series=series,
             subject=subject, chapitre=chapitre,
             top_k=top_k, min_similarity=min_similarity,
+            use_pgvector=use_pgvector,
         )
         if len(results) >= 3:
             return results
@@ -48,6 +65,7 @@ class SearchService:
                 exam_type=exam_type, series=series,
                 subject=subject, chapitre=None,
                 top_k=top_k, min_similarity=min_similarity,
+                use_pgvector=use_pgvector,
             )
             if len(results2) > len(results):
                 results = results2
@@ -63,11 +81,14 @@ class SearchService:
                 exam_type=exam_type, series=series,
                 subject=None, chapitre=None,
                 top_k=top_k, min_similarity=min_similarity,
+                use_pgvector=use_pgvector,
             )
             if len(results3) > len(results):
                 results = results3
 
         return results
+
+    # ── Dispatch pgvector / JSONB ─────────────────────────────────────
 
     async def _search_with_filters(
         self,
@@ -80,8 +101,139 @@ class SearchService:
         chapitre: str = None,
         top_k: int = 5,
         min_similarity: float = 0.4,
+        use_pgvector: bool = False,
     ) -> list[dict]:
-        """Recherche hybride sémantique + BM25 avec filtres."""
+        if use_pgvector:
+            return await self._search_pgvector(
+                db, query_embedding, query_text,
+                exam_type, series, subject, chapitre,
+                top_k, min_similarity,
+            )
+        return await self._search_jsonb(
+            db, query_embedding, query_text,
+            exam_type, series, subject, chapitre,
+            top_k, min_similarity,
+        )
+
+    # ── Mode pgvector — SQL natif ─────────────────────────────────────
+
+    async def _search_pgvector(
+        self,
+        db: AsyncSession,
+        query_embedding: list[float],
+        query_text: str,
+        exam_type: str = None,
+        series: str = None,
+        subject: str = None,
+        chapitre: str = None,
+        top_k: int = 5,
+        min_similarity: float = 0.4,
+    ) -> list[dict]:
+        """Recherche vectorielle native pgvector avec index HNSW."""
+
+        # Construit les conditions WHERE
+        conditions = ["embedding_vector IS NOT NULL"]
+        params = {"query_vec": str(query_embedding), "limit": top_k * 3}
+
+        if exam_type:
+            conditions.append("exam_type = :exam_type")
+            params["exam_type"] = exam_type
+        if series:
+            conditions.append("(serie = :series OR serie IS NULL)")
+            params["series"] = series
+        if subject:
+            conditions.append("matiere = :subject")
+            params["subject"] = subject
+        if chapitre:
+            conditions.append("chapitre = :chapitre")
+            params["chapitre"] = chapitre
+
+        where_clause = " AND ".join(conditions)
+
+        # Requête pgvector — distance cosine
+        sql = text(f"""
+            SELECT
+                id, content, chunk_index, exam_type, serie,
+                matiere, chapitre, doc_type, annee, document_id,
+                1 - (embedding_vector <=> :query_vec::vector) AS semantic_score
+            FROM document_chunks
+            WHERE {where_clause}
+              AND 1 - (embedding_vector <=> :query_vec::vector) >= :min_sim
+            ORDER BY embedding_vector <=> :query_vec::vector
+            LIMIT :limit
+        """)
+        params["min_sim"] = min_similarity
+
+        try:
+            result = await db.execute(sql, params)
+            rows = result.fetchall()
+        except Exception as e:
+            print(f"pgvector search error: {e} — fallback JSONB")
+            self._pgvector_available = False
+            return await self._search_jsonb(
+                db, query_embedding, query_text,
+                exam_type, series, subject, chapitre,
+                top_k, min_similarity,
+            )
+
+        if not rows:
+            return []
+
+        # Récupère les chunks complets pour BM25
+        chunk_ids = [str(r.id) for r in rows]
+        chunks_result = await db.execute(
+            select(DocumentChunk).where(
+                DocumentChunk.id.in_([r.id for r in rows])
+            )
+        )
+        chunks_by_id = {c.id: c for c in chunks_result.scalars().all()}
+
+        # Score BM25
+        chunks_list = [chunks_by_id[r.id] for r in rows if r.id in chunks_by_id]
+        bm25_scores = self._bm25_score(query_text, chunks_list)
+
+        # Score hybride
+        scored = []
+        for row in rows:
+            sem = float(row.semantic_score)
+            bm25 = bm25_scores.get(row.id, 0)
+            hybrid = 0.8 * sem + 0.2 * bm25
+
+            chunk = chunks_by_id.get(row.id)
+            scored.append({
+                "content": row.content,
+                "similarity": hybrid,
+                "semantic_score": sem,
+                "bm25_score": bm25,
+                "exam_type": row.exam_type,
+                "serie": row.serie,
+                "matiere": row.matiere,
+                "chapitre": row.chapitre,
+                "doc_type": row.doc_type,
+                "annee": row.annee,
+                "document_id": str(row.document_id),
+                "chunk_index": row.chunk_index,
+            })
+
+        scored.sort(key=lambda x: x["similarity"], reverse=True)
+        print(f"pgvector: {len(scored)} résultats")
+        return scored[:top_k]
+
+    # ── Mode JSONB — fallback Python ──────────────────────────────────
+
+    async def _search_jsonb(
+        self,
+        db: AsyncSession,
+        query_embedding: list[float],
+        query_text: str,
+        exam_type: str = None,
+        series: str = None,
+        subject: str = None,
+        chapitre: str = None,
+        top_k: int = 5,
+        min_similarity: float = 0.4,
+    ) -> list[dict]:
+        """Recherche JSONB avec cosinus Python — fallback."""
         filters = [DocumentChunk.embedding.isnot(None)]
 
         if exam_type:
@@ -102,7 +254,7 @@ class SearchService:
         if not chunks:
             return []
 
-        # Score sémantique
+        # Score sémantique Python
         semantic_scores = {}
         for chunk in chunks:
             if not chunk.embedding:
@@ -113,13 +265,11 @@ class SearchService:
         # Score BM25
         bm25_scores = self._bm25_score(query_text, chunks)
 
-        # Score hybride combiné
+        # Score hybride
         scored = []
         for chunk in chunks:
             sem = semantic_scores.get(chunk.id, 0)
             bm25 = bm25_scores.get(chunk.id, 0)
-
-            # Pondération : 70% sémantique + 30% BM25
             hybrid_score = 0.8 * sem + 0.2 * bm25
 
             if sem >= min_similarity or (bm25 > 0.5 and sem >= 0.3):
@@ -141,12 +291,13 @@ class SearchService:
         scored.sort(key=lambda x: x["similarity"], reverse=True)
         return scored[:top_k]
 
+    # ── BM25 ──────────────────────────────────────────────────────────
+
     def _bm25_score(self, query: str, chunks: list) -> dict:
         """Calcule les scores BM25 pour chaque chunk."""
         try:
             from rank_bm25 import BM25Okapi
 
-            # Tokenise
             def tokenize(text: str) -> list[str]:
                 text = text.lower()
                 text = re.sub(r'[^\w\s]', ' ', text)
@@ -161,7 +312,6 @@ class SearchService:
             bm25 = BM25Okapi(corpus)
             scores = bm25.get_scores(query_tokens)
 
-            # Normalise entre 0 et 1
             max_score = max(scores) if max(scores) > 0 else 1
             normalized = scores / max_score
 
@@ -172,6 +322,8 @@ class SearchService:
         except Exception as e:
             print(f"BM25 error: {e}")
             return {}
+
+    # ── Build context ─────────────────────────────────────────────────
 
     async def build_context(
         self,

@@ -45,10 +45,10 @@ def build_messages(
     rag_context: str = "",
     chapitre: str = "",
     detection: dict = None,
-    mastery_context: str = "",
+    memory_context: str = "",
     exercise_context: str = "",
 ) -> list:
-    """Construit la liste de messages pour le LLM."""
+    """Construit la liste de messages pour le LLM avec mémoire structurée."""
 
     context = ""
     if exam_type:
@@ -85,8 +85,8 @@ def build_messages(
     system = SYSTEM_PROMPT
     if context:
         system += f"\n\nContexte élève : {context}"
-    if mastery_context:
-        system += f"\n\nProfil cognitif élève : {mastery_context}"
+    if memory_context:
+        system += f"\n\nMémoire session :\n{memory_context}"
     if exercise_context:
         system += f"\n\nTypes d'exercices connus sur ce chapitre :\n{exercise_context}"
     if detection_context:
@@ -96,8 +96,9 @@ def build_messages(
 
     msgs = [{"role": "system", "content": system}]
 
+    # Historique court — max 4 échanges
     if history:
-        msgs.extend(history[-10:])
+        msgs.extend(history[-4:])
 
     msgs.append({"role": "user", "content": user_message})
     return msgs
@@ -114,8 +115,9 @@ async def call_llm(
     db=None,
     chapitre: str = "",
     detection: dict = None,
+    user=None,
 ) -> LLMResponse:
-    """Point d'entrée principal pour appeler l'IA avec RAG granulaire + profil cognitif + cerveau."""
+    """Point d'entrée principal — RAG + profil cognitif + mémoire structurée."""
 
     # 1. Choisit le provider
     request = LLMRequest(
@@ -153,25 +155,45 @@ async def call_llm(
         except Exception as e:
             print(f"RAG error: {e}")
 
-    # 4. Récupère le profil cognitif de l'élève
-    mastery_context = ""
-    if db and subject and chapitre and detection:
+    # 4. Mémoire structurée — résumé session + profil cognitif
+    memory_context = ""
+    structured_history = history or []
+
+    if db and detection:
         try:
             user_id_str = detection.get("user_id")
             if user_id_str:
+                from app.repositories.message_repository import message_repo
                 from app.services.rag.mastery_service import mastery_service
-                mastery_context = await mastery_service.get_chapter_context(
-                    db=db,
-                    user_id=uuid.UUID(user_id_str),
-                    matiere=subject,
-                    chapitre=chapitre,
-                )
-                if mastery_context:
-                    print(f"Mastery: {mastery_context}")
-        except Exception as e:
-            print(f"Mastery context error: {e}")
 
-    # 5. Récupère le contexte des types d'exercices depuis le cerveau
+                # Profil cognitif
+                mastery_str = ""
+                if subject and chapitre:
+                    mastery_str = await mastery_service.get_chapter_context(
+                        db=db,
+                        user_id=uuid.UUID(user_id_str),
+                        matiere=subject,
+                        chapitre=chapitre,
+                    )
+                    if mastery_str:
+                        print(f"Mastery: {mastery_str}")
+
+                # Historique court + résumé session
+                if user:
+                    structured_history, memory_context = await message_repo.get_structured_context(
+                        db=db,
+                        user_id=uuid.UUID(user_id_str),
+                        user=user,
+                        mastery_context=mastery_str,
+                    )
+                elif mastery_str:
+                    memory_context = f"Profil élève : {mastery_str}"
+
+        except Exception as e:
+            print(f"Memory context error: {e}")
+            structured_history = history or []
+
+    # 5. Contexte types d'exercices depuis le cerveau
     exercise_context = ""
     if db and subject and chapitre:
         try:
@@ -187,11 +209,11 @@ async def call_llm(
         except Exception as e:
             print(f"Exercise context error: {e}")
 
-    # 6. Construit les messages avec contexte complet
+    # 6. Construit les messages avec mémoire structurée
     msgs = build_messages(
         user_message, exam_type, subject, series,
-        history, rag_context, chapitre, detection,
-        mastery_context, exercise_context,
+        structured_history, rag_context, chapitre,
+        detection, memory_context, exercise_context,
     )
 
     # 7. Appelle le provider avec fallback

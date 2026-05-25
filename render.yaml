@@ -3,7 +3,7 @@ services:
     name: prepa
     runtime: python
     buildCommand: pip install -r requirements.txt && alembic upgrade head
-    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    startCommand: uvicorn main:app --host 0.0.0.0 --port 10000
     envVars:
       - key: APP_ENV
         value: production
@@ -13,14 +13,14 @@ services:
         sync: false
       - key: REDIS_URL
         sync: false
-      - key: WHATSAPP_API_KEY
+      - key: WASENDER_API_KEY
         sync: false
       - key: WHATSAPP_NUMBER
         sync: false
       - key: WHATSAPP_WEBHOOK_SECRET
         sync: false
-      - key: WHATSAPP_BASE_URL
-        value: https://waba-sandbox.360dialog.io/v1
+      - key: WASENDER_BASE_URL
+        value: https://api.wasender.com/api
       - key: MISTRAL_API_KEY
         sync: false
       - key: PAYDUNYA_MASTER_KEY

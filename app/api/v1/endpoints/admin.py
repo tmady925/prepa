@@ -1,13 +1,22 @@
+from datetime import date, datetime, timezone
 from fastapi import APIRouter, Request, Depends, HTTPException, Header
 from fastapi.responses import HTMLResponse
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
+from sqlalchemy import select, func, cast, Date
 from app.db.database import get_db
 from app.core.settings import get_settings
 from app.models.user import User
 from app.models.subscription import Subscription
 from app.models.message import Message
 from app.services.config_service import config_service, DEFAULTS
+
+# Coût estimé par 1 000 tokens (USD)
+PROVIDER_COST_PER_1K = {
+    "openai":    0.00015,   # gpt-4o-mini
+    "anthropic": 0.00025,   # claude-haiku
+    "mistral":   0.00020,   # mistral-small
+    "groq":      0.00000,   # gratuit
+}
 
 settings = get_settings()
 router = APIRouter()
@@ -32,6 +41,49 @@ async def get_stats(
     total_messages = await db.scalar(select(func.sum(User.total_messages)))
     total_revenue = await db.scalar(select(func.sum(Subscription.amount_fcfa)).where(Subscription.status == "active"))
 
+    today = date.today()
+
+    # Tokens aujourd'hui (messages sortants avec LLM)
+    tokens_today = await db.scalar(
+        select(func.sum(Message.tokens_used)).where(
+            Message.direction == "outbound",
+            cast(Message.created_at, Date) == today,
+        )
+    ) or 0
+
+    # Tokens total (toutes périodes)
+    tokens_total = await db.scalar(
+        select(func.sum(Message.tokens_used)).where(Message.direction == "outbound")
+    ) or 0
+
+    # Dépenses par provider aujourd'hui
+    provider_rows = await db.execute(
+        select(Message.llm_provider, func.sum(Message.tokens_used)).where(
+            Message.direction == "outbound",
+            cast(Message.created_at, Date) == today,
+            Message.llm_provider.isnot(None),
+        ).group_by(Message.llm_provider)
+    )
+    cost_today_usd = 0.0
+    provider_breakdown = {}
+    for provider, tokens in provider_rows:
+        rate = PROVIDER_COST_PER_1K.get(provider, 0.0)
+        cost = round((tokens or 0) / 1000 * rate, 6)
+        cost_today_usd += cost
+        provider_breakdown[provider] = {"tokens": tokens or 0, "cost_usd": cost}
+
+    # Dépenses totales par provider (toutes périodes)
+    provider_rows_total = await db.execute(
+        select(Message.llm_provider, func.sum(Message.tokens_used)).where(
+            Message.direction == "outbound",
+            Message.llm_provider.isnot(None),
+        ).group_by(Message.llm_provider)
+    )
+    cost_total_usd = 0.0
+    for provider, tokens in provider_rows_total:
+        rate = PROVIDER_COST_PER_1K.get(provider, 0.0)
+        cost_total_usd += round((tokens or 0) / 1000 * rate, 6)
+
     return {
         "total_users": total_users or 0,
         "active_users": active_users or 0,
@@ -40,6 +92,11 @@ async def get_stats(
         "total_messages": total_messages or 0,
         "total_revenue_fcfa": total_revenue or 0,
         "conversion_rate": round((pro_users or 0) / max(active_users or 1, 1) * 100, 1),
+        "tokens_today": tokens_today,
+        "tokens_total": tokens_total,
+        "cost_today_usd": round(cost_today_usd, 4),
+        "cost_total_usd": round(cost_total_usd, 4),
+        "provider_breakdown": provider_breakdown,
     }
 
 
@@ -380,6 +437,29 @@ async function loadDashboard() {
                 <div class="stat-card"><div class="value">${stats.conversion_rate}%</div><div class="label">Conversion</div></div>
                 <div class="stat-card"><div class="value">${stats.total_messages.toLocaleString()}</div><div class="label">Messages</div></div>
                 <div class="stat-card"><div class="value">${(stats.total_revenue_fcfa || 0).toLocaleString()} F</div><div class="label">Revenus</div></div>
+            </div>
+
+            <div class="section">
+                <h2>💸 Consommation API LLM</h2>
+                <div class="stats-grid" style="margin-bottom:20px">
+                    <div class="stat-card"><div class="value">${(stats.tokens_today || 0).toLocaleString()}</div><div class="label">Tokens aujourd'hui</div></div>
+                    <div class="stat-card"><div class="value">$${stats.cost_today_usd || '0.0000'}</div><div class="label">Coût aujourd'hui (USD)</div></div>
+                    <div class="stat-card"><div class="value">${(stats.tokens_total || 0).toLocaleString()}</div><div class="label">Tokens total</div></div>
+                    <div class="stat-card"><div class="value">$${stats.cost_total_usd || '0.0000'}</div><div class="label">Coût total (USD)</div></div>
+                </div>
+                ${Object.keys(stats.provider_breakdown || {}).length > 0 ? `
+                <table>
+                    <thead><tr><th>Provider</th><th>Tokens aujourd'hui</th><th>Coût estimé</th></tr></thead>
+                    <tbody>
+                        ${Object.entries(stats.provider_breakdown).map(([p, d]) => `
+                            <tr>
+                                <td><span class="badge" style="background:#e0e7ff;color:#3730a3">${p}</span></td>
+                                <td>${(d.tokens || 0).toLocaleString()}</td>
+                                <td>$${d.cost_usd}</td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>` : '<p style="color:#4b5563;font-size:13px">Aucun appel LLM aujourd\'hui.</p>'}
             </div>
 
             <div class="section">

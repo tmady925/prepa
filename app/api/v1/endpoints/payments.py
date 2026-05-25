@@ -16,21 +16,28 @@ async def paydunya_webhook(
     db: AsyncSession = Depends(get_db),
 ):
     """Reçoit la notification de PayDunya après paiement."""
-    data = await request.json()
-    print(f"PayDunya webhook: {data}")
+    try:
+        data = await request.json()
+    except Exception:
+        return {"status": "invalid_payload"}
+
+    print(f"PayDunya webhook: {data.get('status')} token={data.get('token', '')[:12]}...")
 
     status = data.get("status", "")
     if status.lower() != "completed":
         return {"status": "ignored"}
 
-    custom = data.get("custom_data", {})
+    custom = data.get("custom_data", {}) or {}
     phone = custom.get("phone")
-    plan = custom.get("plan", "pro")
     token = data.get("token", "")
     payment_method = data.get("payment_method", "")
 
     if not phone:
+        print(f"PayDunya webhook: champ 'phone' absent dans custom_data — token={token[:12]}")
         return {"status": "no_phone"}
+
+    if not token:
+        return {"status": "no_token"}
 
     result = await db.execute(
         select(User).where(User.phone_number == phone)
@@ -38,31 +45,38 @@ async def paydunya_webhook(
     user = result.scalar_one_or_none()
 
     if not user:
+        print(f"PayDunya webhook: utilisateur introuvable pour phone={phone}")
         return {"status": "user_not_found"}
 
-    # Active le Pro
-    await payment_service.activate_pro(
-        db=db,
-        user=user,
-        paydunya_token=token,
-        payment_method=payment_method,
-        raw_data=data,
-    )
+    try:
+        await payment_service.activate_pro(
+            db=db,
+            user=user,
+            paydunya_token=token,
+            payment_method=payment_method,
+            raw_data=data,
+        )
 
-    # Bonus parrainage si filleul passe Pro
-    activated = await referral_service.activate_paid_bonus(db=db, user=user)
-    if activated:
-        print(f"Bonus parrainage payant activé pour filleul {phone}")
+        activated = await referral_service.activate_paid_bonus(db=db, user=user)
+        if activated:
+            print(f"Bonus parrainage payant activé pour filleul {phone}")
 
-    await db.commit()
+        await db.commit()
+    except Exception as e:
+        print(f"PayDunya webhook: erreur activation Pro pour {phone} — {e}")
+        await db.rollback()
+        return {"status": "activation_error"}
 
-    # Notifie l'élève sur WhatsApp
-    await whatsapp_sender.send_text(
-        phone,
-        f"🎉 Félicitations *{user.name}* !\n\n"
-        f"Ton abonnement *Prepa Pro* est activé pour 30 jours.\n\n"
-        f"Tu peux maintenant réviser sans limite. Bonne chance ! 💪"
-    )
+    # Notifie l'élève sur WhatsApp (hors transaction)
+    try:
+        await whatsapp_sender.send_text(
+            phone,
+            f"🎉 Félicitations *{user.name}* !\n\n"
+            f"Ton abonnement *Prepa Pro* est activé pour 30 jours.\n\n"
+            f"Tu peux maintenant réviser sans limite. Bonne chance ! 💪"
+        )
+    except Exception as e:
+        print(f"PayDunya webhook: notification WhatsApp échouée pour {phone} — {e}")
 
     return {"status": "ok"}
 

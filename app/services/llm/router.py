@@ -36,9 +36,6 @@ class LLMRouter:
 
         return await config_service.get("llm_default_free_provider") or "groq"
 
-    async def get_daily_budget(self) -> float:
-        return await config_service.get_float("llm_daily_budget_usd")
-
     async def get_max_tokens(self) -> int:
         return await config_service.get_int("llm_max_tokens")
 

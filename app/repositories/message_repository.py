@@ -188,8 +188,20 @@ class MessageRepository:
         Résume une liste de messages en 2-3 phrases via LLM.
         Extrait : sujets abordés, points de confusion, progression.
         """
-        if not messages or not settings.mistral_api_key:
+        if not messages:
             return ""
+
+        if not settings.mistral_api_key:
+            # Fallback texte : première + dernière question de l'élève
+            inbound = [m for m in messages if m.direction == "inbound"]
+            if not inbound:
+                return ""
+            parts = []
+            if inbound[0].content:
+                parts.append(f"Début de session : {inbound[0].content[:100]}")
+            if len(inbound) > 1 and inbound[-1].content:
+                parts.append(f"Dernière question : {inbound[-1].content[:100]}")
+            return " | ".join(parts)
 
         # Formate les messages pour le prompt
         conv_text = ""

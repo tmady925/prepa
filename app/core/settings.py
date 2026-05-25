@@ -27,11 +27,11 @@ class Settings(BaseSettings):
     redis_config_ttl: int = 60
     redis_cache_ttl: int = 604800
 
-    # WhatsApp
-    whatsapp_api_key: str = ""
+    # WhatsApp — Wasender
+    wasender_api_key: str = ""
+    wasender_base_url: str = "https://api.wasender.com/api"
     whatsapp_number: str = "221789939028"
     whatsapp_webhook_secret: str = ""
-    whatsapp_base_url: str = "https://waba.360dialog.io/v1"
 
     # LLM
     openai_api_key: str = ""
@@ -54,7 +54,6 @@ class Settings(BaseSettings):
     # LLM routing
     llm_default_free_provider: str = "mistral"
     llm_default_pro_provider: str = "openai"
-    llm_daily_budget_usd: float = 10.0
     llm_max_tokens_default: int = 300
 
     @property

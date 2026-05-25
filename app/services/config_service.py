@@ -25,8 +25,6 @@ DEFAULTS = {
     "llm_max_tokens": 300,
     "llm_context_messages": 5,
     "llm_semantic_cache_threshold": 0.92,
-    "llm_daily_budget_usd": 10.0,
-
     # Upsell
     "upsell_min_streak_days": 5,
     "upsell_min_msgs_today": 8,

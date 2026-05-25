@@ -118,10 +118,6 @@ class ExerciseGenerator:
             return "intermediaire_avance"
 
         level = mastery.mastery_level
-        hints_ratio = 0
-        if mastery.practice_count > 0:
-            # Si l'élève demande souvent des indices → niveau bas
-            pass
 
         if level >= 0.75:
             return "avance"

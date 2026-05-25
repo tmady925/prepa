@@ -1,5 +1,6 @@
 import hashlib
 import hmac
+import json
 from datetime import datetime
 from fastapi import APIRouter, Request, Depends
 from sqlalchemy import select as sa_select
@@ -32,15 +33,39 @@ async def webhook_receive(
     request: Request,
     db: AsyncSession = Depends(get_db),
 ):
-    data = await request.json()
+    body = await request.body()
 
-    incoming = (
-        data.get("messages") or
-        data.get("entry", [{}])[0]
-        .get("changes", [{}])[0]
-        .get("value", {})
-        .get("messages", [])
-    )
+    # Vérification signature HMAC 360dialog (si secret configuré)
+    if settings.whatsapp_webhook_secret:
+        signature = request.headers.get("X-Hub-Signature-256", "")
+        expected = "sha256=" + hmac.new(
+            settings.whatsapp_webhook_secret.encode(),
+            body,
+            hashlib.sha256,
+        ).hexdigest()
+        if not hmac.compare_digest(signature, expected):
+            print(f"Webhook: signature invalide — {signature[:20]}...")
+            return {"status": "invalid_signature"}
+
+    data = json.loads(body)
+
+    # ── Format Wasender ───────────────────────────────────────────────
+    event = data.get("event", "")
+
+    # Ignore les événements systèmes Wasender (QR code, statut session…)
+    if event in ("qrcode.updated", "session.status", "session.connected", "session.disconnected"):
+        return {"status": "ignored"}
+
+    incoming = []
+
+    if event == "message.received" or "data" in data:
+        # Format Wasender événement : {"event": "message.received", "data": {...}}
+        wasender_msg = data.get("data", {})
+        if wasender_msg and not wasender_msg.get("fromMe", False):
+            incoming = [wasender_msg]
+    elif "messages" in data:
+        # Format plat Wasender (ancienne version) : {"messages": [...]}
+        incoming = data.get("messages", [])
 
     if not incoming:
         return {"status": "no_messages"}
@@ -183,13 +208,18 @@ async def process_message(message: dict, db: AsyncSession):
 
     text = ""
     if msg_type == "text":
-        text = message.get("text", {}).get("body", "").strip()
+        # Wasender : le corps du message est dans "body" directement
+        text = message.get("body", "").strip()
     elif msg_type == "interactive":
+        # Wasender interactive (si supporté) — même structure que Meta
         interactive = message.get("interactive", {})
         if interactive.get("type") == "button_reply":
             text = interactive["button_reply"].get("id", "")
         elif interactive.get("type") == "list_reply":
             text = interactive["list_reply"].get("id", "")
+    elif msg_type == "button":
+        # Certains providers renvoient les réponses bouton comme type "button"
+        text = message.get("button", {}).get("payload", "") or message.get("body", "")
 
     if not text:
         return
@@ -299,17 +329,38 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession):
         try:
             exam_date = datetime.strptime(text, "%d/%m/%Y")
             user = await user_service.set_exam_date(db, user, exam_date)
-            user = await user_service.complete_onboarding(db, user)
-            days_left = (exam_date - datetime.now()).days
-            await whatsapp_sender.send_text(
+            # set_exam_date passe onboarding_step à "plan"
+            await whatsapp_sender.send_buttons(
                 phone,
-                messages.onboarding_complete(user.name, days_left)
+                messages.ask_plan(user.name),
+                messages.PLAN_ONBOARDING_BUTTONS,
             )
         except ValueError:
             await whatsapp_sender.send_text(
                 phone,
                 "Format invalide. Utilise *JJ/MM/AAAA*\nExemple : *15/06/2026*"
             )
+
+    elif step == "plan":
+        user = await user_service.complete_onboarding(db, user)
+        days_left = 0
+        if user.exam_date:
+            exam_date = user.exam_date.replace(tzinfo=None)
+            days_left = max(0, (exam_date - datetime.now()).days)
+        await whatsapp_sender.send_text(
+            phone,
+            messages.onboarding_complete(user.name, days_left)
+        )
+        # Si l'élève veut passer Pro directement → envoie le lien de paiement
+        if text in ("onboarding_pro", "action_pro"):
+            from app.services.payment_service import payment_service
+            invoice = await payment_service.create_invoice(user=user, plan="pro")
+            if invoice.get("success"):
+                await whatsapp_sender.send_text(
+                    phone,
+                    f"💳 Voici ton lien de paiement :\n\n{invoice['payment_url']}\n\n"
+                    "Paiement sécurisé via Wave, Orange Money ou Free Money 🔒"
+                )
 
     elif step == "done":
         quota = await user_service.check_quota(user)
@@ -518,6 +569,7 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession):
             db=db,
             chapitre=detected_chapitre,
             detection=detection,
+            user=user,
         )
 
         await message_repo.save(

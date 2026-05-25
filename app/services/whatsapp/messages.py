@@ -88,6 +88,20 @@ class Messages:
             "Exemple : 15/06/2026"
         )
 
+    def ask_plan(self, name: str) -> str:
+        return (
+            f"Presque fini *{name}* ! 🎉\n\n"
+            "Comment veux-tu utiliser Prepa ?\n\n"
+            "🆓 *Gratuit* — 10 messages par jour\n"
+            "⭐ *Pro* — messages illimités, 500 FCFA/mois\n\n"
+            "_Tu peux toujours changer plus tard avec /plan_"
+        )
+
+    PLAN_ONBOARDING_BUTTONS = [
+        {"id": "onboarding_free", "title": "Gratuit 🆓"},
+        {"id": "onboarding_pro", "title": "Passer Pro ⭐"},
+    ]
+
     def onboarding_complete(self, name: str, days_left: int) -> str:
         return (
             f"✅ Tout est prêt *{name}* !\n\n"

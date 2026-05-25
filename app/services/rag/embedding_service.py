@@ -30,13 +30,19 @@ class EmbeddingService:
     # ── Check pgvector ────────────────────────────────────────────────
 
     async def check_pgvector(self, db) -> bool:
-        """Vérifie si pgvector est disponible en base."""
+        """
+        Vérifie si pgvector est disponible.
+        Utilise une connexion indépendante pour ne pas polluer
+        la transaction courante en cas d'erreur.
+        """
         if self._pgvector_checked:
             return self._pgvector_enabled
 
         try:
             from sqlalchemy import text
-            await db.execute(text("SELECT '[1,2,3]'::vector"))
+            # Connexion indépendante — ne touche pas la transaction active
+            async with db.bind.connect() as conn:
+                await conn.execute(text("SELECT '[1,2,3]'::vector"))
             self._pgvector_enabled = True
             print("pgvector: disponible ✅")
         except Exception:
@@ -98,7 +104,7 @@ class EmbeddingService:
             return None
 
         all_embeddings = []
-        batch_size = 10  # Réduit pour éviter rate limit
+        batch_size = 10
         max_retries = 3
         total_batches = (len(texts) - 1) // batch_size + 1
 
@@ -120,7 +126,6 @@ class EmbeddingService:
 
                             if "data" not in data:
                                 error_code = data.get("code", "")
-                                # Rate limit → attend et retry
                                 if error_code == "3505" or response.status_code == 429:
                                     wait = 5 * (attempt + 1)
                                     print(f"  Rate limit batch {batch_num}/{total_batches} — attente {wait}s...")
@@ -143,7 +148,6 @@ class EmbeddingService:
                         print(f"  Batch {batch_num} échoué après {max_retries} tentatives")
                         return None
 
-                    # Délai entre batches pour respecter les limites
                     if i + batch_size < len(texts):
                         await asyncio.sleep(1.0)
 
@@ -156,10 +160,7 @@ class EmbeddingService:
     # ── Fallback local — BAAI/bge-m3 (1024 dims) ─────────────────────
 
     async def _local_embed(self, text: str) -> list[float]:
-        """
-        Fallback local avec BAAI/bge-m3.
-        Produit 1024 dims — compatible pgvector vector(1024).
-        """
+        """Fallback local BAAI/bge-m3 — 1024 dims compatible pgvector."""
         try:
             model = self._get_local_model()
             if model is None:

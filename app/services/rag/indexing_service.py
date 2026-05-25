@@ -1,6 +1,8 @@
 """
 Service d'indexation des documents dans la base vectorielle.
-Supporte pgvector natif + fallback JSONB.
+Double indexation :
+  embedding (JSONB)        ← bge-m3 local (toujours disponible)
+  embedding_vector (pgvector) ← Mistral (si disponible)
 """
 import uuid
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -31,20 +33,20 @@ class IndexingService:
     ) -> dict:
         """
         Indexe un document complet.
-        1. Extrait le texte
-        2. Découpe en chunks
-        3. Génère les embeddings
-        4. Sauvegarde en base (pgvector + JSONB)
+        1. Extrait le texte + chunking sémantique
+        2. Génère embeddings bge-m3 (JSONB) — toujours
+        3. Génère embeddings Mistral (pgvector) — si disponible
+        4. Sauvegarde en base double colonne
         5. Lance l'analyse cerveau automatiquement
         """
         ext = filename.lower().split(".")[-1]
 
-        # Détecte pgvector avant indexation
+        # Détecte pgvector
         use_pgvector = await embedding_service.check_pgvector(db)
         if use_pgvector:
-            print("  → Mode pgvector activé ✅")
+            print("  → Double indexation : bge-m3 (JSONB) + Mistral (pgvector) ✅")
         else:
-            print("  → Mode JSONB (fallback)")
+            print("  → Indexation simple : bge-m3 (JSONB)")
 
         # Crée l'entrée document
         doc = Document(
@@ -86,15 +88,29 @@ class IndexingService:
                 await db.commit()
                 return {"success": False, "error": "Aucun texte extrait"}
 
-            # Génère les embeddings en batch
-            print(f"  → Génération des embeddings...")
-            embeddings = await embedding_service.embed_batch(chunks)
-            print(f"  → {len(embeddings)} embeddings générés")
+            # ── Embeddings bge-m3 (JSONB) — toujours ─────────────────
+            print(f"  → Génération embeddings bge-m3 (JSONB)...")
+            local_embeddings = await embedding_service.embed_batch(chunks)
+            print(f"  → {len(local_embeddings)} embeddings bge-m3 ✅")
 
-            # Sauvegarde les chunks
+            # ── Embeddings Mistral (pgvector) — si disponible ─────────
+            mistral_embeddings = [None] * len(chunks)
+            if use_pgvector:
+                print(f"  → Génération embeddings Mistral (pgvector)...")
+                mistral_embeddings = await embedding_service.embed_batch_mistral(chunks)
+                mistral_ok = sum(1 for e in mistral_embeddings if e is not None)
+                print(f"  → {mistral_ok}/{len(chunks)} embeddings Mistral ✅")
+
+            # ── Sauvegarde les chunks ─────────────────────────────────
             saved = 0
-            for i, (chunk, embedding) in enumerate(zip(chunks, embeddings)):
-                if not embedding:
+            pgvector_saved = 0
+
+            for i, chunk in enumerate(chunks):
+                local_emb = local_embeddings[i] if i < len(local_embeddings) else None
+                mistral_emb = mistral_embeddings[i] if i < len(mistral_embeddings) else None
+
+                # bge-m3 obligatoire
+                if not local_emb:
                     continue
 
                 doc_chunk = DocumentChunk(
@@ -109,15 +125,16 @@ class IndexingService:
                     doc_type=doc_type,
                     annee=annee,
                     niveau=niveau,
-                    embedding=embedding,  # JSONB — toujours sauvegardé
+                    embedding=local_emb,  # bge-m3 — toujours présent
                 )
 
-                # pgvector — sauvegarde en parallèle si disponible
-                if use_pgvector:
+                # Mistral — pgvector si disponible
+                if use_pgvector and mistral_emb:
                     try:
-                        doc_chunk.embedding_vector = embedding
+                        doc_chunk.embedding_vector = mistral_emb
+                        pgvector_saved += 1
                     except Exception as e:
-                        print(f"  pgvector set error: {e}")
+                        print(f"  pgvector set error chunk {i}: {e}")
 
                 db.add(doc_chunk)
                 saved += 1
@@ -129,7 +146,10 @@ class IndexingService:
             doc.has_ocr = result["has_ocr"]
 
             await db.commit()
-            print(f"  ✅ Document indexé : {saved} chunks {'(pgvector)' if use_pgvector else '(JSONB)'}")
+            print(
+                f"  ✅ Document indexé : {saved} chunks "
+                f"(JSONB: {saved}, pgvector: {pgvector_saved})"
+            )
 
             # Analyse automatique par le cerveau
             if subject and exam_type:
@@ -147,6 +167,7 @@ class IndexingService:
                 "success": True,
                 "document_id": str(doc.id),
                 "chunks": saved,
+                "pgvector_chunks": pgvector_saved,
                 "pages": result["page_count"],
                 "has_ocr": result["has_ocr"],
                 "pgvector": use_pgvector,

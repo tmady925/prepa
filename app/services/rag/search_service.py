@@ -1,7 +1,8 @@
 """
 Service de recherche hybride — sémantique + BM25.
-Mode pgvector : requête SQL native avec index HNSW (ultra-rapide)
-Mode JSONB : calcul cosinus Python (fallback)
+Double provider :
+  pgvector → embed requête avec Mistral (cohérence avec embedding_vector)
+  JSONB    → embed requête avec bge-m3  (cohérence avec embedding)
 Cascade de fallback si pas assez de résultats.
 """
 import re
@@ -38,13 +39,26 @@ class SearchService:
     ) -> list[dict]:
         """
         Recherche hybride : sémantique + BM25.
+        Embed la requête avec le provider cohérent avec la colonne cible.
         Cascade : strict → sans chapitre → sans matière.
         """
-        query_embedding = await embedding_service.embed_text(query)
+        # Détermine le mode et embed avec le bon provider
+        use_pgvector = await self._check_pgvector(db)
+
+        if use_pgvector:
+            # pgvector → embed avec Mistral (même espace que embedding_vector)
+            query_embedding = await embedding_service.embed_text_mistral(query)
+            if not query_embedding:
+                # Mistral indispo → bascule JSONB avec bge-m3
+                print("Mistral embed indispo — bascule JSONB bge-m3")
+                use_pgvector = False
+                query_embedding = await embedding_service.embed_text_local(query)
+        else:
+            # JSONB → embed avec bge-m3 (même espace que embedding)
+            query_embedding = await embedding_service.embed_text_local(query)
+
         if not query_embedding:
             return []
-
-        use_pgvector = await self._check_pgvector(db)
 
         # Tentative 1 — filtres complets
         results = await self._search_with_filters(
@@ -130,8 +144,6 @@ class SearchService:
         min_similarity: float = 0.4,
     ) -> list[dict]:
         """Recherche vectorielle native pgvector avec index HNSW."""
-
-        # Construit les conditions WHERE
         conditions = ["embedding_vector IS NOT NULL"]
         params = {"query_vec": str(query_embedding), "limit": top_k * 3}
 
@@ -149,8 +161,8 @@ class SearchService:
             params["chapitre"] = chapitre
 
         where_clause = " AND ".join(conditions)
+        params["min_sim"] = min_similarity
 
-        # Requête pgvector — distance cosine
         sql = text(f"""
             SELECT
                 id, content, chunk_index, exam_type, serie,
@@ -162,16 +174,19 @@ class SearchService:
             ORDER BY embedding_vector <=> :query_vec::vector
             LIMIT :limit
         """)
-        params["min_sim"] = min_similarity
 
         try:
             result = await db.execute(sql, params)
             rows = result.fetchall()
         except Exception as e:
-            print(f"pgvector search error: {e} — fallback JSONB")
+            print(f"pgvector search error: {e} — fallback JSONB bge-m3")
             self._pgvector_available = False
+            # Fallback JSONB — re-embed avec bge-m3
+            jsonb_embedding = await embedding_service.embed_text_local(query_text)
+            if not jsonb_embedding:
+                return []
             return await self._search_jsonb(
-                db, query_embedding, query_text,
+                db, jsonb_embedding, query_text,
                 exam_type, series, subject, chapitre,
                 top_k, min_similarity,
             )
@@ -179,27 +194,21 @@ class SearchService:
         if not rows:
             return []
 
-        # Récupère les chunks complets pour BM25
-        chunk_ids = [str(r.id) for r in rows]
+        # Récupère les chunks pour BM25
         chunks_result = await db.execute(
             select(DocumentChunk).where(
                 DocumentChunk.id.in_([r.id for r in rows])
             )
         )
         chunks_by_id = {c.id: c for c in chunks_result.scalars().all()}
-
-        # Score BM25
         chunks_list = [chunks_by_id[r.id] for r in rows if r.id in chunks_by_id]
         bm25_scores = self._bm25_score(query_text, chunks_list)
 
-        # Score hybride
         scored = []
         for row in rows:
             sem = float(row.semantic_score)
             bm25 = bm25_scores.get(row.id, 0)
             hybrid = 0.8 * sem + 0.2 * bm25
-
-            chunk = chunks_by_id.get(row.id)
             scored.append({
                 "content": row.content,
                 "similarity": hybrid,
@@ -216,10 +225,10 @@ class SearchService:
             })
 
         scored.sort(key=lambda x: x["similarity"], reverse=True)
-        print(f"pgvector: {len(scored)} résultats")
+        print(f"pgvector (Mistral): {len(scored)} résultats")
         return scored[:top_k]
 
-    # ── Mode JSONB — fallback Python ──────────────────────────────────
+    # ── Mode JSONB — bge-m3 ───────────────────────────────────────────
 
     async def _search_jsonb(
         self,
@@ -233,7 +242,7 @@ class SearchService:
         top_k: int = 5,
         min_similarity: float = 0.4,
     ) -> list[dict]:
-        """Recherche JSONB avec cosinus Python — fallback."""
+        """Recherche JSONB avec cosinus Python — bge-m3."""
         filters = [DocumentChunk.embedding.isnot(None)]
 
         if exam_type:
@@ -254,7 +263,6 @@ class SearchService:
         if not chunks:
             return []
 
-        # Score sémantique Python
         semantic_scores = {}
         for chunk in chunks:
             if not chunk.embedding:
@@ -262,10 +270,8 @@ class SearchService:
             sim = embedding_service.cosine_similarity(query_embedding, chunk.embedding)
             semantic_scores[chunk.id] = sim
 
-        # Score BM25
         bm25_scores = self._bm25_score(query_text, chunks)
 
-        # Score hybride
         scored = []
         for chunk in chunks:
             sem = semantic_scores.get(chunk.id, 0)
@@ -289,12 +295,13 @@ class SearchService:
                 })
 
         scored.sort(key=lambda x: x["similarity"], reverse=True)
+        print(f"JSONB (bge-m3): {len(scored)} résultats")
         return scored[:top_k]
 
     # ── BM25 ──────────────────────────────────────────────────────────
 
     def _bm25_score(self, query: str, chunks: list) -> dict:
-        """Calcule les scores BM25 pour chaque chunk."""
+        """Calcule les scores BM25."""
         try:
             from rank_bm25 import BM25Okapi
 
@@ -311,7 +318,6 @@ class SearchService:
 
             bm25 = BM25Okapi(corpus)
             scores = bm25.get_scores(query_tokens)
-
             max_score = max(scores) if max(scores) > 0 else 1
             normalized = scores / max_score
 

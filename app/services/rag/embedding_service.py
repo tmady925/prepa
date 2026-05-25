@@ -1,8 +1,19 @@
 """
-Service d'embedding pour le RAG.
-Provider principal : Mistral embed (1024 dim)
-Fallback : BAAI/bge-m3 local (1024 dim) — compatible pgvector
-Stockage : pgvector (natif) ou JSONB (fallback)
+Service d'embedding double-provider pour le RAG.
+
+Architecture :
+  JSONB      ← bge-m3 local (gratuit, toujours disponible)
+  pgvector   ← Mistral embed (premium, meilleur français)
+
+Indexation :
+  chunk.embedding        = bge-m3  (toujours)
+  chunk.embedding_vector = Mistral (si disponible)
+
+Recherche :
+  pgvector disponible → embed requête avec Mistral → cherche pgvector
+  pgvector indispo    → embed requête avec bge-m3  → cherche JSONB
+
+Cohérence garantie : chaque colonne utilise toujours son provider.
 """
 import asyncio
 import httpx
@@ -10,7 +21,6 @@ from app.core.settings import get_settings
 
 settings = get_settings()
 
-# Détecte pgvector
 try:
     from pgvector.sqlalchemy import Vector
     PGVECTOR_AVAILABLE = True
@@ -30,17 +40,11 @@ class EmbeddingService:
     # ── Check pgvector ────────────────────────────────────────────────
 
     async def check_pgvector(self, db) -> bool:
-        """
-        Vérifie si pgvector est disponible.
-        Utilise une connexion indépendante pour ne pas polluer
-        la transaction courante en cas d'erreur.
-        """
+        """Vérifie pgvector via connexion indépendante."""
         if self._pgvector_checked:
             return self._pgvector_enabled
-
         try:
             from sqlalchemy import text
-            # Connexion indépendante — ne touche pas la transaction active
             async with db.bind.connect() as conn:
                 await conn.execute(text("SELECT '[1,2,3]'::vector"))
             self._pgvector_enabled = True
@@ -48,32 +52,53 @@ class EmbeddingService:
         except Exception:
             self._pgvector_enabled = False
             print("pgvector: non disponible — fallback JSONB")
-
         self._pgvector_checked = True
         return self._pgvector_enabled
 
-    # ── Embed public ──────────────────────────────────────────────────
+    # ── API publique — embed_text ─────────────────────────────────────
 
     async def embed_text(self, text: str) -> list[float] | None:
-        """Génère l'embedding d'un texte — Mistral puis fallback local."""
-        embedding = await self._mistral_embed(text)
-        if embedding:
-            return embedding
-        print("Mistral embed failed — fallback local bge-m3")
+        """
+        Embed pour les REQUÊTES de recherche.
+        Utilisé dans search_service et detector.
+        Retourne Mistral si disponible, sinon bge-m3.
+        → Appelant doit savoir quel provider a été utilisé
+          pour chercher dans la bonne colonne.
+        """
+        emb = await self.embed_text_mistral(text)
+        if emb:
+            return emb
+        return await self.embed_text_local(text)
+
+    async def embed_text_mistral(self, text: str) -> list[float] | None:
+        """Embed Mistral — pour requêtes pgvector."""
+        return await self._mistral_embed(text)
+
+    async def embed_text_local(self, text: str) -> list[float]:
+        """Embed bge-m3 — pour requêtes JSONB."""
         return await self._local_embed(text)
 
-    async def embed_batch(self, texts: list[str]) -> list[list[float]]:
-        """Génère les embeddings en batch — Mistral avec retry puis fallback."""
-        embeddings = await self._mistral_embed_batch(texts)
-        if embeddings and len(embeddings) == len(texts):
-            return embeddings
+    # ── API publique — embed_batch ────────────────────────────────────
 
-        print(f"Mistral batch failed — fallback local pour {len(texts)} textes")
-        results = []
-        for text in texts:
-            emb = await self._local_embed(text)
-            results.append(emb if emb else [0.0] * EMBEDDING_DIM)
-        return results
+    async def embed_batch(self, texts: list[str]) -> list[list[float]]:
+        """
+        Batch pour JSONB uniquement (bge-m3).
+        Utilisé dans indexing_service pour remplir embedding (JSONB).
+        Toujours disponible, jamais de rate limit.
+        """
+        return await self._local_embed_batch(texts)
+
+    async def embed_batch_mistral(self, texts: list[str]) -> list[list[float] | None]:
+        """
+        Batch Mistral — pour remplir embedding_vector (pgvector).
+        Peut retourner None pour certains chunks si rate limit.
+        """
+        results = await self._mistral_embed_batch(texts)
+        if results and len(results) == len(texts):
+            return results
+        # Rate limit — retourne None pour tous
+        print(f"Mistral batch indisponible — pgvector non rempli pour ce document")
+        return [None] * len(texts)
 
     # ── Mistral ───────────────────────────────────────────────────────
 
@@ -81,7 +106,7 @@ class EmbeddingService:
         if not settings.mistral_api_key:
             return None
         try:
-            async with httpx.AsyncClient(timeout=30.0) as client:
+            async with httpx.AsyncClient(timeout=15.0) as client:
                 response = await client.post(
                     "https://api.mistral.ai/v1/embeddings",
                     headers={"Authorization": f"Bearer {settings.mistral_api_key}"},
@@ -89,17 +114,17 @@ class EmbeddingService:
                 )
                 data = response.json()
                 if "data" not in data:
-                    print(f"Mistral embed réponse inattendue: {data}")
                     return None
                 emb = data["data"][0]["embedding"]
-                assert len(emb) == EMBEDDING_DIM, f"Dims incorrectes: {len(emb)}"
+                if len(emb) != EMBEDDING_DIM:
+                    return None
                 return emb
         except Exception as e:
             print(f"Mistral embed error: {e}")
             return None
 
     async def _mistral_embed_batch(self, texts: list[str]) -> list[list[float]] | None:
-        """Batch avec délai anti-rate-limit et retry automatique."""
+        """Batch Mistral avec retry anti-rate-limit."""
         if not settings.mistral_api_key:
             return None
 
@@ -136,7 +161,7 @@ class EmbeddingService:
 
                             batch_embeddings = [item["embedding"] for item in data["data"]]
                             all_embeddings.extend(batch_embeddings)
-                            print(f"  → Batch {batch_num}/{total_batches} ✅ ({len(batch)} textes)")
+                            print(f"  → Mistral batch {batch_num}/{total_batches} ✅")
                             success = True
                             break
 
@@ -145,7 +170,7 @@ class EmbeddingService:
                             await asyncio.sleep(2)
 
                     if not success:
-                        print(f"  Batch {batch_num} échoué après {max_retries} tentatives")
+                        print(f"  Batch {batch_num} échoué")
                         return None
 
                     if i + batch_size < len(texts):
@@ -157,10 +182,10 @@ class EmbeddingService:
             print(f"Mistral batch embed error: {e}")
             return None
 
-    # ── Fallback local — BAAI/bge-m3 (1024 dims) ─────────────────────
+    # ── bge-m3 local ──────────────────────────────────────────────────
 
     async def _local_embed(self, text: str) -> list[float]:
-        """Fallback local BAAI/bge-m3 — 1024 dims compatible pgvector."""
+        """Embed bge-m3 local — 1024 dims, gratuit."""
         try:
             model = self._get_local_model()
             if model is None:
@@ -171,38 +196,63 @@ class EmbeddingService:
                 show_progress_bar=False,
             )
             result = embedding.tolist()
-            if len(result) != EMBEDDING_DIM:
-                print(f"⚠️ Fallback dims incorrectes: {len(result)} au lieu de {EMBEDDING_DIM}")
-                if len(result) < EMBEDDING_DIM:
-                    result = result + [0.0] * (EMBEDDING_DIM - len(result))
-                else:
-                    result = result[:EMBEDDING_DIM]
-            return result
+            return self._ensure_dim(result)
         except Exception as e:
             print(f"Local embed error: {e}")
             return [0.0] * EMBEDDING_DIM
 
+    async def _local_embed_batch(self, texts: list[str]) -> list[list[float]]:
+        """Batch bge-m3 local — toujours disponible."""
+        try:
+            model = self._get_local_model()
+            if model is None:
+                return [[0.0] * EMBEDDING_DIM for _ in texts]
+
+            print(f"  → bge-m3 local batch ({len(texts)} textes)...")
+            embeddings = model.encode(
+                texts,
+                normalize_embeddings=True,
+                show_progress_bar=True,
+                batch_size=32,
+            )
+            results = []
+            for emb in embeddings:
+                results.append(self._ensure_dim(emb.tolist()))
+            print(f"  → bge-m3 batch terminé ✅")
+            return results
+
+        except Exception as e:
+            print(f"Local batch embed error: {e}")
+            return [[0.0] * EMBEDDING_DIM for _ in texts]
+
     def _get_local_model(self):
-        """Charge le modèle local une seule fois en mémoire."""
+        """Charge bge-m3 une seule fois en mémoire."""
         if self._local_model is not None:
             return self._local_model
         try:
             from sentence_transformers import SentenceTransformer
-            print("Chargement modèle local BAAI/bge-m3 (1024 dims)...")
+            print("Chargement BAAI/bge-m3 (1024 dims)...")
             self._local_model = SentenceTransformer("BAAI/bge-m3")
-            print("Modèle local chargé ✅")
+            print("bge-m3 chargé ✅")
             return self._local_model
         except Exception as e:
-            print(f"Erreur chargement modèle local: {e}")
+            print(f"Erreur chargement bge-m3: {e}")
             return None
 
-    # ── Similarité cosinus (mode JSONB) ──────────────────────────────
+    def _ensure_dim(self, result: list[float]) -> list[float]:
+        """Garantit 1024 dimensions."""
+        if len(result) == EMBEDDING_DIM:
+            return result
+        if len(result) < EMBEDDING_DIM:
+            return result + [0.0] * (EMBEDDING_DIM - len(result))
+        return result[:EMBEDDING_DIM]
+
+    # ── Similarité cosinus (JSONB) ────────────────────────────────────
 
     def cosine_similarity(self, vec1: list[float], vec2: list[float]) -> float:
-        """Calcule la similarité cosinus — mode JSONB uniquement."""
+        """Similarité cosinus — mode JSONB uniquement."""
         import math
         if len(vec1) != len(vec2):
-            print(f"⚠️ Dimensions incompatibles: {len(vec1)} vs {len(vec2)}")
             return 0.0
         dot = sum(a * b for a, b in zip(vec1, vec2))
         norm1 = math.sqrt(sum(a * a for a in vec1))

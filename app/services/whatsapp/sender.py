@@ -25,11 +25,18 @@ class WhatsAppSender:
 
     async def send_text(self, phone: str, text: str) -> dict:
         cleaned = self._clean_for_whatsapp(text)
-        payload = {"phone": phone, "message": cleaned}
+        payload = {
+            "to": phone,
+            "text": cleaned,
+        }
         return await self._send(payload)
 
     async def send_image_url(self, phone: str, url: str, caption: str = "") -> dict:
-        payload = {"phone": phone, "image_url": url, "caption": caption}
+        payload = {
+            "to": phone,
+            "image_url": url,
+            "caption": caption,
+        }
         return await self._send(payload, endpoint="send-image")
 
     async def send_image_bytes(self, phone: str, image_bytes: bytes, caption: str = "") -> dict:
@@ -39,7 +46,7 @@ class WhatsAppSender:
     async def send_buttons(self, phone: str, text: str, buttons: list[dict]) -> dict:
         cleaned = self._clean_for_whatsapp(text)
         payload = {
-            "phone": phone,
+            "to": phone,
             "type": "interactive",
             "interactive": {
                 "type": "button",
@@ -65,8 +72,8 @@ class WhatsAppSender:
                 f"{i + 1}. {btn['title']}" for i, btn in enumerate(buttons[:3])
             )
             fallback_payload = {
-                "phone": phone,
-                "message": f"{cleaned}\n\n{options}",
+                "to": phone,
+                "text": f"{cleaned}\n\n{options}",
             }
             return await self._send(fallback_payload)
 
@@ -75,7 +82,7 @@ class WhatsAppSender:
     async def send_list(self, phone: str, text: str, button_label: str, sections: list[dict]) -> dict:
         cleaned = self._clean_for_whatsapp(text)
         payload = {
-            "phone": phone,
+            "to": phone,
             "type": "interactive",
             "interactive": {
                 "type": "list",
@@ -98,8 +105,8 @@ class WhatsAppSender:
                     idx += 1
                 lines.append("")
             fallback_payload = {
-                "phone": phone,
-                "message": "\n".join(lines).strip(),
+                "to": phone,
+                "text": "\n".join(lines).strip(),
             }
             return await self._send(fallback_payload)
 
@@ -107,7 +114,7 @@ class WhatsAppSender:
 
     async def send_template(self, phone: str, template_name: str, language: str = "fr", components: list = None) -> dict:
         payload = {
-            "phone": phone,
+            "to": phone,
             "type": "template",
             "template": {
                 "name": template_name,
@@ -122,8 +129,8 @@ class WhatsAppSender:
 
         # Mode développement — simule l'envoi sans appeler Wasender
         if settings.app_env == "development":
-            msg_preview = payload.get("message", payload.get("image_url", str(payload)))[:80]
-            print(f"[DEV] WhatsApp → {payload.get('phone')}: {msg_preview}")
+            msg_preview = payload.get("text", payload.get("image_url", str(payload)))[:80]
+            print(f"[DEV] WhatsApp → {payload.get('to')}: {msg_preview}")
             return {"success": True, "dev_mode": True}
 
         url = f"{settings.wasender_base_url}/{endpoint}"
@@ -142,7 +149,7 @@ class WhatsAppSender:
                 return result
 
             except httpx.TimeoutException:
-                print(f"Wasender API timeout pour {payload.get('phone')}")
+                print(f"Wasender API timeout pour {payload.get('to')}")
                 return {"error": "timeout"}
 
             except Exception as e:

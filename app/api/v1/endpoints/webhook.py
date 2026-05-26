@@ -26,12 +26,6 @@ async def webhook_verify(request: Request):
     return {"status": "ok"}
 
 
-@router.post("/webhook/debug")
-async def webhook_debug(request: Request):
-    data = await request.json()
-    print(f"DEBUG WEBHOOK: {data}")
-    return {"received": data}
-
 
 @router.post("/webhook")
 async def webhook_receive(
@@ -71,10 +65,7 @@ async def webhook_receive(
                 "fromMe": False,
             }]
 
-    # Debug temporaire — à supprimer après diagnostic
-    print(f"Event: {event}, Incoming: {len(incoming)} messages")
     if not incoming:
-        print(f"Payload ignoré: {data}")
         return {"status": "no_messages"}
 
     redis = await get_redis()

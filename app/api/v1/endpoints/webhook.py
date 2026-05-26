@@ -58,14 +58,18 @@ async def webhook_receive(
 
     incoming = []
 
-    if event == "message.received":
-        # Format Wasender événement : {"event": "message.received", "data": {...}}
-        wasender_msg = data.get("data", {})
-        if wasender_msg and not wasender_msg.get("fromMe", False):
-            incoming = [wasender_msg]
-    elif not event and "messages" in data:
-        # Format plat Wasender (ancienne version) : {"messages": [...]}
-        incoming = data.get("messages", [])
+    # Wasender envoie event="messages.received" avec data.messages
+    if event in ("messages.received", "messages-personal.received", "messages.upsert"):
+        msg_data = data.get("data", {}).get("messages", {})
+        if msg_data and not msg_data.get("key", {}).get("fromMe", False):
+            # Normalise le format pour process_message
+            incoming = [{
+                "from": msg_data.get("key", {}).get("cleanedSenderPn", ""),
+                "type": "text",
+                "body": msg_data.get("messageBody", ""),
+                "id": msg_data.get("key", {}).get("id", ""),
+                "fromMe": False,
+            }]
 
     if not incoming:
         return {"status": "no_messages"}

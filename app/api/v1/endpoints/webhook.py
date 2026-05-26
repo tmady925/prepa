@@ -52,11 +52,11 @@ async def webhook_receive(
 
     incoming = []
 
-    # Wasender envoie event="messages.received" avec data.messages
-    if event in ("messages.received", "messages-personal.received", "messages.upsert"):
+    # Wasender envoie le même message via plusieurs events
+    # On traite uniquement messages.received pour éviter les doublons
+    if event in ("messages.received",):
         msg_data = data.get("data", {}).get("messages", {})
         if msg_data and not msg_data.get("key", {}).get("fromMe", False):
-            # Normalise le format pour process_message
             incoming = [{
                 "from": msg_data.get("key", {}).get("cleanedSenderPn", ""),
                 "type": "text",

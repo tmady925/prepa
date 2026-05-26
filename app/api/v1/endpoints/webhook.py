@@ -256,10 +256,15 @@ async def process_message(message: dict, db: AsyncSession):
     if user.status == "active":
         quota = await user_service.check_quota(user)
         if not quota["allowed"]:
-            # Détecte si c'est un clic bouton quota → déclenche le bon flux
-            if text in ("action_invite", "action_pro"):
-                await handle_command(text.replace("action_", ""), phone, user, db)
+            # Détecte toutes les variantes possibles
+            text_lower = text.lower().strip()
+            if text_lower in ("action_invite", "1", "inviter des amis", "inviter", "/inviter"):
+                await handle_command("inviter", phone, user, db)
                 return
+            if text_lower in ("action_pro", "2", "passer pro", "pro", "/plan"):
+                await handle_command("plan", phone, user, db)
+                return
+            # Affiche le message quota avec options
             await whatsapp_sender.send_buttons(
                 phone,
                 messages.quota_reached(user.name or "ami"),

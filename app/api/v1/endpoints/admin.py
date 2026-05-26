@@ -172,10 +172,22 @@ async def delete_user(
     _: bool = Depends(verify_admin),
 ):
     import uuid
-    result = await db.execute(select(User).where(User.id == uuid.UUID(user_id)))
+    from sqlalchemy import delete as sa_delete
+    from app.models.subscription import Subscription
+    from app.models.message import Message
+
+    uid = uuid.UUID(user_id)
+
+    result = await db.execute(select(User).where(User.id == uid))
     user = result.scalar_one_or_none()
     if not user:
         raise HTTPException(status_code=404, detail="Utilisateur non trouvé")
+
+    # Supprime les données liées d'abord
+    await db.execute(sa_delete(Subscription).where(Subscription.user_id == uid))
+    await db.execute(sa_delete(Message).where(Message.user_id == uid))
+
+    # Supprime l'utilisateur
     await db.delete(user)
     await db.commit()
     return {"status": "ok"}

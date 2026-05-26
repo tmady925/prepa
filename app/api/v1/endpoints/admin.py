@@ -165,6 +165,22 @@ async def update_config(
     return {"status": "ok", "key": key, "value": value}
 
 
+@router.delete("/admin/users/{user_id}")
+async def delete_user(
+    user_id: str,
+    db: AsyncSession = Depends(get_db),
+    _: bool = Depends(verify_admin),
+):
+    import uuid
+    result = await db.execute(select(User).where(User.id == uuid.UUID(user_id)))
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=404, detail="Utilisateur non trouvé")
+    await db.delete(user)
+    await db.commit()
+    return {"status": "ok"}
+
+
 @router.post("/admin/users/{user_id}/reset-quota")
 async def reset_quota(
     user_id: str,

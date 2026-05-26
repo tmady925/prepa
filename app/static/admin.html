@@ -369,6 +369,7 @@ Révise avec moi aujourd'hui ! 📚" oninput="updatePreview()"></textarea>
                                 <td style="display:flex;gap:6px">
                                     <button class="btn-sm" onclick="resetQuota('${u.id}')">Reset quota</button>
                                     ${u.plan !== 'pro' ? `<button class="btn-sm" onclick="activatePro('${u.id}')">→ Pro</button>` : ''}
+                                    <button class="btn-sm btn-danger" onclick="deleteUser('${u.id}', '${u.name || u.phone}')">🗑</button>
                                 </td>
                             </tr>
                         `).join('')}
@@ -489,6 +490,17 @@ async function activatePro(userId) {
         loadDashboard();
     } catch (e) {
         showToast('Erreur', true);
+    }
+}
+
+async function deleteUser(userId, userName) {
+    if (!confirm(`Supprimer définitivement l'élève "${userName}" et toutes ses données ?`)) return;
+    try {
+        await api('/admin/users/' + userId, 'DELETE');
+        showToast('Élève supprimé');
+        loadDashboard();
+    } catch (e) {
+        showToast('Erreur suppression', true);
     }
 }
 

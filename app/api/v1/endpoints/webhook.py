@@ -71,7 +71,10 @@ async def webhook_receive(
                 "fromMe": False,
             }]
 
+    # Debug temporaire — à supprimer après diagnostic
+    print(f"Event: {event}, Incoming: {len(incoming)} messages")
     if not incoming:
+        print(f"Payload ignoré: {data}")
         return {"status": "no_messages"}
 
     redis = await get_redis()

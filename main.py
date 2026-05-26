@@ -1,5 +1,6 @@
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
 from app.core.settings import get_settings
 from app.db.redis import connect_redis, disconnect_redis
 
@@ -36,3 +37,5 @@ app.include_router(webhook.router, prefix="/api/v1")
 app.include_router(payments.router, prefix="/api/v1")
 app.include_router(admin.router, prefix="/api/v1")
 app.include_router(tasks.router, prefix="/api/v1")
+
+app.mount("/static", StaticFiles(directory="app/static"), name="static")

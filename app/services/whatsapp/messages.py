@@ -115,14 +115,12 @@ class Messages:
 
     # ── Quota ─────────────────────────────────────────────────────
 
-    def quota_reached(self, name: str, referral_code: str) -> str:
+    def quota_reached(self, name: str) -> str:
         return (
             f"Tu as utilisé tous tes messages du jour *{name}* 🎯\n\n"
-            "Deux options :\n\n"
-            f"📤 *Invite des amis* et gagne 20 messages par ami actif :\n"
-            f"_Partage ce code : *{referral_code}*_\n\n"
-            "⭐ *Passe Pro* pour réviser sans limite :\n"
-            "Seulement *500 FCFA/mois*"
+            "Pour continuer :\n\n"
+            "📤 *Inviter des amis* → gagne 20 messages par ami actif\n"
+            "⭐ *Passer Pro* → révise sans limite pour 3000 FCFA/mois"
         )
 
     QUOTA_BUTTONS = [

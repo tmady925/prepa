@@ -186,18 +186,26 @@ async def handle_command(command: str, phone: str, user, db: AsyncSession):
         )
 
     elif command == "plan":
-        msg = messages.plan_message(user)
-        if user.plan != "pro":
-            await whatsapp_sender.send_buttons(
-                phone,
-                msg,
-                [
-                    {"id": "action_pro", "title": "Passer Pro ⭐"},
-                    {"id": "action_invite", "title": "Inviter des amis"},
-                ]
-            )
+        if user.plan == "pro":
+            await whatsapp_sender.send_text(phone, messages.plan_message(user))
         else:
-            await whatsapp_sender.send_text(phone, msg)
+            from app.services.payment_service import payment_service
+            invoice = await payment_service.create_invoice(user=user, plan="pro")
+            if invoice.get("success"):
+                await whatsapp_sender.send_text(
+                    phone,
+                    f"💳 *Passe Prepa Pro maintenant !*\n\n"
+                    f"✅ Messages illimités\n"
+                    f"✅ Corrections détaillées\n\n"
+                    f"💰 *3000 FCFA/mois*\n\n"
+                    f"👉 Clique ici pour payer :\n{invoice['payment_url']}\n\n"
+                    f"_Paiement sécurisé via Wave, Orange Money ou Free Money 🔒_"
+                )
+            else:
+                await whatsapp_sender.send_text(
+                    phone,
+                    "❌ Impossible de créer le lien de paiement. Réessaie dans quelques instants."
+                )
 
 
 async def process_message(message: dict, db: AsyncSession):
@@ -248,9 +256,13 @@ async def process_message(message: dict, db: AsyncSession):
     if user.status == "active":
         quota = await user_service.check_quota(user)
         if not quota["allowed"]:
+            # Détecte si c'est un clic bouton quota → déclenche le bon flux
+            if text in ("action_invite", "action_pro"):
+                await handle_command(text.replace("action_", ""), phone, user, db)
+                return
             await whatsapp_sender.send_buttons(
                 phone,
-                messages.quota_reached(user.name or "ami", user.referral_code or ""),
+                messages.quota_reached(user.name or "ami"),
                 messages.QUOTA_BUTTONS,
             )
             return
@@ -368,7 +380,7 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession):
         if not quota["allowed"]:
             await whatsapp_sender.send_buttons(
                 phone,
-                messages.quota_reached(user.name or "ami", user.referral_code or ""),
+                messages.quota_reached(user.name or "ami"),
                 messages.QUOTA_BUTTONS,
             )
             return

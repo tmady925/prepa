@@ -14,12 +14,13 @@ PAYDUNYA_BASE_URL = (
     else "https://app.paydunya.com/sandbox-api/v1"
 )
 
-HEADERS = {
-    "PAYDUNYA-MASTER-KEY": settings.paydunya_master_key,
-    "PAYDUNYA-PRIVATE-KEY": settings.paydunya_private_key,
-    "PAYDUNYA-TOKEN": settings.paydunya_token,
-    "Content-Type": "application/json",
-}
+def _paydunya_headers() -> dict:
+    return {
+        "PAYDUNYA-MASTER-KEY": settings.paydunya_master_key,
+        "PAYDUNYA-PRIVATE-KEY": settings.paydunya_private_key,
+        "PAYDUNYA-TOKEN": settings.paydunya_token,
+        "Content-Type": "application/json",
+    }
 
 
 class PaymentService:
@@ -69,7 +70,7 @@ class PaymentService:
                 response = await client.post(
                     f"{PAYDUNYA_BASE_URL}/checkout-invoice/create",
                     json=payload,
-                    headers=HEADERS,
+                    headers=_paydunya_headers(),
                 )
                 print(f"PayDunya status: {response.status_code}")
                 print(f"PayDunya response: {response.text[:300]}")
@@ -134,7 +135,7 @@ class PaymentService:
             try:
                 response = await client.get(
                     f"{PAYDUNYA_BASE_URL}/softorder/details/{token}",
-                    headers=HEADERS,
+                    headers=_paydunya_headers(),
                 )
                 return response.json()
             except Exception as e:

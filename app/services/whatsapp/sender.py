@@ -6,7 +6,6 @@ settings = get_settings()
 
 
 def _headers() -> dict:
-    """Headers Wasender — rechargés à chaque appel pour supporter les updates runtime."""
     return {
         "Content-Type": "application/json",
         "Authorization": f"Bearer {settings.wasender_api_key}",
@@ -16,51 +15,28 @@ def _headers() -> dict:
 class WhatsAppSender:
 
     def _clean_for_whatsapp(self, text: str) -> str:
-        """Nettoie le texte pour WhatsApp — supprime Markdown et LaTeX."""
-        # Headers ### → *Titre*
         text = re.sub(r'^#{1,6}\s+(.+)$', r'*\1*', text, flags=re.MULTILINE)
-        # **gras** → *gras*
         text = re.sub(r'\*\*(.+?)\*\*', r'*\1*', text)
-        # \( formule \) → formule
         text = re.sub(r'\\\(\s*(.+?)\s*\\\)', r'\1', text, flags=re.DOTALL)
-        # \[ formule \] → formule
         text = re.sub(r'\\\[\s*(.+?)\s*\\\]', r'\1', text, flags=re.DOTALL)
-        # Séparateurs ---
         text = re.sub(r'^---+$', '', text, flags=re.MULTILINE)
-        # Lignes vides multiples
         text = re.sub(r'\n{3,}', '\n\n', text)
         return text.strip()
 
     async def send_text(self, phone: str, text: str) -> dict:
-        """Envoie un message texte simple."""
         cleaned = self._clean_for_whatsapp(text)
-        payload = {
-            "phone": phone,
-            "message": cleaned,
-        }
+        payload = {"phone": phone, "message": cleaned}
         return await self._send(payload)
 
     async def send_image_url(self, phone: str, url: str, caption: str = "") -> dict:
-        """Envoie une image via URL publique."""
-        payload = {
-            "phone": phone,
-            "image_url": url,
-            "caption": caption,
-        }
+        payload = {"phone": phone, "image_url": url, "caption": caption}
         return await self._send(payload, endpoint="send-image")
 
     async def send_image_bytes(self, phone: str, image_bytes: bytes, caption: str = "") -> dict:
-        """Envoie une image en base64. Wasender : upload via URL — on passe par Cloudinary."""
-        # Sans URL publique disponible → message texte de fallback
         print("send_image_bytes: utilise send_image_url avec une URL Cloudinary plutôt.")
         return {"error": "use_send_image_url"}
 
     async def send_buttons(self, phone: str, text: str, buttons: list[dict]) -> dict:
-        """
-        Envoie un message avec boutons interactifs (Wasender interactive).
-        Max 3 boutons. Si l'API Wasender ne supporte pas l'interactif,
-        dégrade automatiquement vers un message texte numéroté.
-        """
         cleaned = self._clean_for_whatsapp(text)
         payload = {
             "phone": phone,
@@ -84,8 +60,7 @@ class WhatsAppSender:
         }
         result = await self._send(payload)
 
-        # Fallback texte si Wasender rejette l'interactif
-        if result.get("error") or result.get("status") == "error":
+        if not result.get("success", True) or result.get("error"):
             options = "\n".join(
                 f"{i + 1}. {btn['title']}" for i, btn in enumerate(buttons[:3])
             )
@@ -98,10 +73,6 @@ class WhatsAppSender:
         return result
 
     async def send_list(self, phone: str, text: str, button_label: str, sections: list[dict]) -> dict:
-        """
-        Envoie un message avec liste de choix (Wasender interactive list).
-        Dégrade vers texte numéroté si non supporté.
-        """
         cleaned = self._clean_for_whatsapp(text)
         payload = {
             "phone": phone,
@@ -117,8 +88,7 @@ class WhatsAppSender:
         }
         result = await self._send(payload)
 
-        # Fallback texte si Wasender rejette l'interactif
-        if result.get("error") or result.get("status") == "error":
+        if not result.get("success", True) or result.get("error"):
             lines = [cleaned, ""]
             idx = 1
             for section in sections:
@@ -136,7 +106,6 @@ class WhatsAppSender:
         return result
 
     async def send_template(self, phone: str, template_name: str, language: str = "fr", components: list = None) -> dict:
-        """Envoie un template HSM (hors fenêtre 24h)."""
         payload = {
             "phone": phone,
             "type": "template",
@@ -150,6 +119,13 @@ class WhatsAppSender:
 
     async def _send(self, payload: dict, endpoint: str = "send-message") -> dict:
         """Envoie la requête HTTP à Wasender."""
+
+        # Mode développement — simule l'envoi sans appeler Wasender
+        if settings.app_env == "development":
+            msg_preview = payload.get("message", payload.get("image_url", str(payload)))[:80]
+            print(f"[DEV] WhatsApp → {payload.get('phone')}: {msg_preview}")
+            return {"success": True, "dev_mode": True}
+
         url = f"{settings.wasender_base_url}/{endpoint}"
         async with httpx.AsyncClient(timeout=10.0) as client:
             try:

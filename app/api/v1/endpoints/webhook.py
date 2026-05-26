@@ -51,12 +51,12 @@ async def webhook_receive(
 
     incoming = []
 
-    if event == "message.received" or "data" in data:
+    if event == "message.received":
         # Format Wasender événement : {"event": "message.received", "data": {...}}
         wasender_msg = data.get("data", {})
         if wasender_msg and not wasender_msg.get("fromMe", False):
             incoming = [wasender_msg]
-    elif "messages" in data:
+    elif not event and "messages" in data:
         # Format plat Wasender (ancienne version) : {"messages": [...]}
         incoming = data.get("messages", [])
 
@@ -75,7 +75,10 @@ async def webhook_receive(
                 continue
             await redis.setex(cache_key, 300, "1")
 
-        await process_message(message, db)
+        try:
+            await process_message(message, db)
+        except Exception as e:
+            print(f"process_message error (phone={message.get('from', '?')}): {e}")
 
     return {"status": "ok"}
 

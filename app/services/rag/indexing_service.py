@@ -1,8 +1,8 @@
 """
 Service d'indexation des documents dans la base vectorielle.
-Double indexation :
-  embedding (JSONB)        ← bge-m3 local (toujours disponible)
-  embedding_vector (pgvector) ← Mistral (si disponible)
+Provider unique : Mistral embed pour les deux colonnes.
+  embedding (JSONB)           ← Mistral (fallback cosinus Python)
+  embedding_vector (pgvector) ← Mistral (si pgvector disponible)
 """
 import uuid
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -34,19 +34,18 @@ class IndexingService:
         """
         Indexe un document complet.
         1. Extrait le texte + chunking sémantique
-        2. Génère embeddings bge-m3 (JSONB) — toujours
-        3. Génère embeddings Mistral (pgvector) — si disponible
-        4. Sauvegarde en base double colonne
-        5. Lance l'analyse cerveau automatiquement
+        2. Génère embeddings Mistral (JSONB + pgvector)
+        3. Sauvegarde en base double colonne
+        4. Lance l'analyse cerveau automatiquement
         """
         ext = filename.lower().split(".")[-1]
 
         # Détecte pgvector
         use_pgvector = await embedding_service.check_pgvector(db)
         if use_pgvector:
-            print("  → Double indexation : bge-m3 (JSONB) + Mistral (pgvector) ✅")
+            print("  → Double indexation : Mistral (JSONB) + Mistral (pgvector) ✅")
         else:
-            print("  → Indexation simple : bge-m3 (JSONB)")
+            print("  → Indexation simple : Mistral (JSONB)")
 
         # Crée l'entrée document
         doc = Document(
@@ -88,29 +87,27 @@ class IndexingService:
                 await db.commit()
                 return {"success": False, "error": "Aucun texte extrait"}
 
-            # ── Embeddings bge-m3 (JSONB) — toujours ─────────────────
-            print(f"  → Génération embeddings bge-m3 (JSONB)...")
-            local_embeddings = await embedding_service.embed_batch(chunks)
-            print(f"  → {len(local_embeddings)} embeddings bge-m3 ✅")
+            # ── Embeddings Mistral — pour JSONB et pgvector ───────────
+            print(f"  → Génération embeddings Mistral...")
+            mistral_embeddings = await embedding_service.embed_batch(chunks)
+            mistral_ok = sum(1 for e in mistral_embeddings if e is not None)
+            print(f"  → {mistral_ok}/{len(chunks)} embeddings Mistral ✅")
 
-            # ── Embeddings Mistral (pgvector) — si disponible ─────────
-            mistral_embeddings = [None] * len(chunks)
-            if use_pgvector:
-                print(f"  → Génération embeddings Mistral (pgvector)...")
-                mistral_embeddings = await embedding_service.embed_batch_mistral(chunks)
-                mistral_ok = sum(1 for e in mistral_embeddings if e is not None)
-                print(f"  → {mistral_ok}/{len(chunks)} embeddings Mistral ✅")
+            if mistral_ok == 0:
+                doc.status = "error"
+                doc.error_message = "Aucun embedding généré — clé Mistral invalide ou rate limit"
+                await db.commit()
+                return {"success": False, "error": "Aucun embedding généré"}
 
             # ── Sauvegarde les chunks ─────────────────────────────────
             saved = 0
             pgvector_saved = 0
 
             for i, chunk in enumerate(chunks):
-                local_emb = local_embeddings[i] if i < len(local_embeddings) else None
-                mistral_emb = mistral_embeddings[i] if i < len(mistral_embeddings) else None
+                emb = mistral_embeddings[i] if i < len(mistral_embeddings) else None
 
-                # bge-m3 obligatoire
-                if not local_emb:
+                # Embedding obligatoire
+                if not emb:
                     continue
 
                 doc_chunk = DocumentChunk(
@@ -125,13 +122,13 @@ class IndexingService:
                     doc_type=doc_type,
                     annee=annee,
                     niveau=niveau,
-                    embedding=local_emb,  # bge-m3 — toujours présent
+                    embedding=emb,  # Mistral — JSONB fallback
                 )
 
-                # Mistral — pgvector si disponible
-                if use_pgvector and mistral_emb:
+                # pgvector — même embedding Mistral
+                if use_pgvector:
                     try:
-                        doc_chunk.embedding_vector = mistral_emb
+                        doc_chunk.embedding_vector = emb
                         pgvector_saved += 1
                     except Exception as e:
                         print(f"  pgvector set error chunk {i}: {e}")

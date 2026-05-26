@@ -1,8 +1,8 @@
 """
 Service de recherche hybride — sémantique + BM25.
-Double provider :
+Provider unique : Mistral embed pour toutes les colonnes.
   pgvector → embed requête avec Mistral (cohérence avec embedding_vector)
-  JSONB    → embed requête avec bge-m3  (cohérence avec embedding)
+  JSONB    → embed requête avec Mistral (cohérence avec embedding)
 Cascade de fallback si pas assez de résultats.
 """
 import re
@@ -39,25 +39,15 @@ class SearchService:
     ) -> list[dict]:
         """
         Recherche hybride : sémantique + BM25.
-        Embed la requête avec le provider cohérent avec la colonne cible.
+        Embed la requête avec Mistral — même espace que les deux colonnes.
         Cascade : strict → sans chapitre → sans matière.
         """
-        # Détermine le mode et embed avec le bon provider
         use_pgvector = await self._check_pgvector(db)
 
-        if use_pgvector:
-            # pgvector → embed avec Mistral (même espace que embedding_vector)
-            query_embedding = await embedding_service.embed_text_mistral(query)
-            if not query_embedding:
-                # Mistral indispo → bascule JSONB avec bge-m3
-                print("Mistral embed indispo — bascule JSONB bge-m3")
-                use_pgvector = False
-                query_embedding = await embedding_service.embed_text_local(query)
-        else:
-            # JSONB → embed avec bge-m3 (même espace que embedding)
-            query_embedding = await embedding_service.embed_text_local(query)
-
+        # Embed la requête avec Mistral (provider unique)
+        query_embedding = await embedding_service.embed_text_mistral(query)
         if not query_embedding:
+            print("Mistral embed indisponible — recherche impossible")
             return []
 
         # Tentative 1 — filtres complets
@@ -179,14 +169,10 @@ class SearchService:
             result = await db.execute(sql, params)
             rows = result.fetchall()
         except Exception as e:
-            print(f"pgvector search error: {e} — fallback JSONB bge-m3")
+            print(f"pgvector search error: {e} — fallback JSONB")
             self._pgvector_available = False
-            # Fallback JSONB — re-embed avec bge-m3
-            jsonb_embedding = await embedding_service.embed_text_local(query_text)
-            if not jsonb_embedding:
-                return []
             return await self._search_jsonb(
-                db, jsonb_embedding, query_text,
+                db, query_embedding, query_text,
                 exam_type, series, subject, chapitre,
                 top_k, min_similarity,
             )
@@ -228,7 +214,7 @@ class SearchService:
         print(f"pgvector (Mistral): {len(scored)} résultats")
         return scored[:top_k]
 
-    # ── Mode JSONB — bge-m3 ───────────────────────────────────────────
+    # ── Mode JSONB — cosinus Python ───────────────────────────────────
 
     async def _search_jsonb(
         self,
@@ -242,7 +228,7 @@ class SearchService:
         top_k: int = 5,
         min_similarity: float = 0.4,
     ) -> list[dict]:
-        """Recherche JSONB avec cosinus Python — bge-m3."""
+        """Recherche JSONB avec cosinus Python — Mistral embeddings."""
         filters = [DocumentChunk.embedding.isnot(None)]
 
         if exam_type:
@@ -295,7 +281,7 @@ class SearchService:
                 })
 
         scored.sort(key=lambda x: x["similarity"], reverse=True)
-        print(f"JSONB (bge-m3): {len(scored)} résultats")
+        print(f"JSONB (Mistral): {len(scored)} résultats")
         return scored[:top_k]
 
     # ── BM25 ──────────────────────────────────────────────────────────

@@ -66,9 +66,26 @@ class OpenAIProvider:
 
 class AnthropicProvider:
     BASE_URL = "https://api.anthropic.com/v1/messages"
-    MODEL = "claude-haiku-4-5-20251001"
+    MODEL = "claude-haiku-4-5"
 
     async def complete(self, messages: list, max_tokens: int = 300) -> str:
+        # Anthropic exige que le system soit un champ top-level, pas dans messages[]
+        system_content = ""
+        chat_messages = []
+        for msg in messages:
+            if msg["role"] == "system":
+                system_content = msg["content"]
+            else:
+                chat_messages.append(msg)
+
+        payload = {
+            "model": self.MODEL,
+            "max_tokens": max_tokens,
+            "messages": chat_messages,
+        }
+        if system_content:
+            payload["system"] = system_content
+
         async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.post(
                 self.BASE_URL,
@@ -76,11 +93,7 @@ class AnthropicProvider:
                     "x-api-key": settings.anthropic_api_key,
                     "anthropic-version": "2023-06-01",
                 },
-                json={
-                    "model": self.MODEL,
-                    "messages": messages,
-                    "max_tokens": max_tokens,
-                },
+                json=payload,
             )
             data = response.json()
             return data["content"][0]["text"]

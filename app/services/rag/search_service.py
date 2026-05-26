@@ -6,10 +6,12 @@ Provider unique : Mistral embed pour toutes les colonnes.
 Cascade de fallback si pas assez de résultats.
 """
 import re
+import unicodedata
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_, or_, text
 from app.models.document import DocumentChunk
 from app.services.rag.embedding_service import embedding_service
+from app.services.config_service import config_service
 
 
 class SearchService:
@@ -34,6 +36,8 @@ class SearchService:
         series: str = None,
         subject: str = None,
         chapitre: str = None,
+        doc_type: str = None,
+        niveau: int = None,
         top_k: int = 5,
         min_similarity: float = 0.4,
     ) -> list[dict]:
@@ -42,6 +46,11 @@ class SearchService:
         Embed la requête avec Mistral — même espace que les deux colonnes.
         Cascade : strict → sans chapitre → sans matière.
         """
+        # min_similarity configurable via le dashboard admin
+        config_sim = await config_service.get_float("rag_min_similarity")
+        if config_sim:
+            min_similarity = config_sim
+
         use_pgvector = await self._check_pgvector(db)
 
         # Embed la requête avec Mistral (provider unique)
@@ -55,6 +64,7 @@ class SearchService:
             db, query_embedding, query,
             exam_type=exam_type, series=series,
             subject=subject, chapitre=chapitre,
+            doc_type=doc_type, niveau=niveau,
             top_k=top_k, min_similarity=min_similarity,
             use_pgvector=use_pgvector,
         )
@@ -68,6 +78,7 @@ class SearchService:
                 db, query_embedding, query,
                 exam_type=exam_type, series=series,
                 subject=subject, chapitre=None,
+                doc_type=doc_type, niveau=niveau,
                 top_k=top_k, min_similarity=min_similarity,
                 use_pgvector=use_pgvector,
             )
@@ -84,6 +95,7 @@ class SearchService:
                 db, query_embedding, query,
                 exam_type=exam_type, series=series,
                 subject=None, chapitre=None,
+                doc_type=doc_type, niveau=niveau,
                 top_k=top_k, min_similarity=min_similarity,
                 use_pgvector=use_pgvector,
             )
@@ -103,6 +115,8 @@ class SearchService:
         series: str = None,
         subject: str = None,
         chapitre: str = None,
+        doc_type: str = None,
+        niveau: int = None,
         top_k: int = 5,
         min_similarity: float = 0.4,
         use_pgvector: bool = False,
@@ -111,12 +125,12 @@ class SearchService:
             return await self._search_pgvector(
                 db, query_embedding, query_text,
                 exam_type, series, subject, chapitre,
-                top_k, min_similarity,
+                doc_type, niveau, top_k, min_similarity,
             )
         return await self._search_jsonb(
             db, query_embedding, query_text,
             exam_type, series, subject, chapitre,
-            top_k, min_similarity,
+            doc_type, niveau, top_k, min_similarity,
         )
 
     # ── Mode pgvector — SQL natif ─────────────────────────────────────
@@ -130,6 +144,8 @@ class SearchService:
         series: str = None,
         subject: str = None,
         chapitre: str = None,
+        doc_type: str = None,
+        niveau: int = None,
         top_k: int = 5,
         min_similarity: float = 0.4,
     ) -> list[dict]:
@@ -149,6 +165,12 @@ class SearchService:
         if chapitre:
             conditions.append("chapitre = :chapitre")
             params["chapitre"] = chapitre
+        if doc_type:
+            conditions.append("doc_type = :doc_type")
+            params["doc_type"] = doc_type
+        if niveau:
+            conditions.append("niveau <= :niveau")
+            params["niveau"] = niveau
 
         where_clause = " AND ".join(conditions)
         params["min_sim"] = min_similarity
@@ -178,7 +200,7 @@ class SearchService:
             return await self._search_jsonb(
                 db, query_embedding, query_text,
                 exam_type, series, subject, chapitre,
-                top_k, min_similarity,
+                doc_type, niveau, top_k, min_similarity,
             )
 
         if not rows:
@@ -229,6 +251,8 @@ class SearchService:
         series: str = None,
         subject: str = None,
         chapitre: str = None,
+        doc_type: str = None,
+        niveau: int = None,
         top_k: int = 5,
         min_similarity: float = 0.4,
     ) -> list[dict]:
@@ -245,6 +269,10 @@ class SearchService:
             filters.append(DocumentChunk.matiere == subject)
         if chapitre:
             filters.append(DocumentChunk.chapitre == chapitre)
+        if doc_type:
+            filters.append(DocumentChunk.doc_type == doc_type)
+        if niveau:
+            filters.append(DocumentChunk.niveau <= niveau)
 
         stmt = select(DocumentChunk).where(and_(*filters))
         result = await db.execute(stmt)
@@ -291,11 +319,14 @@ class SearchService:
     # ── BM25 ──────────────────────────────────────────────────────────
 
     def _bm25_score(self, query: str, chunks: list) -> dict:
-        """Calcule les scores BM25."""
+        """Calcule les scores BM25 avec normalisation des accents."""
         try:
             from rank_bm25 import BM25Okapi
 
             def tokenize(text: str) -> list[str]:
+                # Normalise les accents : énergie → energie, dérivée → derivee
+                text = unicodedata.normalize('NFKD', text)
+                text = text.encode('ascii', 'ignore').decode('ascii')
                 text = text.lower()
                 text = re.sub(r'[^\w\s]', ' ', text)
                 return [t for t in text.split() if len(t) > 2]
@@ -329,6 +360,8 @@ class SearchService:
         series: str = None,
         subject: str = None,
         chapitre: str = None,
+        doc_type: str = None,
+        niveau: int = None,
         top_k: int = 5,
     ) -> str:
         """Construit le contexte RAG à injecter dans le prompt LLM."""
@@ -339,6 +372,8 @@ class SearchService:
             series=series,
             subject=subject,
             chapitre=chapitre,
+            doc_type=doc_type,
+            niveau=niveau,
             top_k=top_k,
         )
 

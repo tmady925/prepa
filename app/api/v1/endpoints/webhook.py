@@ -26,6 +26,13 @@ async def webhook_verify(request: Request):
     return {"status": "ok"}
 
 
+@router.post("/webhook/debug")
+async def webhook_debug(request: Request):
+    data = await request.json()
+    print(f"DEBUG WEBHOOK: {data}")
+    return {"received": data}
+
+
 @router.post("/webhook")
 async def webhook_receive(
     request: Request,

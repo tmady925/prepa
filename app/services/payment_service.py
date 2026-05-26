@@ -56,7 +56,7 @@ class PaymentService:
             "actions": {
                 "cancel_url": "https://prepa.app/cancel",
                 "return_url": "https://prepa.app/success",
-                "callback_url": f"{settings.app_base_url}/api/v1/payments/webhook",
+                "callback_url": f"{settings.app_base_url}/api/v1/payments/ipn",
             },
             "custom_data": {
                 "user_id": str(user.id),

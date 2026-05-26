@@ -10,7 +10,7 @@ from app.services.whatsapp.sender import whatsapp_sender
 router = APIRouter()
 
 
-@router.post("/payments/webhook")
+@router.post("/payments/ipn")
 async def paydunya_webhook(
     request: Request,
     db: AsyncSession = Depends(get_db),

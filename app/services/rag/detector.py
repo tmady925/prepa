@@ -41,21 +41,17 @@ LABELS_MATIERE = {
         "logarithme exponentielle trigonométrie sinus cosinus",
         "polynôme complexe matrice algèbre analyse",
     ],
-    "physique": [
+    "physique_chimie": [
         "vitesse accélération force mouvement mécanique Newton",
         "tension courant résistance circuit électrique condensateur",
         "lumière optique lentille réfraction réflexion",
         "oscillation pendule ressort onde thermodynamique",
         "champ électrique magnétique énergie cinétique potentielle",
-    ],
-    "chimie": [
         "acide base pH neutralisation titrage dosage",
         "réaction chimique oxydation réduction équilibrer",
         "alcool aldéhyde cétone ester amine chimie organique",
         "mole concentration solution molaire",
         "atome molécule ion électron liaison covalente",
-    ],
-    "physique_chimie": [
         "noyau nucléaire radioactivité désintégration fission fusion",
         "isotope demi-vie activité rayonnement alpha bêta gamma",
         "réactions nucléaires équation bilan masse énergie",
@@ -200,17 +196,6 @@ MATIERE_KEYWORDS = {
         "logarithme", "exponentielle", "trigonometrie", "sin", "cos", "tan",
         "geometrie", "géométrie", "statistique", "complexe", "polynome",
     ],
-    "physique": [
-        "vitesse", "acceleration", "force", "mouvement", "newton", "energie",
-        "tension", "courant", "resistance", "circuit", "ohm", "volt", "ampere",
-        "condensateur", "bobine", "champ", "optique", "lumiere", "lentille",
-        "oscillation", "pendule", "onde", "thermodynamique",
-    ],
-    "chimie": [
-        "acide", "base", "ph", "reaction", "mol", "concentration", "oxyde",
-        "ion", "molecule", "atome", "oxydation", "titrage", "dosage",
-        "alcool", "amine", "ester", "alcane",
-    ],
     "svt": [
         "cellule", "adn", "gene", "chromosome", "mitose", "meiose",
         "photosynthese", "photosynthèse", "respiration", "digestion",
@@ -218,6 +203,13 @@ MATIERE_KEYWORDS = {
         "genetique", "proteine", "enzyme",
     ],
     "physique_chimie": [
+        "vitesse", "acceleration", "force", "mouvement", "newton", "energie",
+        "tension", "courant", "resistance", "circuit", "ohm", "volt", "ampere",
+        "condensateur", "bobine", "champ", "optique", "lumiere", "lentille",
+        "oscillation", "pendule", "onde", "thermodynamique",
+        "acide", "base", "ph", "reaction", "mol", "concentration", "oxyde",
+        "ion", "molecule", "atome", "oxydation", "titrage", "dosage",
+        "alcool", "amine", "ester", "alcane",
         "nucleaire", "radioactivite", "fission", "fusion", "desintegration",
         "isotope", "noyau", "rayonnement",
     ],

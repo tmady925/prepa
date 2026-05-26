@@ -308,7 +308,7 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession):
 
     elif step == "subjects":
         subject_map = {
-            "1": "maths", "2": "physique", "3": "svt",
+            "1": "maths", "2": "physique_chimie", "3": "svt",
             "4": "francais", "5": "philosophie",
             "6": "histoire_geo", "7": "anglais",
         }

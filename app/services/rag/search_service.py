@@ -157,11 +157,11 @@ class SearchService:
             SELECT
                 id, content, chunk_index, exam_type, serie,
                 matiere, chapitre, doc_type, annee, document_id,
-                1 - (embedding_vector <=> :query_vec::vector) AS semantic_score
+                1 - (embedding_vector <=> CAST(:query_vec AS vector)) AS semantic_score
             FROM document_chunks
             WHERE {where_clause}
-              AND 1 - (embedding_vector <=> :query_vec::vector) >= :min_sim
-            ORDER BY embedding_vector <=> :query_vec::vector
+              AND 1 - (embedding_vector <=> CAST(:query_vec AS vector)) >= :min_sim
+            ORDER BY embedding_vector <=> CAST(:query_vec AS vector)
             LIMIT :limit
         """)
 
@@ -171,6 +171,10 @@ class SearchService:
         except Exception as e:
             print(f"pgvector search error: {e} — fallback JSONB")
             self._pgvector_available = False
+            try:
+                await db.rollback()
+            except Exception:
+                pass
             return await self._search_jsonb(
                 db, query_embedding, query_text,
                 exam_type, series, subject, chapitre,

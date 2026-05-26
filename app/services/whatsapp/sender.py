@@ -34,10 +34,12 @@ class WhatsAppSender:
     async def send_image_url(self, phone: str, url: str, caption: str = "") -> dict:
         payload = {
             "to": phone,
-            "image_url": url,
-            "caption": caption,
+            "imageUrl": url,
+            "text": caption if caption else None,
         }
-        return await self._send(payload, endpoint="send-image")
+        if not payload["text"]:
+            del payload["text"]
+        return await self._send(payload)
 
     async def send_image_bytes(self, phone: str, image_bytes: bytes, caption: str = "") -> dict:
         print("send_image_bytes: utilise send_image_url avec une URL Cloudinary plutôt.")
@@ -45,39 +47,14 @@ class WhatsAppSender:
 
     async def send_buttons(self, phone: str, text: str, buttons: list[dict]) -> dict:
         cleaned = self._clean_for_whatsapp(text)
+        options = "\n".join(
+            f"{i + 1}. {btn['title']}" for i, btn in enumerate(buttons[:3])
+        )
         payload = {
             "to": phone,
-            "type": "interactive",
-            "interactive": {
-                "type": "button",
-                "body": {"text": cleaned},
-                "action": {
-                    "buttons": [
-                        {
-                            "type": "reply",
-                            "reply": {
-                                "id": btn["id"],
-                                "title": btn["title"][:20],
-                            },
-                        }
-                        for btn in buttons[:3]
-                    ]
-                },
-            },
+            "text": f"{cleaned}\n\n{options}",
         }
-        result = await self._send(payload)
-
-        if not result.get("success", True) or result.get("error"):
-            options = "\n".join(
-                f"{i + 1}. {btn['title']}" for i, btn in enumerate(buttons[:3])
-            )
-            fallback_payload = {
-                "to": phone,
-                "text": f"{cleaned}\n\n{options}",
-            }
-            return await self._send(fallback_payload)
-
-        return result
+        return await self._send(payload)
 
     async def send_list(self, phone: str, text: str, button_label: str, sections: list[dict]) -> dict:
         cleaned = self._clean_for_whatsapp(text)

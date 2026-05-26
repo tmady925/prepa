@@ -67,7 +67,7 @@ class PaymentService:
         async with httpx.AsyncClient(timeout=30.0) as client:
             try:
                 response = await client.post(
-                    f"{PAYDUNYA_BASE_URL}/softorder/create",
+                    f"{PAYDUNYA_BASE_URL}/checkout-invoice/create",
                     json=payload,
                     headers=HEADERS,
                 )
@@ -88,7 +88,7 @@ class PaymentService:
             return {
                 "success": True,
                 "token": data.get("token"),
-                "payment_url": data.get("payment_url"),
+                "payment_url": data.get("response_text"),  # response_text contient l'URL de paiement
                 "raw": data,
             }
 

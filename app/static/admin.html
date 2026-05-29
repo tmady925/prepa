@@ -247,21 +247,42 @@ Révise avec moi aujourd'hui ! 📚" oninput="updatePreview()"></textarea>
             </div>
 
             <div class="section">
-                <h2>📝 Upload Exercices</h2>
-                <p style="font-size:11px;color:#94a3b8;margin-bottom:12px">
-                    Uploade un document contenant des exercices — le système détecte automatiquement
-                    chaque exercice, génère les PDFs et crée les corrections.
+                <h2>📝 Ajouter un Exercice</h2>
+                <p style="font-size:11px;color:#94a3b8;margin-bottom:16px">
+                    Upload le PDF exercice et optionnellement la correction.
+                    Le niveau de difficulté est détecté automatiquement.
                 </p>
-                <div style="margin-bottom:16px;display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap">
+
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:16px">
+                    <!-- Colonne gauche : exercice -->
+                    <div style="background:#0f0f1a;border:1px solid #2d2d4e;border-radius:8px;padding:16px">
+                        <div style="font-size:12px;color:#818cf8;font-weight:600;margin-bottom:12px">📄 PDF Exercice *</div>
+                        <input type="file" id="exPdfFile" accept=".pdf"
+                            style="background:#1a1a2e;border:1px solid #3d3d6e;color:#e2e8f0;
+                            padding:6px;border-radius:6px;font-size:12px;width:100%;margin-bottom:8px"/>
+                        <div id="exPdfName" style="font-size:11px;color:#94a3b8"></div>
+                    </div>
+
+                    <!-- Colonne droite : correction -->
+                    <div style="background:#0f0f1a;border:1px solid #2d2d4e;border-radius:8px;padding:16px">
+                        <div style="font-size:12px;color:#10b981;font-weight:600;margin-bottom:12px">✅ PDF Correction (optionnel)</div>
+                        <input type="file" id="corrPdfFile" accept=".pdf"
+                            style="background:#1a1a2e;border:1px solid #3d3d6e;color:#e2e8f0;
+                            padding:6px;border-radius:6px;font-size:12px;width:100%;margin-bottom:8px"/>
+                        <div id="corrPdfName" style="font-size:11px;color:#94a3b8"></div>
+                    </div>
+                </div>
+
+                <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px">
                     <div>
-                        <div style="font-size:11px;color:#94a3b8;margin-bottom:4px">Fichier PDF</div>
-                        <input type="file" id="exFile" accept=".pdf"
-                            style="background:#0f0f1a;border:1px solid #3d3d6e;color:#e2e8f0;padding:6px;border-radius:6px;font-size:12px"/>
+                        <div style="font-size:11px;color:#94a3b8;margin-bottom:4px">Titre</div>
+                        <input type="text" id="exTitle" placeholder="Ex: Exercice acides-bases"
+                            style="background:#0f0f1a;border:1px solid #3d3d6e;color:#e2e8f0;
+                            padding:6px 10px;border-radius:6px;font-size:12px;width:200px"/>
                     </div>
                     <div>
-                        <div style="font-size:11px;color:#94a3b8;margin-bottom:4px">Examen</div>
-                        <select id="exExam">
-                            <option value="">-- Examen --</option>
+                        <div style="font-size:11px;color:#94a3b8;margin-bottom:4px">Examen *</div>
+                        <select id="exExamType">
                             <option value="bac_senegal">BAC Sénégal</option>
                             <option value="bfem">BFEM</option>
                             <option value="concours">Concours</option>
@@ -277,10 +298,11 @@ Révise avec moi aujourd'hui ! 📚" oninput="updatePreview()"></textarea>
                             <option value="L1">L1</option>
                             <option value="L2">L2</option>
                             <option value="T">T</option>
+                            <option value="STEG">STEG</option>
                         </select>
                     </div>
                     <div>
-                        <div style="font-size:11px;color:#94a3b8;margin-bottom:4px">Matière</div>
+                        <div style="font-size:11px;color:#94a3b8;margin-bottom:4px">Matière *</div>
                         <select id="exMatiere">
                             <option value="">-- Matière --</option>
                             <option value="maths">Maths</option>
@@ -292,10 +314,32 @@ Révise avec moi aujourd'hui ! 📚" oninput="updatePreview()"></textarea>
                             <option value="anglais">Anglais</option>
                         </select>
                     </div>
-                    <button class="btn-sm btn-green" onclick="uploadExercises()" style="padding:8px 16px">🔍 Analyser et Extraire</button>
+                    <div>
+                        <div style="font-size:11px;color:#94a3b8;margin-bottom:4px">Chapitre</div>
+                        <input type="text" id="exChapitre" placeholder="Ex: derivees"
+                            style="background:#0f0f1a;border:1px solid #3d3d6e;color:#e2e8f0;
+                            padding:6px 10px;border-radius:6px;font-size:12px;width:140px"/>
+                    </div>
+                    <div>
+                        <div style="font-size:11px;color:#94a3b8;margin-bottom:4px">Année</div>
+                        <input type="number" id="exAnnee" placeholder="2023"
+                            style="background:#0f0f1a;border:1px solid #3d3d6e;color:#e2e8f0;
+                            padding:6px 10px;border-radius:6px;font-size:12px;width:80px"/>
+                    </div>
+                    <div>
+                        <div style="font-size:11px;color:#94a3b8;margin-bottom:4px">Tags</div>
+                        <input type="text" id="exTags" placeholder="tag1, tag2"
+                            style="background:#0f0f1a;border:1px solid #3d3d6e;color:#e2e8f0;
+                            padding:6px 10px;border-radius:6px;font-size:12px;width:140px"/>
+                    </div>
+                    <div style="display:flex;align-items:flex-end">
+                        <button class="btn-sm btn-green" onclick="uploadExercisePdf()" style="padding:8px 16px">
+                            ⬆️ Ajouter l'exercice
+                        </button>
+                    </div>
                 </div>
-                <div id="exStatus" style="font-size:12px;color:#94a3b8;margin-bottom:12px"></div>
-                <div id="exResults"></div>
+
+                <div id="exUploadStatus" style="font-size:12px;color:#94a3b8;margin-top:8px"></div>
             </div>
 
             <div class="section">
@@ -701,6 +745,101 @@ async function uploadExercises() {
         }
     };
     reader.readAsDataURL(file);
+}
+
+// ── Upload exercice PDF ────────────────────────────────────────────
+
+// Preview noms fichiers
+document.addEventListener('DOMContentLoaded', () => {
+    document.getElementById('exPdfFile')?.addEventListener('change', (e) => {
+        const f = e.target.files[0];
+        document.getElementById('exPdfName').textContent = f ? `${f.name} (${(f.size/1024/1024).toFixed(1)}MB)` : '';
+    });
+    document.getElementById('corrPdfFile')?.addEventListener('change', (e) => {
+        const f = e.target.files[0];
+        document.getElementById('corrPdfName').textContent = f ? `${f.name} (${(f.size/1024/1024).toFixed(1)}MB)` : '';
+    });
+});
+
+async function uploadExercisePdf() {
+    const exFile = document.getElementById('exPdfFile').files[0];
+    const corrFile = document.getElementById('corrPdfFile').files[0];
+    const matiere = document.getElementById('exMatiere').value;
+    const status = document.getElementById('exUploadStatus');
+
+    if (!exFile) { showToast('Sélectionne un PDF exercice', true); return; }
+    if (!matiere) { showToast('Sélectionne une matière', true); return; }
+
+    status.textContent = '⏳ Lecture des fichiers...';
+
+    const toBase64 = (file) => new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result.split(',')[1]);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+    });
+
+    try {
+        const exercise_b64 = await toBase64(exFile);
+        const correction_b64 = corrFile ? await toBase64(corrFile) : null;
+
+        status.textContent = '⏳ Analyse du niveau par IA...';
+
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 120000);
+
+        const res = await fetch('/api/v1/admin/exercises/upload', {
+            method: 'POST',
+            headers: { 'X-Admin-Key': API_KEY, 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                exercise_b64,
+                correction_b64,
+                filename_ex: exFile.name,
+                filename_corr: corrFile?.name || 'correction.pdf',
+                title: document.getElementById('exTitle').value || '',
+                exam_type: document.getElementById('exExamType').value,
+                serie: document.getElementById('exSerie').value || null,
+                matiere,
+                chapitre: document.getElementById('exChapitre').value || null,
+                annee: document.getElementById('exAnnee').value || null,
+                tags: document.getElementById('exTags').value
+                    .split(',').map(t => t.trim()).filter(Boolean),
+            }),
+            signal: controller.signal,
+        });
+        clearTimeout(timeoutId);
+
+        const data = await res.json();
+
+        if (data.success) {
+            const niveauLabel = {1: '🟢 Facile', 2: '🟡 Intermédiaire', 3: '🔴 Difficile'}[data.niveau] || data.niveau;
+            status.innerHTML = `
+                ✅ Exercice ajouté !<br>
+                <span style="color:#818cf8">Niveau détecté : <strong>${niveauLabel}</strong></span><br>
+                <span style="color:#94a3b8">${data.matiere} — ${data.chapitre || 'général'} — ${data.exam_type}</span>
+                ${data.correction_path ? '<br><span style="color:#10b981">✅ Correction incluse</span>' : '<br><span style="color:#f59e0b">⚠️ Sans correction</span>'}
+            `;
+            showToast(`Exercice ajouté — Niveau ${data.niveau}`);
+
+            // Reset formulaire
+            document.getElementById('exPdfFile').value = '';
+            document.getElementById('corrPdfFile').value = '';
+            document.getElementById('exPdfName').textContent = '';
+            document.getElementById('corrPdfName').textContent = '';
+            document.getElementById('exTitle').value = '';
+            document.getElementById('exChapitre').value = '';
+            document.getElementById('exAnnee').value = '';
+            document.getElementById('exTags').value = '';
+        } else {
+            status.textContent = '❌ ' + (data.detail || 'Erreur inconnue');
+            showToast('Erreur upload', true);
+        }
+    } catch(e) {
+        status.textContent = e.name === 'AbortError'
+            ? '❌ Timeout — réessaie'
+            : '❌ ' + e.message;
+        showToast('Erreur', true);
+    }
 }
 
 async function deleteDocument(docId) {

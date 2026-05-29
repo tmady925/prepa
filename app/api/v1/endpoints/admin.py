@@ -402,6 +402,168 @@ async def upload_exercise_document(
     }
 
 
+@router.post("/admin/exercises/upload")
+async def upload_exercise(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    _: bool = Depends(verify_admin),
+):
+    """
+    Upload manuel d'un exercice PDF + correction PDF optionnelle.
+    Le niveau est déterminé automatiquement par Mistral.
+    """
+    import base64
+    import uuid
+    import json
+    import re
+    import httpx
+    from pathlib import Path
+    from app.models.exercise import Exercise
+
+    data = await request.json()
+    exercise_b64 = data.get("exercise_b64")
+    correction_b64 = data.get("correction_b64")
+    filename_ex = data.get("filename_ex", "exercice.pdf")
+    filename_corr = data.get("filename_corr", "correction.pdf")
+    matiere = data.get("matiere")
+    exam_type = data.get("exam_type", "bac_senegal")
+    serie = data.get("serie")
+    chapitre = data.get("chapitre")
+    annee = data.get("annee")
+    tags = data.get("tags", [])
+    title = data.get("title", "")
+
+    if not exercise_b64:
+        raise HTTPException(status_code=400, detail="exercise_b64 requis")
+    if not matiere:
+        raise HTTPException(status_code=400, detail="matiere requise")
+
+    # Décode les fichiers
+    try:
+        exercise_bytes = base64.b64decode(exercise_b64)
+    except Exception:
+        raise HTTPException(status_code=400, detail="exercise_b64 invalide")
+
+    correction_bytes = None
+    if correction_b64:
+        try:
+            correction_bytes = base64.b64decode(correction_b64)
+        except Exception:
+            pass
+
+    # Détermine le niveau automatiquement avec Mistral
+    niveau = 2  # défaut
+    try:
+        import fitz
+        doc = fitz.open(stream=exercise_bytes, filetype="pdf")
+        text = ""
+        for page in doc:
+            text += page.get_text("text")
+        doc.close()
+        text = text[:3000]
+
+        if text.strip():
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.post(
+                    "https://api.mistral.ai/v1/chat/completions",
+                    headers={"Authorization": f"Bearer {settings.mistral_api_key}"},
+                    json={
+                        "model": "mistral-small-latest",
+                        "messages": [{
+                            "role": "user",
+                            "content": f"""Analyse cet exercice scolaire sénégalais et détermine son niveau de difficulté.
+
+Matière : {matiere}
+Chapitre : {chapitre or 'général'}
+Examen : {exam_type} {serie or ''}
+
+Exercice :
+---
+{text}
+---
+
+Retourne UNIQUEMENT un JSON :
+{{"niveau": 1, "justification": "raison courte"}}
+
+niveau 1 = facile (élève moyen peut résoudre seul)
+niveau 2 = intermédiaire (nécessite bonne maîtrise du cours)
+niveau 3 = difficile (demande réflexion avancée, type concours)"""
+                        }],
+                        "temperature": 0.1,
+                        "max_tokens": 100,
+                    },
+                )
+                result = response.json()
+                if "choices" in result:
+                    raw = result["choices"][0]["message"]["content"].strip()
+                    raw = re.sub(r"```json|```", "", raw).strip()
+                    parsed = json.loads(raw)
+                    niveau = int(parsed.get("niveau", 2))
+                    print(f"  → Niveau détecté : {niveau} — {parsed.get('justification', '')}")
+    except Exception as e:
+        print(f"  → Erreur détection niveau: {e} — défaut niveau 2")
+
+    # Sauvegarde les fichiers
+    EXERCISES_DIR = Path("/home/prepa/app/exercises")
+    CORRECTIONS_DIR = Path("/home/prepa/app/corrections")
+
+    ex_folder = EXERCISES_DIR / matiere
+    ex_folder.mkdir(parents=True, exist_ok=True)
+
+    serie_clean = re.sub(r'[^A-Z0-9]', '', (serie or 'gen').upper())
+    base_name = f"{exam_type}_{serie_clean}_{matiere}_{chapitre or 'general'}"
+    if annee:
+        base_name += f"_{annee}"
+    base_name += f"_{uuid.uuid4().hex[:6]}"
+
+    # Sauvegarde exercice
+    ex_path = ex_folder / f"{base_name}.pdf"
+    ex_path.write_bytes(exercise_bytes)
+    ex_path.chmod(0o644)
+    print(f"  → Exercice sauvegardé : {ex_path}")
+
+    # Sauvegarde correction si présente
+    corr_path = None
+    if correction_bytes:
+        corr_folder = CORRECTIONS_DIR / matiere
+        corr_folder.mkdir(parents=True, exist_ok=True)
+        corr_path = corr_folder / f"{base_name}_correction.pdf"
+        corr_path.write_bytes(correction_bytes)
+        corr_path.chmod(0o644)
+        print(f"  → Correction sauvegardée : {corr_path}")
+
+    # Sauvegarde en DB
+    exercise = Exercise(
+        title=title or base_name,
+        exam_type=exam_type,
+        serie=serie,
+        matiere=matiere,
+        chapitre=chapitre,
+        niveau=niveau,
+        annee=int(annee) if annee else None,
+        tags=tags if tags else None,
+        exercise_path=str(ex_path),
+        correction_path=str(corr_path) if corr_path else None,
+        correction_generated=False,
+        status="ready",
+    )
+    db.add(exercise)
+    await db.commit()
+
+    return {
+        "success": True,
+        "id": str(exercise.id),
+        "title": exercise.title,
+        "niveau": niveau,
+        "matiere": matiere,
+        "exam_type": exam_type,
+        "serie": serie,
+        "chapitre": chapitre,
+        "exercise_path": str(ex_path),
+        "correction_path": str(corr_path) if corr_path else None,
+    }
+
+
 @router.get("/admin/documents")
 async def get_documents(
     db: AsyncSession = Depends(get_db),

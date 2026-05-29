@@ -43,13 +43,6 @@ async def webhook_receive(
 
     data = json.loads(body)
 
-    if data.get("event") == "messages.received":
-        msg = data.get("data", {}).get("messages", {})
-        image_msg = msg.get("message", {}).get("imageMessage", {})
-        if image_msg:
-            print(f"DEBUG imageMessage keys: {list(image_msg.keys())}")
-            print(f"DEBUG imageMessage: {str(image_msg)[:300]}")
-
     # ── Format Wasender ───────────────────────────────────────────────
     event = data.get("event", "")
 
@@ -64,12 +57,23 @@ async def webhook_receive(
     if event in ("messages.received",):
         msg_data = data.get("data", {}).get("messages", {})
         if msg_data and not msg_data.get("key", {}).get("fromMe", False):
+            # Détecte le type de message
+            raw_message = msg_data.get("message", {}) or {}
+            if "imageMessage" in raw_message:
+                msg_type = "image"
+            elif "documentMessage" in raw_message:
+                msg_type = "document"
+            else:
+                msg_type = "text"
+
             incoming = [{
                 "from": msg_data.get("key", {}).get("cleanedSenderPn", ""),
-                "type": "text",
+                "type": msg_type,
                 "body": msg_data.get("messageBody", ""),
                 "id": msg_data.get("key", {}).get("id", ""),
                 "fromMe": False,
+                "key": msg_data.get("key", {}),
+                "message": raw_message,
             }]
 
     if not incoming:
@@ -222,31 +226,23 @@ async def process_message(message: dict, db: AsyncSession):
     if not phone:
         return
 
-    # Détecte les images (copies manuscrites)
     image_data = None
     text = ""
-    if msg_type == "text":
-        # Wasender : le corps du message est dans "body" directement
+    if msg_type == "image":
+        image_data = {
+            "key": message.get("key", {}),
+            "message": message.get("message", {}),
+        }
+    elif msg_type == "text":
         text = message.get("body", "").strip()
     elif msg_type == "interactive":
-        # Wasender interactive (si supporté) — même structure que Meta
         interactive = message.get("interactive", {})
         if interactive.get("type") == "button_reply":
             text = interactive["button_reply"].get("id", "")
         elif interactive.get("type") == "list_reply":
             text = interactive["list_reply"].get("id", "")
     elif msg_type == "button":
-        # Certains providers renvoient les réponses bouton comme type "button"
         text = message.get("button", {}).get("payload", "") or message.get("body", "")
-    else:
-        # Vérifie si c'est une image
-        raw_msg = message.get("message", {}) or {}
-        if "imageMessage" in raw_msg:
-            image_data = {
-                "key": message.get("key", {}),
-                "message": raw_msg,
-            }
-            msg_type = "image"
 
     if not text and not image_data:
         return

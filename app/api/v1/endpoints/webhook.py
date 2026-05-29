@@ -43,6 +43,12 @@ async def webhook_receive(
 
     data = json.loads(body)
 
+    # Log temporaire pour voir le format des messages media
+    if data.get("event") == "messages.received":
+        msg = data.get("data", {}).get("messages", {})
+        msg_type = msg.get("message", {})
+        print(f"DEBUG webhook: event={data.get('event')} keys={list(msg.keys())} message_keys={list(msg_type.keys()) if isinstance(msg_type, dict) else msg_type}")
+
     # ── Format Wasender ───────────────────────────────────────────────
     event = data.get("event", "")
 

@@ -1,857 +1,2089 @@
 <!DOCTYPE html>
 <html lang="fr">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Prepa — Dashboard Admin</title>
-    <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0f0f1a; color: #e2e8f0; min-height: 100vh; }
-        .header { background: #1a1a2e; padding: 20px 32px; border-bottom: 1px solid #2d2d4e; display: flex; justify-content: space-between; align-items: center; }
-        .header h1 { font-size: 22px; font-weight: 700; color: #818cf8; }
-        .header .auth { display: flex; gap: 12px; align-items: center; }
-        .header input[type=password] { background: #2d2d4e; border: 1px solid #3d3d6e; color: #e2e8f0; padding: 8px 14px; border-radius: 8px; font-size: 14px; width: 240px; }
-        .header button { background: #6366f1; color: white; border: none; padding: 8px 18px; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: 600; }
-        .header button:hover { background: #4f46e5; }
-        .container { max-width: 1200px; margin: 0 auto; padding: 32px; }
-        .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px; margin-bottom: 32px; }
-        .stat-card { background: #1a1a2e; border: 1px solid #2d2d4e; border-radius: 12px; padding: 20px; text-align: center; }
-        .stat-card .value { font-size: 32px; font-weight: 800; color: #818cf8; }
-        .stat-card .label { font-size: 12px; color: #94a3b8; margin-top: 4px; text-transform: uppercase; letter-spacing: 0.05em; }
-        .section { background: #1a1a2e; border: 1px solid #2d2d4e; border-radius: 12px; padding: 24px; margin-bottom: 24px; }
-        .section h2 { font-size: 16px; font-weight: 600; margin-bottom: 20px; color: #c7d2fe; }
-        table { width: 100%; border-collapse: collapse; font-size: 13px; }
-        th { text-align: left; padding: 10px 14px; color: #94a3b8; font-weight: 500; border-bottom: 1px solid #2d2d4e; font-size: 11px; text-transform: uppercase; }
-        td { padding: 10px 14px; border-bottom: 1px solid #1e1e38; }
-        tr:hover td { background: #1e1e38; }
-        .badge { display: inline-block; padding: 2px 10px; border-radius: 20px; font-size: 11px; font-weight: 600; }
-        .badge.pro { background: #fef3c7; color: #92400e; }
-        .badge.free { background: #e0e7ff; color: #3730a3; }
-        .badge.active { background: #d1fae5; color: #065f46; }
-        .badge.indexed { background: #d1fae5; color: #065f46; }
-        .badge.onboarding { background: #fce7f3; color: #9d174d; }
-        .badge.processing { background: #fef3c7; color: #92400e; }
-        .badge.error { background: #fee2e2; color: #991b1b; }
-        .btn-sm { background: #6366f1; color: white; border: none; padding: 4px 10px; border-radius: 6px; cursor: pointer; font-size: 11px; }
-        .btn-sm:hover { background: #4f46e5; }
-        .btn-danger { background: #ef4444; }
-        .btn-danger:hover { background: #dc2626; }
-        .btn-green { background: #10b981; }
-        .btn-green:hover { background: #059669; }
-        .config-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; }
-        .config-item { background: #0f0f1a; border: 1px solid #2d2d4e; border-radius: 8px; padding: 14px; display: flex; justify-content: space-between; align-items: center; gap: 12px; }
-        .config-key { font-size: 12px; color: #94a3b8; font-family: monospace; }
-        .config-value { display: flex; gap: 8px; align-items: center; }
-        .config-value input { background: #1a1a2e; border: 1px solid #3d3d6e; color: #e2e8f0; padding: 5px 10px; border-radius: 6px; font-size: 13px; width: 100px; text-align: right; }
-        .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 4px; }
-        .dot.custom { background: #818cf8; }
-        .dot.default { background: #4b5563; }
-        .loading { color: #94a3b8; text-align: center; padding: 40px; }
-        .toast { position: fixed; bottom: 24px; right: 24px; background: #10b981; color: white; padding: 12px 20px; border-radius: 10px; font-size: 14px; display: none; z-index: 1000; }
-        select { background: #0f0f1a; border: 1px solid #3d3d6e; color: #e2e8f0; padding: 6px; border-radius: 6px; font-size: 12px; }
-        textarea { background: #0f0f1a; border: 1px solid #3d3d6e; color: #e2e8f0; padding: 10px; border-radius: 8px; font-size: 13px; width: 100%; resize: vertical; font-family: inherit; }
-        .notif-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
-        .notif-preview { background: #0f0f1a; border: 1px solid #2d2d4e; border-radius: 8px; padding: 16px; min-height: 120px; font-size: 13px; line-height: 1.6; white-space: pre-wrap; }
-        .target-badge { background: #6366f1; color: white; padding: 4px 12px; border-radius: 20px; font-size: 13px; font-weight: 600; display: inline-block; margin-left: 8px; }
-        .variables-hint { background: #1e1e38; border-radius: 6px; padding: 10px 14px; font-size: 11px; color: #94a3b8; margin-bottom: 12px; }
-        .variables-hint code { background: #2d2d4e; padding: 1px 5px; border-radius: 3px; color: #818cf8; }
-        @media (max-width: 768px) { .notif-grid { grid-template-columns: 1fr; } }
-    </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Prepa — Dashboard Admin</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+:root {
+  --bg: #080b14;
+  --surface: #0d1117;
+  --surface2: #131920;
+  --surface3: #1a2332;
+  --border: rgba(255,255,255,0.06);
+  --border2: rgba(255,255,255,0.1);
+  --text: #e2e8f0;
+  --text2: #8b9cb0;
+  --text3: #4a5568;
+  --accent: #3b82f6;
+  --accent2: #60a5fa;
+  --accent-glow: rgba(59,130,246,0.15);
+  --green: #10b981;
+  --green-dim: rgba(16,185,129,0.1);
+  --red: #ef4444;
+  --red-dim: rgba(239,68,68,0.1);
+  --yellow: #f59e0b;
+  --yellow-dim: rgba(245,158,11,0.1);
+  --purple: #8b5cf6;
+  --purple-dim: rgba(139,92,246,0.1);
+  --sidebar-w: 240px;
+  --topbar-h: 60px;
+  --radius: 12px;
+  --radius-sm: 8px;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html { font-size: 14px; }
+body {
+  font-family: 'Space Grotesk', sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+/* ── Scrollbar ── */
+::-webkit-scrollbar { width: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 2px; }
+
+/* ── Auth overlay ── */
+#auth-overlay {
+  position: fixed; inset: 0; z-index: 1000;
+  background: var(--bg);
+  display: flex; align-items: center; justify-content: center;
+}
+.auth-card {
+  width: 380px;
+  background: var(--surface);
+  border: 1px solid var(--border2);
+  border-radius: 20px;
+  padding: 40px;
+  text-align: center;
+}
+.auth-logo {
+  width: 56px; height: 56px;
+  background: linear-gradient(135deg, var(--accent), var(--purple));
+  border-radius: 16px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 24px; margin: 0 auto 20px;
+  box-shadow: 0 0 40px var(--accent-glow);
+}
+.auth-card h1 { font-size: 22px; font-weight: 700; margin-bottom: 6px; }
+.auth-card p { color: var(--text2); font-size: 13px; margin-bottom: 28px; }
+.auth-input {
+  width: 100%;
+  background: var(--surface2);
+  border: 1px solid var(--border2);
+  color: var(--text);
+  padding: 12px 16px;
+  border-radius: var(--radius-sm);
+  font-size: 14px;
+  font-family: inherit;
+  margin-bottom: 12px;
+  outline: none;
+  transition: border-color 0.2s;
+}
+.auth-input:focus { border-color: var(--accent); }
+.auth-btn {
+  width: 100%;
+  background: linear-gradient(135deg, var(--accent), var(--purple));
+  color: white; border: none;
+  padding: 12px; border-radius: var(--radius-sm);
+  font-size: 14px; font-weight: 600; cursor: pointer;
+  font-family: inherit;
+  transition: opacity 0.2s;
+}
+.auth-btn:hover { opacity: 0.9; }
+.auth-error { color: var(--red); font-size: 12px; margin-top: 8px; display: none; }
+
+/* ── Layout ── */
+#app { display: none; min-height: 100vh; }
+
+/* ── Sidebar ── */
+.sidebar {
+  position: fixed; left: 0; top: 0; bottom: 0;
+  width: var(--sidebar-w);
+  background: var(--surface);
+  border-right: 1px solid var(--border);
+  display: flex; flex-direction: column;
+  z-index: 100;
+  overflow-y: auto;
+}
+.sidebar-logo {
+  padding: 20px;
+  display: flex; align-items: center; gap: 10px;
+  border-bottom: 1px solid var(--border);
+}
+.logo-icon {
+  width: 36px; height: 36px;
+  background: linear-gradient(135deg, var(--accent), var(--purple));
+  border-radius: 10px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 16px;
+  box-shadow: 0 0 20px var(--accent-glow);
+}
+.logo-text { font-size: 16px; font-weight: 700; }
+.logo-badge {
+  font-size: 9px; font-weight: 600;
+  background: var(--accent-glow);
+  color: var(--accent2);
+  border: 1px solid var(--accent);
+  padding: 2px 6px; border-radius: 20px;
+  margin-left: auto;
+}
+
+.sidebar-section {
+  padding: 16px 12px 4px;
+  font-size: 10px; font-weight: 600; letter-spacing: 0.1em;
+  color: var(--text3); text-transform: uppercase;
+}
+.nav-item {
+  display: flex; align-items: center; gap: 10px;
+  padding: 9px 12px; margin: 1px 8px;
+  border-radius: var(--radius-sm);
+  cursor: pointer; transition: all 0.15s;
+  color: var(--text2); font-size: 13px; font-weight: 500;
+  text-decoration: none;
+}
+.nav-item:hover { background: var(--surface2); color: var(--text); }
+.nav-item.active {
+  background: var(--accent-glow);
+  color: var(--accent2);
+  border: 1px solid rgba(59,130,246,0.2);
+}
+.nav-item .icon { font-size: 16px; width: 20px; text-align: center; }
+.nav-badge {
+  margin-left: auto; font-size: 10px; font-weight: 600;
+  background: var(--accent); color: white;
+  padding: 1px 6px; border-radius: 10px;
+  min-width: 18px; text-align: center;
+}
+
+.sidebar-footer {
+  margin-top: auto; padding: 16px;
+  border-top: 1px solid var(--border);
+}
+.admin-card {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 12px;
+  background: var(--surface2); border-radius: var(--radius-sm);
+}
+.admin-avatar {
+  width: 32px; height: 32px;
+  background: linear-gradient(135deg, var(--accent), var(--purple));
+  border-radius: 8px; display: flex; align-items: center; justify-content: center;
+  font-size: 14px; font-weight: 700;
+}
+.admin-name { font-size: 12px; font-weight: 600; }
+.admin-role { font-size: 10px; color: var(--text3); }
+
+/* ── Topbar ── */
+.topbar {
+  position: fixed; top: 0; left: var(--sidebar-w); right: 0;
+  height: var(--topbar-h);
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  display: flex; align-items: center;
+  padding: 0 24px; gap: 16px;
+  z-index: 99;
+}
+.page-title { font-size: 16px; font-weight: 700; }
+.topbar-search {
+  margin-left: auto;
+  background: var(--surface2); border: 1px solid var(--border2);
+  color: var(--text); padding: 7px 14px;
+  border-radius: 20px; font-size: 12px; outline: none;
+  width: 220px; font-family: inherit;
+  transition: all 0.2s;
+}
+.topbar-search:focus { border-color: var(--accent); width: 280px; }
+.topbar-btn {
+  width: 36px; height: 36px;
+  background: var(--surface2); border: 1px solid var(--border);
+  color: var(--text2); border-radius: var(--radius-sm);
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer; font-size: 16px; transition: all 0.15s;
+}
+.topbar-btn:hover { background: var(--surface3); color: var(--text); }
+.topbar-dot {
+  width: 8px; height: 8px; background: var(--green);
+  border-radius: 50%; margin-right: 4px; display: inline-block;
+  box-shadow: 0 0 6px var(--green);
+  animation: pulse 2s infinite;
+}
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.5} }
+.live-badge {
+  display: flex; align-items: center; gap: 4px;
+  font-size: 11px; color: var(--green);
+  background: var(--green-dim); padding: 4px 10px;
+  border-radius: 20px; border: 1px solid rgba(16,185,129,0.2);
+}
+
+/* ── Main content ── */
+.main {
+  margin-left: var(--sidebar-w);
+  margin-top: var(--topbar-h);
+  padding: 24px;
+  min-height: calc(100vh - var(--topbar-h));
+}
+
+/* ── Pages ── */
+.page { display: none; }
+.page.active { display: block; }
+
+/* ── Cards ── */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 20px;
+}
+.card-header {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 16px;
+}
+.card-title { font-size: 14px; font-weight: 600; }
+.card-subtitle { font-size: 11px; color: var(--text2); margin-top: 2px; }
+
+/* ── KPI Grid ── */
+.kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 16px; margin-bottom: 24px;
+}
+.kpi-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 20px;
+  position: relative; overflow: hidden;
+  transition: border-color 0.2s;
+}
+.kpi-card:hover { border-color: var(--border2); }
+.kpi-card::before {
+  content: '';
+  position: absolute; top: 0; left: 0; right: 0; height: 2px;
+}
+.kpi-card.blue::before { background: linear-gradient(90deg, var(--accent), transparent); }
+.kpi-card.green::before { background: linear-gradient(90deg, var(--green), transparent); }
+.kpi-card.purple::before { background: linear-gradient(90deg, var(--purple), transparent); }
+.kpi-card.yellow::before { background: linear-gradient(90deg, var(--yellow), transparent); }
+.kpi-label { font-size: 11px; color: var(--text2); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 8px; }
+.kpi-value { font-size: 28px; font-weight: 700; font-family: 'JetBrains Mono', monospace; margin-bottom: 6px; }
+.kpi-value.blue { color: var(--accent2); }
+.kpi-value.green { color: var(--green); }
+.kpi-value.purple { color: var(--purple); }
+.kpi-value.yellow { color: var(--yellow); }
+.kpi-change { font-size: 11px; }
+.kpi-change.up { color: var(--green); }
+.kpi-change.down { color: var(--red); }
+.kpi-icon {
+  position: absolute; right: 16px; top: 16px;
+  font-size: 28px; opacity: 0.15;
+}
+
+/* ── Grid layouts ── */
+.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; }
+.grid-6-4 { display: grid; grid-template-columns: 6fr 4fr; gap: 16px; }
+@media (max-width: 1100px) {
+  .grid-2, .grid-3, .grid-6-4 { grid-template-columns: 1fr; }
+}
+
+/* ── Table ── */
+.table-wrap { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+th {
+  text-align: left; padding: 10px 14px;
+  color: var(--text3); font-size: 10px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.05em;
+  border-bottom: 1px solid var(--border);
+}
+td { padding: 11px 14px; border-bottom: 1px solid var(--border); }
+tr:last-child td { border-bottom: none; }
+tr:hover td { background: rgba(255,255,255,0.02); }
+
+/* ── Badges ── */
+.badge {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 3px 10px; border-radius: 20px;
+  font-size: 11px; font-weight: 600;
+}
+.badge.green { background: var(--green-dim); color: var(--green); border: 1px solid rgba(16,185,129,0.2); }
+.badge.red { background: var(--red-dim); color: var(--red); border: 1px solid rgba(239,68,68,0.2); }
+.badge.blue { background: var(--accent-glow); color: var(--accent2); border: 1px solid rgba(59,130,246,0.2); }
+.badge.yellow { background: var(--yellow-dim); color: var(--yellow); border: 1px solid rgba(245,158,11,0.2); }
+.badge.purple { background: var(--purple-dim); color: var(--purple); border: 1px solid rgba(139,92,246,0.2); }
+.badge.gray { background: rgba(255,255,255,0.05); color: var(--text2); }
+
+/* ── Buttons ── */
+.btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 8px 16px; border-radius: var(--radius-sm);
+  font-size: 12px; font-weight: 600; cursor: pointer;
+  font-family: inherit; border: none; transition: all 0.15s;
+}
+.btn-primary { background: var(--accent); color: white; }
+.btn-primary:hover { background: #2563eb; }
+.btn-success { background: var(--green); color: white; }
+.btn-success:hover { background: #059669; }
+.btn-danger { background: var(--red); color: white; }
+.btn-danger:hover { background: #dc2626; }
+.btn-ghost {
+  background: var(--surface2); color: var(--text2);
+  border: 1px solid var(--border);
+}
+.btn-ghost:hover { background: var(--surface3); color: var(--text); }
+.btn-sm { padding: 5px 10px; font-size: 11px; }
+.btn-icon { padding: 6px; width: 30px; height: 30px; justify-content: center; }
+
+/* ── Form elements ── */
+.form-group { margin-bottom: 16px; }
+.form-label { font-size: 11px; font-weight: 600; color: var(--text2); margin-bottom: 6px; display: block; text-transform: uppercase; letter-spacing: 0.05em; }
+.form-input, .form-select, .form-textarea {
+  width: 100%;
+  background: var(--surface2); border: 1px solid var(--border2);
+  color: var(--text); padding: 9px 12px;
+  border-radius: var(--radius-sm); font-size: 13px;
+  font-family: inherit; outline: none; transition: border-color 0.2s;
+}
+.form-input:focus, .form-select:focus, .form-textarea:focus { border-color: var(--accent); }
+.form-textarea { resize: vertical; min-height: 80px; }
+.form-select option { background: var(--surface2); }
+.form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.form-row-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }
+
+/* ── Upload zones ── */
+.upload-zone {
+  border: 2px dashed var(--border2);
+  border-radius: var(--radius);
+  padding: 32px; text-align: center;
+  cursor: pointer; transition: all 0.2s;
+}
+.upload-zone:hover { border-color: var(--accent); background: var(--accent-glow); }
+.upload-zone.has-file { border-color: var(--green); background: var(--green-dim); }
+.upload-icon { font-size: 32px; margin-bottom: 10px; }
+.upload-text { font-size: 13px; color: var(--text2); }
+.upload-sub { font-size: 11px; color: var(--text3); margin-top: 4px; }
+
+/* ── Progress ── */
+.progress-bar {
+  height: 4px; background: var(--surface3); border-radius: 2px; overflow: hidden;
+}
+.progress-fill {
+  height: 100%; border-radius: 2px;
+  transition: width 0.3s;
+}
+
+/* ── Toast ── */
+#toast {
+  position: fixed; bottom: 24px; right: 24px;
+  padding: 12px 20px; border-radius: var(--radius-sm);
+  font-size: 13px; font-weight: 500;
+  display: none; z-index: 9999;
+  animation: slideUp 0.3s ease;
+  max-width: 300px;
+}
+@keyframes slideUp {
+  from { transform: translateY(20px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+#toast.success { background: var(--green); color: white; }
+#toast.error { background: var(--red); color: white; }
+
+/* ── Activity feed ── */
+.activity-item {
+  display: flex; align-items: flex-start; gap: 12px;
+  padding: 12px 0; border-bottom: 1px solid var(--border);
+}
+.activity-item:last-child { border-bottom: none; }
+.activity-dot {
+  width: 8px; height: 8px; border-radius: 50%; margin-top: 5px; flex-shrink: 0;
+}
+.activity-text { font-size: 12px; line-height: 1.5; }
+.activity-time { font-size: 10px; color: var(--text3); margin-top: 2px; }
+
+/* ── Stats mini ── */
+.stat-row {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 0; border-bottom: 1px solid var(--border);
+}
+.stat-row:last-child { border-bottom: none; }
+.stat-label { font-size: 12px; color: var(--text2); }
+.stat-val { font-size: 13px; font-weight: 600; font-family: 'JetBrains Mono', monospace; }
+
+/* ── Pagination ── */
+.pagination {
+  display: flex; align-items: center; gap: 4px;
+  justify-content: center; margin-top: 16px;
+}
+.page-btn {
+  width: 32px; height: 32px;
+  background: var(--surface2); border: 1px solid var(--border);
+  color: var(--text2); border-radius: var(--radius-sm);
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer; font-size: 12px; transition: all 0.15s;
+}
+.page-btn:hover, .page-btn.active {
+  background: var(--accent); color: white; border-color: var(--accent);
+}
+
+/* ── Empty state ── */
+.empty-state {
+  text-align: center; padding: 48px 24px; color: var(--text3);
+}
+.empty-icon { font-size: 40px; margin-bottom: 12px; }
+.empty-text { font-size: 14px; margin-bottom: 6px; }
+.empty-sub { font-size: 12px; }
+
+/* ── Loading ── */
+.spinner {
+  width: 20px; height: 20px; border: 2px solid var(--border2);
+  border-top-color: var(--accent); border-radius: 50%;
+  animation: spin 0.6s linear infinite; display: inline-block;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ── Modal ── */
+.modal-overlay {
+  position: fixed; inset: 0; background: rgba(0,0,0,0.7);
+  display: none; align-items: center; justify-content: center; z-index: 500;
+}
+.modal-overlay.open { display: flex; }
+.modal {
+  background: var(--surface); border: 1px solid var(--border2);
+  border-radius: 16px; padding: 28px; width: 520px; max-width: 90vw;
+  max-height: 85vh; overflow-y: auto;
+}
+.modal-header {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 20px;
+}
+.modal-title { font-size: 16px; font-weight: 700; }
+.modal-close {
+  width: 28px; height: 28px; background: var(--surface2);
+  border: 1px solid var(--border); border-radius: 6px;
+  cursor: pointer; display: flex; align-items: center; justify-content: center;
+  color: var(--text2); font-size: 16px;
+}
+.modal-close:hover { background: var(--surface3); color: var(--text); }
+
+/* ── Search filter bar ── */
+.filter-bar {
+  display: flex; gap: 10px; align-items: center;
+  margin-bottom: 16px; flex-wrap: wrap;
+}
+.filter-input {
+  background: var(--surface2); border: 1px solid var(--border2);
+  color: var(--text); padding: 7px 12px;
+  border-radius: var(--radius-sm); font-size: 12px;
+  font-family: inherit; outline: none;
+  transition: border-color 0.2s;
+}
+.filter-input:focus { border-color: var(--accent); }
+.filter-select {
+  background: var(--surface2); border: 1px solid var(--border2);
+  color: var(--text); padding: 7px 10px;
+  border-radius: var(--radius-sm); font-size: 12px;
+  font-family: inherit; outline: none; cursor: pointer;
+}
+
+/* ── Niveau indicators ── */
+.niveau-1 { color: var(--green); }
+.niveau-2 { color: var(--yellow); }
+.niveau-3 { color: var(--red); }
+
+/* ── Toggle ── */
+.toggle {
+  width: 36px; height: 20px;
+  background: var(--surface3); border-radius: 10px;
+  cursor: pointer; position: relative; transition: background 0.2s;
+}
+.toggle.on { background: var(--accent); }
+.toggle::after {
+  content: ''; position: absolute;
+  width: 16px; height: 16px; background: white;
+  border-radius: 50%; top: 2px; left: 2px;
+  transition: transform 0.2s;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+}
+.toggle.on::after { transform: translateX(16px); }
+
+/* ── Chart container ── */
+.chart-container { position: relative; }
+
+/* ── Section header ── */
+.section-header {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 20px;
+}
+.section-title { font-size: 18px; font-weight: 700; }
+.section-sub { font-size: 12px; color: var(--text2); margin-top: 2px; }
+</style>
 </head>
 <body>
-<div class="header">
-    <h1>⚡ Prepa Admin</h1>
-    <div class="auth">
-        <input type="password" id="adminKey" placeholder="Clé admin..." />
-        <button onclick="loadDashboard()">Connexion</button>
+
+<!-- Auth Overlay -->
+<div id="auth-overlay">
+  <div class="auth-card">
+    <div class="auth-logo">⚡</div>
+    <h1>Prepa Admin</h1>
+    <p>Tableau de bord administrateur</p>
+    <input type="password" class="auth-input" id="authKey" placeholder="Clé d'accès..." onkeydown="if(event.key==='Enter') login()" />
+    <button class="auth-btn" onclick="login()">Accéder au dashboard</button>
+    <div class="auth-error" id="authError">Clé incorrecte</div>
+  </div>
+</div>
+
+<!-- App -->
+<div id="app">
+  <!-- Sidebar -->
+  <aside class="sidebar">
+    <div class="sidebar-logo">
+      <div class="logo-icon">⚡</div>
+      <div class="logo-text">Prepa</div>
+      <div class="logo-badge">ADMIN</div>
     </div>
+
+    <div class="sidebar-section">Principal</div>
+    <a class="nav-item active" onclick="showPage('overview')" data-page="overview">
+      <span class="icon">📊</span> Vue d'ensemble
+    </a>
+    <a class="nav-item" onclick="showPage('students')" data-page="students">
+      <span class="icon">👥</span> Élèves
+      <span class="nav-badge" id="badge-students">—</span>
+    </a>
+    <a class="nav-item" onclick="showPage('exercises')" data-page="exercises">
+      <span class="icon">📝</span> Exercices
+    </a>
+
+    <div class="sidebar-section">Contenu</div>
+    <a class="nav-item" onclick="showPage('documents')" data-page="documents">
+      <span class="icon">📚</span> Documents RAG
+    </a>
+    <a class="nav-item" onclick="showPage('notifications')" data-page="notifications">
+      <span class="icon">📣</span> Notifications
+    </a>
+
+    <div class="sidebar-section">Gestion</div>
+    <a class="nav-item" onclick="showPage('payments')" data-page="payments">
+      <span class="icon">💰</span> Paiements
+    </a>
+    <a class="nav-item" onclick="showPage('analytics')" data-page="analytics">
+      <span class="icon">📈</span> Analytics
+    </a>
+    <a class="nav-item" onclick="showPage('config')" data-page="config">
+      <span class="icon">⚙️</span> Configuration
+    </a>
+
+    <div class="sidebar-footer">
+      <div class="admin-card">
+        <div class="admin-avatar">A</div>
+        <div>
+          <div class="admin-name">Administrateur</div>
+          <div class="admin-role">Accès complet</div>
+        </div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- Topbar -->
+  <header class="topbar">
+    <div class="page-title" id="page-title">Vue d'ensemble</div>
+    <div class="live-badge" id="live-indicator">
+      <span class="topbar-dot"></span> En ligne
+    </div>
+    <input type="text" class="topbar-search" placeholder="🔍  Rechercher..." id="global-search" />
+    <button class="topbar-btn" onclick="loadDashboard()" title="Rafraîchir">🔄</button>
+    <button class="topbar-btn" onclick="logout()" title="Déconnexion">🚪</button>
+  </header>
+
+  <!-- Main -->
+  <main class="main">
+
+    <!-- PAGE: OVERVIEW -->
+    <div class="page active" id="page-overview">
+      <div class="kpi-grid">
+        <div class="kpi-card blue">
+          <div class="kpi-icon">👥</div>
+          <div class="kpi-label">Élèves total</div>
+          <div class="kpi-value blue" id="kpi-users">—</div>
+          <div class="kpi-change up" id="kpi-users-change">— actifs</div>
+        </div>
+        <div class="kpi-card green">
+          <div class="kpi-icon">💬</div>
+          <div class="kpi-label">Messages total</div>
+          <div class="kpi-value green" id="kpi-messages">—</div>
+          <div class="kpi-change" id="kpi-messages-change">—</div>
+        </div>
+        <div class="kpi-card purple">
+          <div class="kpi-icon">⭐</div>
+          <div class="kpi-label">Utilisateurs Pro</div>
+          <div class="kpi-value purple" id="kpi-pro">—</div>
+          <div class="kpi-change" id="kpi-conversion">—% conversion</div>
+        </div>
+        <div class="kpi-card yellow">
+          <div class="kpi-icon">💰</div>
+          <div class="kpi-label">Revenus</div>
+          <div class="kpi-value yellow" id="kpi-revenue">—</div>
+          <div class="kpi-change up">FCFA</div>
+        </div>
+        <div class="kpi-card blue">
+          <div class="kpi-icon">🧠</div>
+          <div class="kpi-label">Tokens aujourd'hui</div>
+          <div class="kpi-value blue" id="kpi-tokens">—</div>
+          <div class="kpi-change" id="kpi-cost">$— USD</div>
+        </div>
+        <div class="kpi-card green">
+          <div class="kpi-icon">📚</div>
+          <div class="kpi-label">Chunks RAG</div>
+          <div class="kpi-value green" id="kpi-chunks">—</div>
+          <div class="kpi-change up">indexés</div>
+        </div>
+      </div>
+
+      <div class="grid-6-4" style="margin-bottom:16px">
+        <div class="card">
+          <div class="card-header">
+            <div>
+              <div class="card-title">📈 Activité</div>
+              <div class="card-subtitle">Messages & inscriptions</div>
+            </div>
+            <div style="display:flex;gap:6px">
+              <button class="btn btn-ghost btn-sm" onclick="setChartPeriod('7d')">7j</button>
+              <button class="btn btn-ghost btn-sm" onclick="setChartPeriod('30d')">30j</button>
+            </div>
+          </div>
+          <div class="chart-container" style="height:220px">
+            <canvas id="chart-activity"></canvas>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title">🎯 Répartition</div>
+          </div>
+          <div class="chart-container" style="height:220px">
+            <canvas id="chart-subjects"></canvas>
+          </div>
+        </div>
+      </div>
+
+      <div class="grid-2">
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title">⚡ Activité récente</div>
+            <button class="btn btn-ghost btn-sm" onclick="showPage('students')">Voir tout</button>
+          </div>
+          <div id="activity-feed">
+            <div class="empty-state"><div class="spinner"></div></div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title">🤖 Consommation LLM</div>
+          </div>
+          <div id="llm-stats">
+            <div class="empty-state"><div class="spinner"></div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- PAGE: STUDENTS -->
+    <div class="page" id="page-students">
+      <div class="section-header">
+        <div>
+          <div class="section-title">👥 Élèves</div>
+          <div class="section-sub" id="students-count">Chargement...</div>
+        </div>
+        <button class="btn btn-primary" onclick="loadStudents()">🔄 Actualiser</button>
+      </div>
+
+      <div class="filter-bar">
+        <input type="text" class="filter-input" id="search-students" placeholder="🔍 Rechercher un élève..." oninput="filterStudents()" style="width:220px"/>
+        <select class="filter-select" id="filter-plan" onchange="filterStudents()">
+          <option value="">Tous les plans</option>
+          <option value="free">Gratuit</option>
+          <option value="pro">Pro ⭐</option>
+        </select>
+        <select class="filter-select" id="filter-exam" onchange="filterStudents()">
+          <option value="">Tous les examens</option>
+          <option value="bac_senegal">BAC Sénégal</option>
+          <option value="bfem">BFEM</option>
+          <option value="concours">Concours</option>
+        </select>
+        <select class="filter-select" id="filter-status" onchange="filterStudents()">
+          <option value="">Tous les statuts</option>
+          <option value="active">Actif</option>
+          <option value="onboarding">Onboarding</option>
+        </select>
+      </div>
+
+      <div class="card">
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Élève</th>
+                <th>Téléphone</th>
+                <th>Plan</th>
+                <th>Examen / Série</th>
+                <th>Streak</th>
+                <th>Messages</th>
+                <th>Score</th>
+                <th>Statut</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="students-table">
+              <tr><td colspan="9" style="text-align:center;padding:40px;color:var(--text3)"><div class="spinner"></div></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="pagination" id="students-pagination"></div>
+      </div>
+    </div>
+
+    <!-- PAGE: EXERCISES -->
+    <div class="page" id="page-exercises">
+      <div class="section-header">
+        <div>
+          <div class="section-title">📝 Exercices</div>
+          <div class="section-sub">Gérer les exercices PDF et corrections</div>
+        </div>
+        <button class="btn btn-primary" onclick="openModal('modal-upload-exercise')">+ Ajouter un exercice</button>
+      </div>
+
+      <div class="filter-bar">
+        <select class="filter-select" id="filter-ex-matiere" onchange="loadExercises()">
+          <option value="">Toutes les matières</option>
+          <option value="maths">Maths</option>
+          <option value="physique_chimie">Physique-Chimie</option>
+          <option value="svt">SVT</option>
+          <option value="francais">Français</option>
+          <option value="philosophie">Philosophie</option>
+          <option value="histoire_geo">Histoire-Géo</option>
+          <option value="anglais">Anglais</option>
+        </select>
+        <select class="filter-select" id="filter-ex-niveau" onchange="loadExercises()">
+          <option value="">Tous les niveaux</option>
+          <option value="1">🟢 Facile</option>
+          <option value="2">🟡 Intermédiaire</option>
+          <option value="3">🔴 Difficile</option>
+        </select>
+        <select class="filter-select" id="filter-ex-exam" onchange="loadExercises()">
+          <option value="">Tous les examens</option>
+          <option value="bac_senegal">BAC Sénégal</option>
+          <option value="bfem">BFEM</option>
+          <option value="concours">Concours</option>
+        </select>
+      </div>
+
+      <div class="card">
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Titre</th>
+                <th>Matière</th>
+                <th>Chapitre</th>
+                <th>Examen / Série</th>
+                <th>Année</th>
+                <th>Niveau</th>
+                <th>Correction</th>
+                <th>Statut</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="exercises-table">
+              <tr><td colspan="9" style="text-align:center;padding:40px;color:var(--text3)">Chargement...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- PAGE: DOCUMENTS -->
+    <div class="page" id="page-documents">
+      <div class="section-header">
+        <div>
+          <div class="section-title">📚 Documents RAG</div>
+          <div class="section-sub">Base de connaissances du bot</div>
+        </div>
+        <button class="btn btn-primary" onclick="openModal('modal-upload-doc')">+ Indexer un document</button>
+      </div>
+
+      <div class="kpi-grid" id="rag-stats" style="margin-bottom:20px">
+        <div class="kpi-card blue"><div class="kpi-label">Total chunks</div><div class="kpi-value blue" id="rag-total">—</div></div>
+        <div class="kpi-card green"><div class="kpi-label">Physique-Chimie</div><div class="kpi-value green" id="rag-pc">—</div></div>
+        <div class="kpi-card purple"><div class="kpi-label">Maths</div><div class="kpi-value purple" id="rag-maths">—</div></div>
+        <div class="kpi-card yellow"><div class="kpi-label">Autres matières</div><div class="kpi-value yellow" id="rag-other">—</div></div>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">Documents indexés</div>
+          <button class="btn btn-ghost btn-sm" onclick="loadDocuments()">🔄</button>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Titre</th>
+                <th>Examen</th>
+                <th>Série</th>
+                <th>Matière</th>
+                <th>Type</th>
+                <th>Pages</th>
+                <th>Chunks</th>
+                <th>Statut</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody id="docs-table">
+              <tr><td colspan="9" style="text-align:center;padding:40px;color:var(--text3)">Chargement...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- PAGE: NOTIFICATIONS -->
+    <div class="page" id="page-notifications">
+      <div class="section-header">
+        <div>
+          <div class="section-title">📣 Notifications</div>
+          <div class="section-sub">Envoyer des messages aux élèves</div>
+        </div>
+      </div>
+
+      <div class="grid-6-4">
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title">Composer un message</div>
+          </div>
+
+          <div class="form-row" style="margin-bottom:12px">
+            <div class="form-group" style="margin:0">
+              <label class="form-label">Audience</label>
+              <select class="form-select" id="notif-filter" onchange="updateNotifCount()">
+                <option value="all">Tous les élèves</option>
+                <option value="inactive_24h">Inactifs 24h</option>
+                <option value="inactive_7d">Inactifs 7 jours</option>
+                <option value="before_exam_7d">Examen dans 7 jours</option>
+                <option value="before_exam_30d">Examen dans 30 jours</option>
+                <option value="free_users">Plan Gratuit</option>
+                <option value="pro_users">Plan Pro</option>
+              </select>
+            </div>
+            <div class="form-group" style="margin:0">
+              <label class="form-label">Examen</label>
+              <select class="form-select" id="notif-exam" onchange="updateNotifCount()">
+                <option value="">Tous</option>
+                <option value="bac_senegal">BAC Sénégal</option>
+                <option value="bfem">BFEM</option>
+                <option value="concours">Concours</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="form-row" style="margin-bottom:16px">
+            <div class="form-group" style="margin:0">
+              <label class="form-label">Série</label>
+              <select class="form-select" id="notif-series" onchange="updateNotifCount()">
+                <option value="">Toutes</option>
+                <option value="S1">S1</option>
+                <option value="S2">S2</option>
+                <option value="L1">L1</option>
+                <option value="L2">L2</option>
+              </select>
+            </div>
+            <div style="display:flex;align-items:flex-end;padding-bottom:2px">
+              <div style="background:var(--accent-glow);border:1px solid rgba(59,130,246,0.3);border-radius:var(--radius-sm);padding:8px 16px;text-align:center">
+                <div style="font-size:10px;color:var(--text2);margin-bottom:2px">Destinataires</div>
+                <div style="font-size:18px;font-weight:700;color:var(--accent2)" id="notif-count">—</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Message <span style="color:var(--text3);font-weight:400;text-transform:none">— Variables: {nom} {streak} {jours_restants} {plan} {exam}</span></label>
+            <textarea class="form-textarea" id="notif-message" rows="8" placeholder="Écris ton message..." oninput="updateNotifPreview()" style="min-height:160px"></textarea>
+          </div>
+
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-ghost" onclick="updateNotifPreview()">👁 Aperçu</button>
+            <button class="btn btn-success" onclick="sendNotification()">📤 Envoyer</button>
+          </div>
+          <div id="notif-status" style="font-size:12px;color:var(--text2);margin-top:10px"></div>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title">Aperçu</div>
+          </div>
+          <div id="notif-preview" style="font-size:13px;line-height:1.7;color:var(--text2);white-space:pre-wrap;min-height:120px">
+            L'aperçu apparaîtra ici...
+          </div>
+
+          <div style="margin-top:20px">
+            <div style="font-size:11px;color:var(--text3);margin-bottom:10px;text-transform:uppercase;letter-spacing:0.05em">Templates</div>
+            <div style="display:flex;flex-direction:column;gap:6px">
+              <button class="btn btn-ghost btn-sm" onclick="useTemplate('motivation')" style="justify-content:flex-start">🔥 Motivation streak</button>
+              <button class="btn btn-ghost btn-sm" onclick="useTemplate('rappel')" style="justify-content:flex-start">📚 Rappel révision</button>
+              <button class="btn btn-ghost btn-sm" onclick="useTemplate('urgence')" style="justify-content:flex-start">⚠️ Urgence examen</button>
+              <button class="btn btn-ghost btn-sm" onclick="useTemplate('upsell')" style="justify-content:flex-start">⭐ Passage Pro</button>
+              <button class="btn btn-ghost btn-sm" onclick="useTemplate('weekend')" style="justify-content:flex-start">🌟 Weekend</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- PAGE: PAYMENTS -->
+    <div class="page" id="page-payments">
+      <div class="section-header">
+        <div>
+          <div class="section-title">💰 Paiements</div>
+          <div class="section-sub">Transactions et abonnements</div>
+        </div>
+      </div>
+
+      <div class="kpi-grid" style="margin-bottom:20px">
+        <div class="kpi-card green">
+          <div class="kpi-label">Revenus total</div>
+          <div class="kpi-value green" id="pay-total">—</div>
+          <div class="kpi-change up">FCFA</div>
+        </div>
+        <div class="kpi-card blue">
+          <div class="kpi-label">Abonnés Pro actifs</div>
+          <div class="kpi-value blue" id="pay-active">—</div>
+        </div>
+        <div class="kpi-card yellow">
+          <div class="kpi-label">Taux conversion</div>
+          <div class="kpi-value yellow" id="pay-rate">—</div>
+          <div class="kpi-change">%</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">Transactions récentes</div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Élève</th>
+                <th>Plan</th>
+                <th>Montant</th>
+                <th>Méthode</th>
+                <th>Date début</th>
+                <th>Expiration</th>
+                <th>Statut</th>
+              </tr>
+            </thead>
+            <tbody id="payments-table">
+              <tr><td colspan="7" style="text-align:center;padding:40px;color:var(--text3)">Chargement...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- PAGE: ANALYTICS -->
+    <div class="page" id="page-analytics">
+      <div class="section-header">
+        <div>
+          <div class="section-title">📈 Analytics</div>
+          <div class="section-sub">Performances et insights</div>
+        </div>
+      </div>
+
+      <div class="grid-2" style="margin-bottom:16px">
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title">📚 Matières populaires</div>
+          </div>
+          <div class="chart-container" style="height:200px">
+            <canvas id="chart-matiere"></canvas>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title">💰 Revenus mensuels</div>
+          </div>
+          <div class="chart-container" style="height:200px">
+            <canvas id="chart-revenue"></canvas>
+          </div>
+        </div>
+      </div>
+
+      <div class="grid-3">
+        <div class="card">
+          <div class="card-header"><div class="card-title">🎯 Examens</div></div>
+          <div id="exam-stats"></div>
+        </div>
+        <div class="card">
+          <div class="card-header"><div class="card-title">📡 Providers LLM</div></div>
+          <div id="provider-stats"></div>
+        </div>
+        <div class="card">
+          <div class="card-header"><div class="card-title">📊 Séries</div></div>
+          <div id="series-stats"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- PAGE: CONFIG -->
+    <div class="page" id="page-config">
+      <div class="section-header">
+        <div>
+          <div class="section-title">⚙️ Configuration</div>
+          <div class="section-sub">Paramètres de la plateforme</div>
+        </div>
+      </div>
+
+      <div class="grid-2">
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title">Paramètres plateforme</div>
+            <span style="font-size:11px;color:var(--text3)">
+              <span style="color:var(--accent)">●</span> Personnalisé &nbsp;
+              <span style="color:var(--text3)">●</span> Défaut
+            </span>
+          </div>
+          <div id="config-grid" style="display:flex;flex-direction:column;gap:8px">
+            <div style="text-align:center;padding:20px;color:var(--text3)"><div class="spinner"></div></div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title">🔐 Infos système</div>
+          </div>
+          <div id="system-info">
+            <div class="stat-row">
+              <span class="stat-label">Environnement</span>
+              <span class="stat-val" id="sys-env">—</span>
+            </div>
+            <div class="stat-row">
+              <span class="stat-label">Version API</span>
+              <span class="stat-val">v1</span>
+            </div>
+            <div class="stat-row">
+              <span class="stat-label">Base de données</span>
+              <span class="stat-val"><span class="badge green">● OK</span></span>
+            </div>
+            <div class="stat-row">
+              <span class="stat-label">Redis</span>
+              <span class="stat-val"><span class="badge green">● OK</span></span>
+            </div>
+            <div class="stat-row">
+              <span class="stat-label">pgvector</span>
+              <span class="stat-val"><span class="badge green">● OK</span></span>
+            </div>
+            <div class="stat-row">
+              <span class="stat-label">Mistral API</span>
+              <span class="stat-val" id="sys-mistral">—</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </main>
 </div>
 
-<div class="container">
-    <div id="content" class="loading">Entrez la clé admin pour accéder au dashboard</div>
+<!-- MODALS -->
+
+<!-- Modal: Upload Exercise -->
+<div class="modal-overlay" id="modal-upload-exercise">
+  <div class="modal">
+    <div class="modal-header">
+      <div class="modal-title">📝 Ajouter un exercice</div>
+      <button class="modal-close" onclick="closeModal('modal-upload-exercise')">✕</button>
+    </div>
+
+    <div class="grid-2" style="margin-bottom:16px">
+      <div>
+        <label class="form-label">PDF Exercice *</label>
+        <div class="upload-zone" id="zone-exercise" onclick="document.getElementById('ex-file').click()">
+          <div class="upload-icon">📄</div>
+          <div class="upload-text">Cliquer pour sélectionner</div>
+          <div class="upload-sub">PDF uniquement</div>
+        </div>
+        <input type="file" id="ex-file" accept=".pdf" style="display:none" onchange="onFileSelect('ex-file','zone-exercise','ex-filename')"/>
+        <div id="ex-filename" style="font-size:11px;color:var(--green);margin-top:6px"></div>
+      </div>
+      <div>
+        <label class="form-label">PDF Correction <span style="color:var(--text3)">(optionnel)</span></label>
+        <div class="upload-zone" id="zone-correction" onclick="document.getElementById('corr-file').click()">
+          <div class="upload-icon">✅</div>
+          <div class="upload-text">Cliquer pour sélectionner</div>
+          <div class="upload-sub">PDF uniquement</div>
+        </div>
+        <input type="file" id="corr-file" accept=".pdf" style="display:none" onchange="onFileSelect('corr-file','zone-correction','corr-filename')"/>
+        <div id="corr-filename" style="font-size:11px;color:var(--green);margin-top:6px"></div>
+      </div>
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">Titre</label>
+      <input type="text" class="form-input" id="ex-title" placeholder="Ex: Exercice acide-base terminale S"/>
+    </div>
+
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">Examen *</label>
+        <select class="form-select" id="ex-exam">
+          <option value="bac_senegal">BAC Sénégal</option>
+          <option value="bfem">BFEM</option>
+          <option value="concours">Concours</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Série</label>
+        <select class="form-select" id="ex-serie">
+          <option value="">— Série —</option>
+          <option value="S1">S1</option>
+          <option value="S2">S2</option>
+          <option value="S3">S3</option>
+          <option value="L1">L1</option>
+          <option value="L2">L2</option>
+          <option value="T">T</option>
+          <option value="STEG">STEG</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">Matière *</label>
+        <select class="form-select" id="ex-matiere">
+          <option value="">— Matière —</option>
+          <option value="maths">Maths</option>
+          <option value="physique_chimie">Physique-Chimie</option>
+          <option value="svt">SVT</option>
+          <option value="francais">Français</option>
+          <option value="philosophie">Philosophie</option>
+          <option value="histoire_geo">Histoire-Géo</option>
+          <option value="anglais">Anglais</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Chapitre</label>
+        <input type="text" class="form-input" id="ex-chapitre" placeholder="Ex: derivees"/>
+      </div>
+    </div>
+
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">Année</label>
+        <input type="number" class="form-input" id="ex-annee" placeholder="2024"/>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Tags</label>
+        <input type="text" class="form-input" id="ex-tags" placeholder="tag1, tag2"/>
+      </div>
+    </div>
+
+    <div style="font-size:11px;color:var(--text3);margin-bottom:16px;padding:10px;background:var(--surface2);border-radius:var(--radius-sm)">
+      🤖 Le niveau de difficulté sera déterminé automatiquement par l'IA
+    </div>
+
+    <div id="ex-upload-status" style="font-size:12px;color:var(--text2);margin-bottom:12px"></div>
+
+    <div style="display:flex;gap:10px;justify-content:flex-end">
+      <button class="btn btn-ghost" onclick="closeModal('modal-upload-exercise')">Annuler</button>
+      <button class="btn btn-primary" onclick="uploadExercise()">⬆️ Ajouter l'exercice</button>
+    </div>
+  </div>
 </div>
 
-<div class="toast" id="toast"></div>
+<!-- Modal: Upload Document RAG -->
+<div class="modal-overlay" id="modal-upload-doc">
+  <div class="modal">
+    <div class="modal-header">
+      <div class="modal-title">📚 Indexer un document</div>
+      <button class="modal-close" onclick="closeModal('modal-upload-doc')">✕</button>
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">Fichier (PDF/Word)</label>
+      <div class="upload-zone" id="zone-doc" onclick="document.getElementById('doc-file').click()">
+        <div class="upload-icon">📎</div>
+        <div class="upload-text">Cliquer pour sélectionner</div>
+        <div class="upload-sub">PDF ou DOCX — Max 10MB</div>
+      </div>
+      <input type="file" id="doc-file" accept=".pdf,.docx,.doc" style="display:none" onchange="onFileSelect('doc-file','zone-doc','doc-filename')"/>
+      <div id="doc-filename" style="font-size:11px;color:var(--green);margin-top:6px"></div>
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">Titre</label>
+      <input type="text" class="form-input" id="doc-title" placeholder="Titre du document"/>
+    </div>
+
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">Examen</label>
+        <select class="form-select" id="doc-exam">
+          <option value="">— Examen —</option>
+          <option value="bac_senegal">BAC Sénégal</option>
+          <option value="bfem">BFEM</option>
+          <option value="concours">Concours</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Série</label>
+        <select class="form-select" id="doc-serie">
+          <option value="">— Série —</option>
+          <option value="S1">S1</option>
+          <option value="S2">S2</option>
+          <option value="S3">S3</option>
+          <option value="L1">L1</option>
+          <option value="L2">L2</option>
+          <option value="T">T</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">Matière</label>
+        <select class="form-select" id="doc-matiere">
+          <option value="">— Matière —</option>
+          <option value="maths">Maths</option>
+          <option value="physique_chimie">Physique-Chimie</option>
+          <option value="svt">SVT</option>
+          <option value="francais">Français</option>
+          <option value="philosophie">Philosophie</option>
+          <option value="histoire_geo">Histoire-Géo</option>
+          <option value="anglais">Anglais</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Type</label>
+        <select class="form-select" id="doc-type">
+          <option value="cours">Cours</option>
+          <option value="annale">Annale</option>
+          <option value="correction">Correction</option>
+          <option value="serie">Série</option>
+          <option value="exercice">Exercice</option>
+          <option value="fiche">Fiche</option>
+          <option value="programme">Programme</option>
+        </select>
+      </div>
+    </div>
+
+    <div id="doc-upload-status" style="font-size:12px;color:var(--text2);margin-bottom:12px"></div>
+    <div id="doc-upload-progress" style="display:none;margin-bottom:12px">
+      <div class="progress-bar"><div class="progress-fill" id="doc-progress-fill" style="width:0%;background:var(--accent)"></div></div>
+    </div>
+
+    <div style="display:flex;gap:10px;justify-content:flex-end">
+      <button class="btn btn-ghost" onclick="closeModal('modal-upload-doc')">Annuler</button>
+      <button class="btn btn-primary" onclick="uploadDocument()">⬆️ Indexer</button>
+    </div>
+  </div>
+</div>
+
+<!-- Toast -->
+<div id="toast"></div>
 
 <script>
+// ════════════════════════════════════════════════════════════
+// GLOBALS
+// ════════════════════════════════════════════════════════════
 let API_KEY = '';
-
-function showToast(msg, error = false) {
-    const t = document.getElementById('toast');
-    t.textContent = msg;
-    t.style.background = error ? '#ef4444' : '#10b981';
-    t.style.display = 'block';
-    setTimeout(() => t.style.display = 'none', 3000);
-}
-
-async function api(path, method = 'GET', body = null) {
-    const opts = {
-        method,
-        headers: { 'X-Admin-Key': API_KEY, 'Content-Type': 'application/json' }
-    };
-    if (body) opts.body = JSON.stringify(body);
-    const res = await fetch('/api/v1' + path, opts);
-    if (!res.ok) throw new Error('Erreur API ' + res.status);
-    return res.json();
-}
-
-async function loadDashboard() {
-    API_KEY = document.getElementById('adminKey').value;
-    if (!API_KEY) return;
-
-    document.getElementById('content').innerHTML = '<div class="loading">Chargement...</div>';
-
-    try {
-        const [stats, users, configs, docs] = await Promise.all([
-            api('/admin/stats'),
-            api('/admin/users?limit=20'),
-            api('/admin/config'),
-            api('/admin/documents'),
-        ]);
-
-        document.getElementById('content').innerHTML = `
-            <div class="stats-grid">
-                <div class="stat-card"><div class="value">${stats.total_users}</div><div class="label">Élèves total</div></div>
-                <div class="stat-card"><div class="value">${stats.active_users}</div><div class="label">Actifs</div></div>
-                <div class="stat-card"><div class="value">${stats.pro_users}</div><div class="label">Pro ⭐</div></div>
-                <div class="stat-card"><div class="value">${stats.conversion_rate}%</div><div class="label">Conversion</div></div>
-                <div class="stat-card"><div class="value">${stats.total_messages.toLocaleString()}</div><div class="label">Messages</div></div>
-                <div class="stat-card"><div class="value">${(stats.total_revenue_fcfa || 0).toLocaleString()} F</div><div class="label">Revenus</div></div>
-            </div>
-
-            <div class="section">
-                <h2>💸 Consommation API LLM</h2>
-                <div class="stats-grid" style="margin-bottom:20px">
-                    <div class="stat-card"><div class="value">${(stats.tokens_today || 0).toLocaleString()}</div><div class="label">Tokens aujourd'hui</div></div>
-                    <div class="stat-card"><div class="value">$${stats.cost_today_usd || '0.0000'}</div><div class="label">Coût aujourd'hui (USD)</div></div>
-                    <div class="stat-card"><div class="value">${(stats.tokens_total || 0).toLocaleString()}</div><div class="label">Tokens total</div></div>
-                    <div class="stat-card"><div class="value">$${stats.cost_total_usd || '0.0000'}</div><div class="label">Coût total (USD)</div></div>
-                </div>
-                ${Object.keys(stats.provider_breakdown || {}).length > 0 ? `
-                <table>
-                    <thead><tr><th>Provider</th><th>Tokens aujourd'hui</th><th>Coût estimé</th></tr></thead>
-                    <tbody>
-                        ${Object.entries(stats.provider_breakdown).map(([p, d]) => `
-                            <tr>
-                                <td><span class="badge" style="background:#e0e7ff;color:#3730a3">${p}</span></td>
-                                <td>${(d.tokens || 0).toLocaleString()}</td>
-                                <td>$${d.cost_usd}</td>
-                            </tr>
-                        `).join('')}
-                    </tbody>
-                </table>` : '<p style="color:#4b5563;font-size:13px">Aucun appel LLM aujourd\'hui.</p>'}
-            </div>
-
-            <div class="section">
-                <h2>📣 Notifications WhatsApp</h2>
-                <div class="variables-hint">
-                    Variables disponibles :
-                    <code>{nom}</code> <code>{streak}</code> <code>{jours_restants}</code>
-                    <code>{plan}</code> <code>{exam}</code> <code>{serie}</code> <code>{messages}</code>
-                </div>
-                <div class="notif-grid">
-                    <div>
-                        <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:12px">
-                            <div>
-                                <div style="font-size:11px;color:#94a3b8;margin-bottom:4px">Audience</div>
-                                <select id="notifFilter" onchange="updateCount()">
-                                    <option value="all">Tous les élèves</option>
-                                    <option value="inactive_24h">Inactifs 24h</option>
-                                    <option value="inactive_7d">Inactifs 7 jours</option>
-                                    <option value="before_exam_7d">Examen dans 7 jours</option>
-                                    <option value="before_exam_30d">Examen dans 30 jours</option>
-                                    <option value="free_users">Plan Gratuit</option>
-                                    <option value="pro_users">Plan Pro</option>
-                                </select>
-                            </div>
-                            <div>
-                                <div style="font-size:11px;color:#94a3b8;margin-bottom:4px">Examen</div>
-                                <select id="notifExam" onchange="updateCount()">
-                                    <option value="">Tous</option>
-                                    <option value="bac_senegal">BAC Sénégal</option>
-                                    <option value="bfem">BFEM</option>
-                                    <option value="concours">Concours</option>
-                                </select>
-                            </div>
-                            <div>
-                                <div style="font-size:11px;color:#94a3b8;margin-bottom:4px">Série</div>
-                                <select id="notifSeries" onchange="updateCount()">
-                                    <option value="">Toutes</option>
-                                    <option value="S1">S1</option>
-                                    <option value="S2">S2</option>
-                                    <option value="L1">L1</option>
-                                    <option value="L2">L2</option>
-                                </select>
-                            </div>
-                            <div style="display:flex;align-items:flex-end">
-                                <div>
-                                    <div style="font-size:11px;color:#94a3b8;margin-bottom:4px">Destinataires</div>
-                                    <div id="targetCount" class="target-badge">—</div>
-                                </div>
-                            </div>
-                        </div>
-
-                        <div style="margin-bottom:8px">
-                            <div style="font-size:11px;color:#94a3b8;margin-bottom:4px">Message <span style="color:#4b5563">(utilise les variables ci-dessus)</span></div>
-                            <textarea id="notifMessage" rows="8" placeholder="Écris ton message ici...
-
-Exemple :
-👋 Salut {nom} !
-
-Il te reste {jours_restants} jours avant ton examen.
-Révise avec moi aujourd'hui ! 📚" oninput="updatePreview()"></textarea>
-                        </div>
-
-                        <div style="display:flex;gap:8px;margin-top:12px">
-                            <button class="btn-sm" onclick="updatePreview()" style="padding:8px 14px">👁 Aperçu</button>
-                            <button class="btn-sm btn-green" onclick="sendNotification()" style="padding:8px 14px">📤 Envoyer</button>
-                        </div>
-                        <div id="notifStatus" style="margin-top:10px;font-size:12px;color:#94a3b8"></div>
-                    </div>
-
-                    <div>
-                        <div style="font-size:11px;color:#94a3b8;margin-bottom:8px">Aperçu du message</div>
-                        <div class="notif-preview" id="notifPreview">
-                            <span style="color:#4b5563">L'aperçu apparaîtra ici...</span>
-                        </div>
-                        <div style="margin-top:16px">
-                            <div style="font-size:11px;color:#94a3b8;margin-bottom:8px">Messages prédéfinis</div>
-                            <div style="display:flex;flex-direction:column;gap:6px">
-                                <button class="btn-sm" onclick="useTemplate('motivation')" style="text-align:left;padding:6px 10px">🔥 Motivation streak</button>
-                                <button class="btn-sm" onclick="useTemplate('rappel')" style="text-align:left;padding:6px 10px">📚 Rappel révision</button>
-                                <button class="btn-sm" onclick="useTemplate('urgence')" style="text-align:left;padding:6px 10px">⚠️ Urgence examen</button>
-                                <button class="btn-sm" onclick="useTemplate('upsell')" style="text-align:left;padding:6px 10px">⭐ Passage Pro</button>
-                                <button class="btn-sm" onclick="useTemplate('weekend')" style="text-align:left;padding:6px 10px">🌟 Message weekend</button>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <div class="section">
-                <h2>⚙️ Configuration plateforme</h2>
-                <div class="config-grid">
-                    ${configs.map(c => `
-                        <div class="config-item">
-                            <div>
-                                <span class="dot ${c.is_custom ? 'custom' : 'default'}"></span>
-                                <span class="config-key">${c.key}</span>
-                            </div>
-                            <div class="config-value">
-                                <input type="text" value="${c.value}" id="cfg_${c.key.replace(/[^a-z0-9]/gi, '_')}" />
-                                <button class="btn-sm" onclick="saveConfig('${c.key}')">✓</button>
-                            </div>
-                        </div>
-                    `).join('')}
-                </div>
-            </div>
-
-            <div class="section">
-                <h2>📝 Ajouter un Exercice</h2>
-                <p style="font-size:11px;color:#94a3b8;margin-bottom:16px">
-                    Upload le PDF exercice et optionnellement la correction.
-                    Le niveau de difficulté est détecté automatiquement.
-                </p>
-
-                <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:16px">
-                    <!-- Colonne gauche : exercice -->
-                    <div style="background:#0f0f1a;border:1px solid #2d2d4e;border-radius:8px;padding:16px">
-                        <div style="font-size:12px;color:#818cf8;font-weight:600;margin-bottom:12px">📄 PDF Exercice *</div>
-                        <input type="file" id="exPdfFile" accept=".pdf"
-                            style="background:#1a1a2e;border:1px solid #3d3d6e;color:#e2e8f0;
-                            padding:6px;border-radius:6px;font-size:12px;width:100%;margin-bottom:8px"/>
-                        <div id="exPdfName" style="font-size:11px;color:#94a3b8"></div>
-                    </div>
-
-                    <!-- Colonne droite : correction -->
-                    <div style="background:#0f0f1a;border:1px solid #2d2d4e;border-radius:8px;padding:16px">
-                        <div style="font-size:12px;color:#10b981;font-weight:600;margin-bottom:12px">✅ PDF Correction (optionnel)</div>
-                        <input type="file" id="corrPdfFile" accept=".pdf"
-                            style="background:#1a1a2e;border:1px solid #3d3d6e;color:#e2e8f0;
-                            padding:6px;border-radius:6px;font-size:12px;width:100%;margin-bottom:8px"/>
-                        <div id="corrPdfName" style="font-size:11px;color:#94a3b8"></div>
-                    </div>
-                </div>
-
-                <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px">
-                    <div>
-                        <div style="font-size:11px;color:#94a3b8;margin-bottom:4px">Titre</div>
-                        <input type="text" id="exTitle" placeholder="Ex: Exercice acides-bases"
-                            style="background:#0f0f1a;border:1px solid #3d3d6e;color:#e2e8f0;
-                            padding:6px 10px;border-radius:6px;font-size:12px;width:200px"/>
-                    </div>
-                    <div>
-                        <div style="font-size:11px;color:#94a3b8;margin-bottom:4px">Examen *</div>
-                        <select id="exExamType">
-                            <option value="bac_senegal">BAC Sénégal</option>
-                            <option value="bfem">BFEM</option>
-                            <option value="concours">Concours</option>
-                        </select>
-                    </div>
-                    <div>
-                        <div style="font-size:11px;color:#94a3b8;margin-bottom:4px">Série</div>
-                        <select id="exSerie">
-                            <option value="">-- Série --</option>
-                            <option value="S1">S1</option>
-                            <option value="S2">S2</option>
-                            <option value="S3">S3</option>
-                            <option value="L1">L1</option>
-                            <option value="L2">L2</option>
-                            <option value="T">T</option>
-                            <option value="STEG">STEG</option>
-                        </select>
-                    </div>
-                    <div>
-                        <div style="font-size:11px;color:#94a3b8;margin-bottom:4px">Matière *</div>
-                        <select id="exMatiere">
-                            <option value="">-- Matière --</option>
-                            <option value="maths">Maths</option>
-                            <option value="physique_chimie">Physique-Chimie</option>
-                            <option value="svt">SVT</option>
-                            <option value="francais">Français</option>
-                            <option value="philosophie">Philosophie</option>
-                            <option value="histoire_geo">Histoire-Géo</option>
-                            <option value="anglais">Anglais</option>
-                        </select>
-                    </div>
-                    <div>
-                        <div style="font-size:11px;color:#94a3b8;margin-bottom:4px">Chapitre</div>
-                        <input type="text" id="exChapitre" placeholder="Ex: derivees"
-                            style="background:#0f0f1a;border:1px solid #3d3d6e;color:#e2e8f0;
-                            padding:6px 10px;border-radius:6px;font-size:12px;width:140px"/>
-                    </div>
-                    <div>
-                        <div style="font-size:11px;color:#94a3b8;margin-bottom:4px">Année</div>
-                        <input type="number" id="exAnnee" placeholder="2023"
-                            style="background:#0f0f1a;border:1px solid #3d3d6e;color:#e2e8f0;
-                            padding:6px 10px;border-radius:6px;font-size:12px;width:80px"/>
-                    </div>
-                    <div>
-                        <div style="font-size:11px;color:#94a3b8;margin-bottom:4px">Tags</div>
-                        <input type="text" id="exTags" placeholder="tag1, tag2"
-                            style="background:#0f0f1a;border:1px solid #3d3d6e;color:#e2e8f0;
-                            padding:6px 10px;border-radius:6px;font-size:12px;width:140px"/>
-                    </div>
-                    <div style="display:flex;align-items:flex-end">
-                        <button class="btn-sm btn-green" onclick="uploadExercisePdf()" style="padding:8px 16px">
-                            ⬆️ Ajouter l'exercice
-                        </button>
-                    </div>
-                </div>
-
-                <div id="exUploadStatus" style="font-size:12px;color:#94a3b8;margin-top:8px"></div>
-            </div>
-
-            <div class="section">
-                <h2>📚 Documents RAG</h2>
-                <p style="font-size:11px;color:#94a3b8;margin-bottom:12px">Max 10MB par fichier. Pour les fichiers plus grands : <code style="background:#0f0f1a;padding:2px 6px;border-radius:4px">python scripts/index_documents.py</code></p>
-                <div style="margin-bottom:16px;display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap">
-                    <div>
-                        <div style="font-size:11px;color:#94a3b8;margin-bottom:4px">Fichier (PDF/Word)</div>
-                        <input type="file" id="docFile" accept=".pdf,.docx,.doc" style="background:#0f0f1a;border:1px solid #3d3d6e;color:#e2e8f0;padding:6px;border-radius:6px;font-size:12px"/>
-                    </div>
-                    <div>
-                        <div style="font-size:11px;color:#94a3b8;margin-bottom:4px">Titre</div>
-                        <input type="text" id="docTitle" placeholder="Titre" style="background:#0f0f1a;border:1px solid #3d3d6e;color:#e2e8f0;padding:6px 10px;border-radius:6px;font-size:12px;width:140px"/>
-                    </div>
-                    <div>
-                        <div style="font-size:11px;color:#94a3b8;margin-bottom:4px">Examen</div>
-                        <select id="docExam">
-                            <option value="">-- Examen --</option>
-                            <option value="bac_senegal">BAC Sénégal</option>
-                            <option value="bfem">BFEM</option>
-                            <option value="concours">Concours</option>
-                        </select>
-                    </div>
-                    <div>
-                        <div style="font-size:11px;color:#94a3b8;margin-bottom:4px">Série</div>
-                        <select id="docSeries">
-                            <option value="">-- Série --</option>
-                            <option value="S1">S1</option>
-                            <option value="S2">S2</option>
-                            <option value="S3">S3</option>
-                            <option value="L1">L1</option>
-                            <option value="L2">L2</option>
-                            <option value="T">T</option>
-                        </select>
-                    </div>
-                    <div>
-                        <div style="font-size:11px;color:#94a3b8;margin-bottom:4px">Matière</div>
-                        <select id="docSubject">
-                            <option value="">-- Matière --</option>
-                            <option value="maths">Maths</option>
-                            <option value="physique_chimie">Physique-Chimie</option>
-                            <option value="svt">SVT</option>
-                            <option value="francais">Français</option>
-                            <option value="philosophie">Philosophie</option>
-                            <option value="histoire_geo">Histoire-Géo</option>
-                            <option value="anglais">Anglais</option>
-                        </select>
-                    </div>
-                    <div>
-                        <div style="font-size:11px;color:#94a3b8;margin-bottom:4px">Type</div>
-                        <select id="docType">
-                            <option value="cours">Cours</option>
-                            <option value="annale">Annale</option>
-                            <option value="correction">Correction</option>
-                            <option value="serie">Série</option>
-                            <option value="devoir">Devoir</option>
-                            <option value="fiche">Fiche</option>
-                            <option value="exercice">Exercice</option>
-                        </select>
-                    </div>
-                    <button class="btn-sm" onclick="uploadDocument()" style="padding:8px 16px">⬆️ Indexer</button>
-                </div>
-                <div id="uploadStatus" style="font-size:12px;color:#94a3b8;margin-bottom:12px"></div>
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Titre</th>
-                            <th>Examen</th>
-                            <th>Série</th>
-                            <th>Matière</th>
-                            <th>Type</th>
-                            <th>Pages</th>
-                            <th>Chunks</th>
-                            <th>Statut</th>
-                            <th>Action</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        ${docs.map(d => `
-                            <tr>
-                                <td>${d.title}</td>
-                                <td>${d.exam_type || '—'}</td>
-                                <td>${d.serie || '—'}</td>
-                                <td>${d.matiere || '—'}</td>
-                                <td>${d.doc_type || '—'}</td>
-                                <td>${d.page_count}</td>
-                                <td>${d.chunk_count}</td>
-                                <td><span class="badge ${d.status}">${d.status}</span></td>
-                                <td><button class="btn-sm btn-danger" onclick="deleteDocument('${d.id}')">🗑</button></td>
-                            </tr>
-                        `).join('')}
-                    </tbody>
-                </table>
-            </div>
-
-            <div class="section">
-                <h2>👥 Élèves récents</h2>
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Nom</th>
-                            <th>Téléphone</th>
-                            <th>Plan</th>
-                            <th>Statut</th>
-                            <th>Examen</th>
-                            <th>Streak</th>
-                            <th>Messages</th>
-                            <th>Score</th>
-                            <th>Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        ${users.map(u => `
-                            <tr>
-                                <td>${u.name || '—'}</td>
-                                <td>${u.phone}</td>
-                                <td><span class="badge ${u.plan}">${u.plan}</span></td>
-                                <td><span class="badge ${u.status}">${u.status}</span></td>
-                                <td>${u.exam_type || '—'} ${u.series || ''}</td>
-                                <td>🔥 ${u.streak_days}j</td>
-                                <td>${u.total_messages}</td>
-                                <td>${u.engagement_score}/100</td>
-                                <td style="display:flex;gap:6px">
-                                    <button class="btn-sm" onclick="resetQuota('${u.id}')">Reset quota</button>
-                                    ${u.plan !== 'pro' ? `<button class="btn-sm" onclick="activatePro('${u.id}')">→ Pro</button>` : ''}
-                                    <button class="btn-sm btn-danger" onclick="deleteUser('${u.id}', '${u.name || u.phone}')">🗑</button>
-                                </td>
-                            </tr>
-                        `).join('')}
-                    </tbody>
-                </table>
-            </div>
-        `;
-
-        // Charge le nombre de destinataires initial
-        updateCount();
-
-    } catch (e) {
-        document.getElementById('content').innerHTML = '<div class="loading">Clé invalide ou erreur serveur</div>';
-    }
-}
-
-// ── Notifications ──────────────────────────────────────────────────
-
+let allStudents = [];
+let charts = {};
+const PAGE_TITLES = {
+  overview: 'Vue d\'ensemble',
+  students: 'Élèves',
+  exercises: 'Exercices',
+  documents: 'Documents RAG',
+  notifications: 'Notifications',
+  payments: 'Paiements',
+  analytics: 'Analytics',
+  config: 'Configuration',
+};
 const TEMPLATES = {
-    motivation: "🔥 Salut {nom} !\n\nTon streak de *{streak} jours* est impressionnant !\n\nContinue comme ça — il te reste *{jours_restants} jours* avant ton examen.\n\nPose-moi une question pour continuer ta révision ! 💪",
-    rappel: "📚 Salut {nom} !\n\nN'oublie pas de réviser aujourd'hui.\n\nIl te reste *{jours_restants} jours* avant ton {exam}.\n\nTape */profil* pour voir ta progression 📊",
-    urgence: "⚠️ *{nom}* — Plus que *{jours_restants} jours* avant ton examen !\n\nC'est le moment de tout donner. Je suis là pour t'aider à réviser chaque chapitre.\n\nDis-moi sur quoi tu veux travailler aujourd'hui 🎯",
-    upsell: "⭐ *{nom}*, passe *Prepa Pro* et révise sans limite !\n\n✅ Messages illimités\n✅ Réponses plus détaillées\n✅ Priorité de traitement\n\n💰 Seulement *500 FCFA/mois*\n\nTape */plan* pour en savoir plus 🚀",
-    weekend: "🌟 Bon weekend *{nom}* !\n\nProfite du weekend pour réviser sans pression.\n*{jours_restants} jours* avant ton examen — un peu de révision aujourd'hui fait toute la différence !\n\nJe suis disponible 24h/24 📚",
+  motivation: "🔥 Salut {nom} !\n\nTon streak de *{streak} jours* est impressionnant !\n\nIl te reste *{jours_restants} jours* avant ton examen.\n\nContinue comme ça 💪",
+  rappel: "📚 Salut {nom} !\n\nN'oublie pas de réviser aujourd'hui.\n\nIl te reste *{jours_restants} jours* avant ton {exam}.",
+  urgence: "⚠️ *{nom}* — Plus que *{jours_restants} jours* avant ton examen !\n\nC'est le moment de tout donner. Je suis là pour t'aider 🎯",
+  upsell: "⭐ *{nom}*, passe *Prepa Pro* et révise sans limite !\n\n✅ Messages illimités\n✅ Corrections détaillées\n\n💰 Seulement *3000 FCFA/mois*\n\nTape */plan* pour en savoir plus 🚀",
+  weekend: "🌟 Bon weekend *{nom}* !\n\n*{jours_restants} jours* avant ton examen — un peu de révision aujourd'hui fait toute la différence !\n\nJe suis disponible 24h/24 📚",
 };
 
-function useTemplate(type) {
-    document.getElementById('notifMessage').value = TEMPLATES[type] || '';
-    updatePreview();
+// ════════════════════════════════════════════════════════════
+// AUTH
+// ════════════════════════════════════════════════════════════
+function login() {
+  const key = document.getElementById('authKey').value.trim();
+  if (!key) return;
+  API_KEY = key;
+  loadDashboard();
 }
 
-function updatePreview() {
-    const msg = document.getElementById('notifMessage').value;
-    const preview = msg
-        .replace(/\{nom\}/g, 'Fatou')
-        .replace(/\{streak\}/g, '5')
-        .replace(/\{jours_restants\}/g, '42')
-        .replace(/\{plan\}/g, 'FREE')
-        .replace(/\{exam\}/g, 'BAC')
-        .replace(/\{serie\}/g, 'S2')
-        .replace(/\{messages\}/g, '28');
-
-    document.getElementById('notifPreview').textContent = preview || 'Aperçu du message...';
+function logout() {
+  API_KEY = '';
+  document.getElementById('app').style.display = 'none';
+  document.getElementById('auth-overlay').style.display = 'flex';
+  document.getElementById('authKey').value = '';
 }
 
-async function updateCount() {
-    if (!API_KEY) return;
-    try {
-        const data = await api('/admin/notifications/count', 'POST', {
-            filter_type: document.getElementById('notifFilter')?.value || 'all',
-            exam_type: document.getElementById('notifExam')?.value || null,
-            series: document.getElementById('notifSeries')?.value || null,
-        });
-        const el = document.getElementById('targetCount');
-        if (el) el.textContent = data.count + ' élèves';
-    } catch(e) {
-        const el = document.getElementById('targetCount');
-        if (el) el.textContent = '—';
+// ════════════════════════════════════════════════════════════
+// API
+// ════════════════════════════════════════════════════════════
+async function api(path, method = 'GET', body = null) {
+  const opts = {
+    method,
+    headers: { 'X-Admin-Key': API_KEY, 'Content-Type': 'application/json' }
+  };
+  if (body) opts.body = JSON.stringify(body);
+  const res = await fetch('/api/v1' + path, opts);
+  if (res.status === 403 || res.status === 401) {
+    document.getElementById('authError').style.display = 'block';
+    document.getElementById('auth-overlay').style.display = 'flex';
+    document.getElementById('app').style.display = 'none';
+    throw new Error('Unauthorized');
+  }
+  if (!res.ok) throw new Error('API Error ' + res.status);
+  return res.json();
+}
+
+// ════════════════════════════════════════════════════════════
+// DASHBOARD LOAD
+// ════════════════════════════════════════════════════════════
+async function loadDashboard() {
+  try {
+    const [stats, users, configs, docs] = await Promise.all([
+      api('/admin/stats'),
+      api('/admin/users?limit=50'),
+      api('/admin/config'),
+      api('/admin/documents'),
+    ]);
+
+    document.getElementById('auth-overlay').style.display = 'none';
+    document.getElementById('app').style.display = 'block';
+
+    allStudents = users;
+
+    // KPIs
+    document.getElementById('kpi-users').textContent = stats.total_users?.toLocaleString() || '0';
+    document.getElementById('kpi-users-change').textContent = `${stats.active_users || 0} actifs`;
+    document.getElementById('kpi-messages').textContent = (stats.total_messages || 0).toLocaleString();
+    document.getElementById('kpi-pro').textContent = stats.pro_users || 0;
+    document.getElementById('kpi-conversion').textContent = `${stats.conversion_rate || 0}% conversion`;
+    document.getElementById('kpi-revenue').textContent = (stats.total_revenue_fcfa || 0).toLocaleString();
+    document.getElementById('kpi-tokens').textContent = (stats.tokens_today || 0).toLocaleString();
+    document.getElementById('kpi-cost').textContent = `$${stats.cost_today_usd || '0.0000'} USD`;
+
+    // Badge nav
+    document.getElementById('badge-students').textContent = stats.total_users || 0;
+
+    // Chunks RAG
+    const totalChunks = docs.reduce((s, d) => s + (d.chunk_count || 0), 0);
+    document.getElementById('kpi-chunks').textContent = totalChunks.toLocaleString();
+    document.getElementById('rag-total').textContent = totalChunks.toLocaleString();
+    const pc = docs.filter(d => d.matiere === 'physique_chimie').reduce((s,d) => s + d.chunk_count, 0);
+    const mt = docs.filter(d => d.matiere === 'maths').reduce((s,d) => s + d.chunk_count, 0);
+    document.getElementById('rag-pc').textContent = pc.toLocaleString();
+    document.getElementById('rag-maths').textContent = mt.toLocaleString();
+    document.getElementById('rag-other').textContent = (totalChunks - pc - mt).toLocaleString();
+
+    // Activity feed
+    renderActivity(users.slice(0, 6));
+
+    // LLM stats
+    renderLLMStats(stats);
+
+    // Charts
+    renderActivityChart(stats);
+    renderSubjectsChart(docs);
+    renderMatiereChart(docs);
+    renderRevenueChart(stats);
+
+    // Students table
+    renderStudentsTable(users);
+
+    // Docs table
+    renderDocsTable(docs);
+
+    // Config
+    renderConfig(configs);
+
+    // Payments
+    loadPayments();
+
+    // Analytics
+    renderAnalytics(stats, users);
+
+    // Notif count
+    updateNotifCount();
+
+  } catch(e) {
+    if (!e.message.includes('Unauthorized')) {
+      document.getElementById('authError').style.display = 'block';
+      document.getElementById('authError').textContent = 'Erreur de connexion';
     }
+  }
 }
 
-async function sendNotification() {
-    const msg = document.getElementById('notifMessage').value.trim();
-    if (!msg) { showToast('Écris un message', true); return; }
-
-    const count = document.getElementById('targetCount').textContent;
-    if (!confirm('Envoyer ce message à ' + count + ' ?')) return;
-
-    const status = document.getElementById('notifStatus');
-    status.textContent = '⏳ Envoi en cours...';
-
-    try {
-        const result = await api('/admin/notifications/send', 'POST', {
-            filter_type: document.getElementById('notifFilter').value,
-            message_type: 'custom',
-            custom_message: msg,
-            exam_type: document.getElementById('notifExam').value || null,
-            series: document.getElementById('notifSeries').value || null,
-        });
-        status.textContent = '✅ Envoyé à ' + result.sent + ' élèves' + (result.failed > 0 ? ' (' + result.failed + ' échecs)' : '');
-        showToast('Notifications envoyées : ' + result.sent);
-    } catch(e) {
-        status.textContent = '❌ Erreur envoi';
-        showToast('Erreur', true);
-    }
+// ════════════════════════════════════════════════════════════
+// NAVIGATION
+// ════════════════════════════════════════════════════════════
+function showPage(name) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  document.getElementById('page-' + name).classList.add('active');
+  document.querySelector(`[data-page="${name}"]`).classList.add('active');
+  document.getElementById('page-title').textContent = PAGE_TITLES[name];
+  if (name === 'exercises') loadExercises();
+  if (name === 'documents') loadDocuments();
+  if (name === 'payments') loadPayments();
 }
 
-// ── Config ─────────────────────────────────────────────────────────
+// ════════════════════════════════════════════════════════════
+// ACTIVITY FEED
+// ════════════════════════════════════════════════════════════
+function renderActivity(users) {
+  const colors = { pro: 'var(--green)', free: 'var(--accent)', onboarding: 'var(--yellow)' };
+  const html = users.map(u => `
+    <div class="activity-item">
+      <div class="activity-dot" style="background:${colors[u.plan] || 'var(--text3)'}"></div>
+      <div>
+        <div class="activity-text"><strong>${u.name || '—'}</strong> — ${u.phone}</div>
+        <div class="activity-time">${u.exam_type || '—'} ${u.series || ''} · ${u.plan === 'pro' ? '⭐ Pro' : '🆓 Gratuit'} · ${u.total_messages || 0} msgs</div>
+      </div>
+    </div>
+  `).join('');
+  document.getElementById('activity-feed').innerHTML = html || '<div class="empty-state"><div class="empty-text">Aucune activité</div></div>';
+}
 
-async function saveConfig(key) {
-    const safeKey = key.replace(/[^a-z0-9]/gi, '_');
-    const val = document.getElementById('cfg_' + safeKey).value;
-    let parsed = val;
-    if (!isNaN(val) && val !== '') parsed = Number(val);
-    if (val === 'true') parsed = true;
-    if (val === 'false') parsed = false;
-    try {
-        await api('/admin/config', 'POST', { key, value: parsed });
-        showToast(key + ' mis à jour');
-    } catch (e) {
-        showToast('Erreur', true);
+// ════════════════════════════════════════════════════════════
+// LLM STATS
+// ════════════════════════════════════════════════════════════
+function renderLLMStats(stats) {
+  const pb = stats.provider_breakdown || {};
+  const rows = Object.entries(pb).map(([p, d]) => `
+    <div class="stat-row">
+      <span class="stat-label"><span class="badge blue">${p}</span></span>
+      <span class="stat-val">${(d.tokens || 0).toLocaleString()} — $${d.cost_usd || '0'}</span>
+    </div>
+  `).join('');
+
+  document.getElementById('llm-stats').innerHTML = `
+    <div class="stat-row">
+      <span class="stat-label">Tokens aujourd'hui</span>
+      <span class="stat-val" style="color:var(--accent2)">${(stats.tokens_today||0).toLocaleString()}</span>
+    </div>
+    <div class="stat-row">
+      <span class="stat-label">Coût aujourd'hui</span>
+      <span class="stat-val" style="color:var(--yellow)">$${stats.cost_today_usd||'0.0000'}</span>
+    </div>
+    <div class="stat-row">
+      <span class="stat-label">Tokens total</span>
+      <span class="stat-val">${(stats.tokens_total||0).toLocaleString()}</span>
+    </div>
+    <div class="stat-row">
+      <span class="stat-label">Coût total</span>
+      <span class="stat-val">$${stats.cost_total_usd||'0.0000'}</span>
+    </div>
+    ${rows || '<div style="color:var(--text3);font-size:12px;padding:10px 0">Aucun appel LLM aujourd\'hui</div>'}
+  `;
+}
+
+// ════════════════════════════════════════════════════════════
+// CHARTS
+// ════════════════════════════════════════════════════════════
+const CHART_DEFAULTS = {
+  responsive: true, maintainAspectRatio: false,
+  plugins: { legend: { display: false } },
+  scales: {
+    x: { grid: { color: 'rgba(255,255,255,0.04)' }, ticks: { color: '#4a5568', font: { size: 10 } } },
+    y: { grid: { color: 'rgba(255,255,255,0.04)' }, ticks: { color: '#4a5568', font: { size: 10 } } }
+  }
+};
+
+function renderActivityChart(stats) {
+  const ctx = document.getElementById('chart-activity');
+  if (!ctx) return;
+  if (charts.activity) charts.activity.destroy();
+  const labels = Array.from({length: 7}, (_, i) => {
+    const d = new Date(); d.setDate(d.getDate() - (6-i));
+    return d.toLocaleDateString('fr', {weekday:'short'});
+  });
+  charts.activity = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [{
+        label: 'Messages',
+        data: labels.map(() => Math.floor(Math.random() * 50 + 10)),
+        backgroundColor: 'rgba(59,130,246,0.3)',
+        borderColor: '#3b82f6', borderWidth: 1, borderRadius: 4,
+      }, {
+        label: 'Inscriptions',
+        data: labels.map(() => Math.floor(Math.random() * 5)),
+        backgroundColor: 'rgba(139,92,246,0.3)',
+        borderColor: '#8b5cf6', borderWidth: 1, borderRadius: 4,
+      }]
+    },
+    options: { ...CHART_DEFAULTS, plugins: { legend: { display: true, labels: { color: '#8b9cb0', font: { size: 10 } } } } }
+  });
+}
+
+function renderSubjectsChart(docs) {
+  const ctx = document.getElementById('chart-subjects');
+  if (!ctx) return;
+  if (charts.subjects) charts.subjects.destroy();
+  const matiereMap = {};
+  docs.forEach(d => { const m = d.matiere || 'autre'; matiereMap[m] = (matiereMap[m] || 0) + d.chunk_count; });
+  charts.subjects = new Chart(ctx, {
+    type: 'doughnut',
+    data: {
+      labels: Object.keys(matiereMap),
+      datasets: [{ data: Object.values(matiereMap), backgroundColor: ['#3b82f6','#8b5cf6','#10b981','#f59e0b','#ef4444','#06b6d4','#84cc16'], borderWidth: 0 }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { position: 'bottom', labels: { color: '#8b9cb0', font: { size: 10 }, padding: 8 } } }
     }
+  });
+}
+
+function renderMatiereChart(docs) {
+  const ctx = document.getElementById('chart-matiere');
+  if (!ctx) return;
+  if (charts.matiere) charts.matiere.destroy();
+  const matiereMap = {};
+  docs.forEach(d => { const m = d.matiere || 'autre'; matiereMap[m] = (matiereMap[m]||0)+1; });
+  const sorted = Object.entries(matiereMap).sort((a,b) => b[1]-a[1]);
+  charts.matiere = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: sorted.map(x => x[0]),
+      datasets: [{ data: sorted.map(x => x[1]), backgroundColor: '#3b82f6', borderRadius: 4 }]
+    },
+    options: { ...CHART_DEFAULTS, indexAxis: 'y' }
+  });
+}
+
+function renderRevenueChart(stats) {
+  const ctx = document.getElementById('chart-revenue');
+  if (!ctx) return;
+  if (charts.revenue) charts.revenue.destroy();
+  const months = ['Jan','Fév','Mar','Avr','Mai','Jun'];
+  charts.revenue = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: months,
+      datasets: [{
+        data: months.map(() => Math.floor(Math.random() * 50000 + 10000)),
+        borderColor: '#10b981', backgroundColor: 'rgba(16,185,129,0.1)',
+        fill: true, tension: 0.4, pointRadius: 3
+      }]
+    },
+    options: CHART_DEFAULTS
+  });
+}
+
+function setChartPeriod(period) {
+  renderActivityChart({});
+}
+
+// ════════════════════════════════════════════════════════════
+// STUDENTS
+// ════════════════════════════════════════════════════════════
+function renderStudentsTable(users) {
+  document.getElementById('students-count').textContent = `${users.length} élèves`;
+  const planBadge = p => p === 'pro' ? '<span class="badge purple">⭐ Pro</span>' : '<span class="badge gray">Gratuit</span>';
+  const statusBadge = s => ({
+    active: '<span class="badge green">Actif</span>',
+    onboarding: '<span class="badge yellow">Onboarding</span>',
+    done: '<span class="badge green">Actif</span>',
+  }[s] || `<span class="badge gray">${s}</span>`);
+  const scoreBar = n => {
+    const col = n >= 70 ? 'var(--green)' : n >= 40 ? 'var(--yellow)' : 'var(--red)';
+    return `<div style="display:flex;align-items:center;gap:6px"><span style="font-family:'JetBrains Mono',monospace;font-size:12px">${n}</span><div class="progress-bar" style="width:50px"><div class="progress-fill" style="width:${n}%;background:${col}"></div></div></div>`;
+  };
+
+  const html = users.map(u => `
+    <tr>
+      <td><div style="font-weight:600">${u.name || '—'}</div><div style="font-size:10px;color:var(--text3)">${u.created_at ? new Date(u.created_at).toLocaleDateString('fr') : ''}</div></td>
+      <td><span style="font-family:'JetBrains Mono',monospace;font-size:11px">${u.phone}</span></td>
+      <td>${planBadge(u.plan)}</td>
+      <td><span style="font-size:12px">${u.exam_type || '—'} ${u.series || ''}</span></td>
+      <td><span style="color:var(--yellow)">🔥 ${u.streak_days || 0}j</span></td>
+      <td><span style="font-family:'JetBrains Mono',monospace">${u.total_messages || 0}</span></td>
+      <td>${scoreBar(u.engagement_score || 0)}</td>
+      <td>${statusBadge(u.status)}</td>
+      <td>
+        <div style="display:flex;gap:4px">
+          <button class="btn btn-ghost btn-sm btn-icon" onclick="resetQuota('${u.id}')" title="Reset quota">🔄</button>
+          ${u.plan !== 'pro' ? `<button class="btn btn-ghost btn-sm btn-icon" onclick="activatePro('${u.id}')" title="Activer Pro">⭐</button>` : ''}
+          <button class="btn btn-danger btn-sm btn-icon" onclick="deleteUser('${u.id}','${(u.name||u.phone).replace(/'/g,"\\'")}')">🗑</button>
+        </div>
+      </td>
+    </tr>
+  `).join('');
+
+  document.getElementById('students-table').innerHTML = html || '<tr><td colspan="9"><div class="empty-state"><div class="empty-icon">👥</div><div class="empty-text">Aucun élève</div></div></td></tr>';
+}
+
+async function loadStudents() {
+  try {
+    const users = await api('/admin/users?limit=100');
+    allStudents = users;
+    renderStudentsTable(users);
+  } catch(e) { showToast('Erreur chargement élèves', 'error'); }
+}
+
+function filterStudents() {
+  const search = document.getElementById('search-students').value.toLowerCase();
+  const plan = document.getElementById('filter-plan').value;
+  const exam = document.getElementById('filter-exam').value;
+  const status = document.getElementById('filter-status').value;
+  const filtered = allStudents.filter(u => {
+    const matchSearch = !search || (u.name||'').toLowerCase().includes(search) || u.phone.includes(search);
+    const matchPlan = !plan || u.plan === plan;
+    const matchExam = !exam || u.exam_type === exam;
+    const matchStatus = !status || u.status === status;
+    return matchSearch && matchPlan && matchExam && matchStatus;
+  });
+  renderStudentsTable(filtered);
 }
 
 async function resetQuota(userId) {
-    try {
-        await api('/admin/users/' + userId + '/reset-quota', 'POST');
-        showToast('Quota réinitialisé');
-    } catch (e) {
-        showToast('Erreur', true);
-    }
+  try {
+    await api('/admin/users/' + userId + '/reset-quota', 'POST');
+    showToast('Quota réinitialisé');
+  } catch(e) { showToast('Erreur', 'error'); }
 }
 
 async function activatePro(userId) {
-    try {
-        await api('/admin/users/' + userId + '/activate-pro', 'POST');
-        showToast('Plan Pro activé');
-        loadDashboard();
-    } catch (e) {
-        showToast('Erreur', true);
-    }
+  try {
+    await api('/admin/users/' + userId + '/activate-pro', 'POST');
+    showToast('Pro activé ✅');
+    loadStudents();
+  } catch(e) { showToast('Erreur', 'error'); }
 }
 
-async function deleteUser(userId, userName) {
-    if (!confirm(`Supprimer définitivement l'élève "${userName}" et toutes ses données ?`)) return;
-    try {
-        await api('/admin/users/' + userId, 'DELETE');
-        showToast('Élève supprimé');
-        loadDashboard();
-    } catch (e) {
-        showToast('Erreur suppression', true);
-    }
+async function deleteUser(userId, name) {
+  if (!confirm(`Supprimer définitivement "${name}" et toutes ses données ?`)) return;
+  try {
+    await api('/admin/users/' + userId, 'DELETE');
+    showToast('Élève supprimé');
+    loadStudents();
+  } catch(e) { showToast('Erreur suppression', 'error'); }
 }
 
-// ── Documents ──────────────────────────────────────────────────────
-
-async function uploadDocument() {
-    const file = document.getElementById('docFile').files[0];
-    if (!file) { showToast('Sélectionne un fichier', true); return; }
-
-    if (file.size > 10 * 1024 * 1024) {
-        showToast('Fichier trop grand (max 10MB)', true);
-        document.getElementById('uploadStatus').textContent = '❌ Max 10MB. Utilise : python scripts/index_documents.py';
-        return;
-    }
-
-    const status = document.getElementById('uploadStatus');
-    status.textContent = '⏳ Lecture (' + (file.size / 1024 / 1024).toFixed(1) + ' MB)...';
-
-    const reader = new FileReader();
-    reader.onload = async (e) => {
-        const b64 = e.target.result.split(',')[1];
-        status.textContent = '⏳ Indexation en cours...';
-
-        try {
-            const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 300000);
-
-            const res = await fetch('/api/v1/admin/documents/upload', {
-                method: 'POST',
-                headers: { 'X-Admin-Key': API_KEY, 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    filename: file.name,
-                    file_b64: b64,
-                    title: document.getElementById('docTitle').value || file.name,
-                    exam_type: document.getElementById('docExam').value,
-                    series: document.getElementById('docSeries').value,
-                    subject: document.getElementById('docSubject').value,
-                    doc_type: document.getElementById('docType').value,
-                }),
-                signal: controller.signal,
-            });
-
-            clearTimeout(timeoutId);
-
-            if (res.status === 413) {
-                status.textContent = '❌ Fichier trop grand.';
-                showToast('Fichier trop grand', true);
-                return;
-            }
-            if (!res.ok) throw new Error('Erreur ' + res.status);
-
-            const result = await res.json();
-            if (result.success) {
-                status.textContent = '✅ ' + result.chunks + ' chunks, ' + result.pages + ' pages';
-                showToast('Document indexé');
-                loadDashboard();
-            } else {
-                status.textContent = '❌ ' + result.error;
-                showToast('Erreur indexation', true);
-            }
-        } catch(e) {
-            status.textContent = e.name === 'AbortError' ? '❌ Timeout' : '❌ ' + e.message;
-            showToast('Erreur', true);
-        }
-    };
-    reader.readAsDataURL(file);
+// ════════════════════════════════════════════════════════════
+// EXERCISES
+// ════════════════════════════════════════════════════════════
+async function loadExercises() {
+  try {
+    const matiere = document.getElementById('filter-ex-matiere').value;
+    const niveau = document.getElementById('filter-ex-niveau').value;
+    const exam = document.getElementById('filter-ex-exam').value;
+    let params = [];
+    if (matiere) params.push('matiere=' + matiere);
+    if (niveau) params.push('niveau=' + niveau);
+    if (exam) params.push('exam_type=' + exam);
+    const qs = params.length ? '?' + params.join('&') : '';
+    const exercises = await api('/admin/exercises' + qs);
+    renderExercisesTable(exercises);
+  } catch(e) {
+    document.getElementById('exercises-table').innerHTML = '<tr><td colspan="9"><div class="empty-state"><div class="empty-icon">📝</div><div class="empty-text">Aucun exercice</div><div class="empty-sub">Ajoutez des exercices depuis le bouton ci-dessus</div></div></td></tr>';
+  }
 }
 
-async function uploadExercises() {
-    const file = document.getElementById('exFile').files[0];
-    if (!file) { showToast('Sélectionne un fichier PDF', true); return; }
-
-    const status = document.getElementById('exStatus');
-    const results = document.getElementById('exResults');
-    results.innerHTML = '';
-
-    if (file.size > 100 * 1024 * 1024) {
-        showToast('Fichier trop grand (max 100MB)', true);
-        status.textContent = '❌ Fichier trop grand. Max 100MB.';
-        return;
-    }
-    status.textContent = `⏳ Lecture fichier (${(file.size/1024/1024).toFixed(1)}MB)...`;
-
-    const reader = new FileReader();
-    reader.onload = async (e) => {
-        const b64 = e.target.result.split(',')[1];
-
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 600000); // 10 minutes
-
-        try {
-            const res = await fetch('/api/v1/admin/documents/upload-exercises', {
-                method: 'POST',
-                headers: { 'X-Admin-Key': API_KEY, 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    filename: file.name,
-                    file_b64: b64,
-                    exam_type: document.getElementById('exExam').value || null,
-                    serie: document.getElementById('exSerie').value || null,
-                    matiere: document.getElementById('exMatiere').value || null,
-                }),
-                signal: controller.signal,
-            });
-            clearTimeout(timeoutId);
-            const data = await res.json();
-
-            if (data.success) {
-                status.textContent = `✅ ${data.exercises_count} exercices extraits — ${data.matiere} ${data.exam_type} ${data.annee || ''}`;
-                results.innerHTML = `
-                    <table>
-                        <thead>
-                            <tr>
-                                <th>N°</th>
-                                <th>Titre</th>
-                                <th>Exercice PDF</th>
-                                <th>Correction PDF</th>
-                                <th>Statut</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            ${data.exercises.map(ex => `
-                                <tr>
-                                    <td>${ex.number}</td>
-                                    <td>${ex.title}</td>
-                                    <td>${ex.exercise_path ? '✅' : '❌'}</td>
-                                    <td>${ex.correction_path ? (ex.correction_generated ? '✅ générée' : '✅ extraite') : '❌'}</td>
-                                    <td>${ex.error ? '❌ ' + ex.error : '✅'}</td>
-                                </tr>
-                            `).join('')}
-                        </tbody>
-                    </table>
-                `;
-                showToast(`${data.exercises_count} exercices extraits`);
-            } else {
-                status.textContent = '❌ ' + (data.error || 'Erreur inconnue');
-                showToast('Erreur analyse', true);
-            }
-        } catch(e) {
-            clearTimeout(timeoutId);
-            if (e.name === 'AbortError') {
-                status.textContent = '❌ Timeout — analyse trop longue, réessaie avec un fichier plus petit';
-            } else {
-                status.textContent = '❌ ' + e.message;
-            }
-            showToast('Erreur', true);
-        }
-    };
-    reader.readAsDataURL(file);
+function renderExercisesTable(exercises) {
+  if (!exercises || !exercises.length) {
+    document.getElementById('exercises-table').innerHTML = '<tr><td colspan="9"><div class="empty-state"><div class="empty-icon">📝</div><div class="empty-text">Aucun exercice</div></div></td></tr>';
+    return;
+  }
+  const niveauLabel = n => ({1:'<span class="badge green">🟢 Facile</span>', 2:'<span class="badge yellow">🟡 Moyen</span>', 3:'<span class="badge red">🔴 Difficile</span>'}[n] || n);
+  const html = exercises.map(ex => `
+    <tr>
+      <td><div style="font-weight:500;max-width:200px">${ex.title || '—'}</div></td>
+      <td><span class="badge blue">${ex.matiere || '—'}</span></td>
+      <td><span style="font-size:12px;color:var(--text2)">${ex.chapitre || '—'}</span></td>
+      <td><span style="font-size:12px">${ex.exam_type || '—'} ${ex.serie || ''}</span></td>
+      <td><span style="font-family:'JetBrains Mono',monospace;font-size:12px">${ex.annee || '—'}</span></td>
+      <td>${niveauLabel(ex.niveau)}</td>
+      <td>${ex.correction_path ? '<span class="badge green">✅ Oui</span>' : '<span class="badge gray">—</span>'}</td>
+      <td><span class="badge ${ex.status === 'ready' ? 'green' : 'yellow'}">${ex.status}</span></td>
+      <td>
+        <button class="btn btn-danger btn-sm btn-icon" onclick="deleteExercise('${ex.id}')">🗑</button>
+      </td>
+    </tr>
+  `).join('');
+  document.getElementById('exercises-table').innerHTML = html;
 }
 
-// ── Upload exercice PDF ────────────────────────────────────────────
+async function deleteExercise(id) {
+  if (!confirm('Supprimer cet exercice ?')) return;
+  try {
+    await api('/admin/exercises/' + id, 'DELETE');
+    showToast('Exercice supprimé');
+    loadExercises();
+  } catch(e) { showToast('Erreur', 'error'); }
+}
 
-// Preview noms fichiers
-document.addEventListener('DOMContentLoaded', () => {
-    document.getElementById('exPdfFile')?.addEventListener('change', (e) => {
-        const f = e.target.files[0];
-        document.getElementById('exPdfName').textContent = f ? `${f.name} (${(f.size/1024/1024).toFixed(1)}MB)` : '';
-    });
-    document.getElementById('corrPdfFile')?.addEventListener('change', (e) => {
-        const f = e.target.files[0];
-        document.getElementById('corrPdfName').textContent = f ? `${f.name} (${(f.size/1024/1024).toFixed(1)}MB)` : '';
-    });
+// ════════════════════════════════════════════════════════════
+// UPLOAD EXERCISE
+// ════════════════════════════════════════════════════════════
+function onFileSelect(inputId, zoneId, nameId) {
+  const f = document.getElementById(inputId).files[0];
+  if (!f) return;
+  document.getElementById(zoneId).classList.add('has-file');
+  document.getElementById(nameId).textContent = `✅ ${f.name} (${(f.size/1024/1024).toFixed(1)}MB)`;
+}
+
+const toBase64 = (file) => new Promise((res, rej) => {
+  const r = new FileReader();
+  r.onload = () => res(r.result.split(',')[1]);
+  r.onerror = rej;
+  r.readAsDataURL(file);
 });
 
-async function uploadExercisePdf() {
-    const exFile = document.getElementById('exPdfFile').files[0];
-    const corrFile = document.getElementById('corrPdfFile').files[0];
-    const matiere = document.getElementById('exMatiere').value;
-    const status = document.getElementById('exUploadStatus');
+async function uploadExercise() {
+  const exFile = document.getElementById('ex-file').files[0];
+  const corrFile = document.getElementById('corr-file').files[0];
+  const matiere = document.getElementById('ex-matiere').value;
+  const status = document.getElementById('ex-upload-status');
 
-    if (!exFile) { showToast('Sélectionne un PDF exercice', true); return; }
-    if (!matiere) { showToast('Sélectionne une matière', true); return; }
+  if (!exFile) { showToast('Sélectionne un PDF exercice', 'error'); return; }
+  if (!matiere) { showToast('Sélectionne une matière', 'error'); return; }
 
-    status.textContent = '⏳ Lecture des fichiers...';
+  status.textContent = '⏳ Lecture des fichiers...';
 
-    const toBase64 = (file) => new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(reader.result.split(',')[1]);
-        reader.onerror = reject;
-        reader.readAsDataURL(file);
+  try {
+    const exercise_b64 = await toBase64(exFile);
+    const correction_b64 = corrFile ? await toBase64(corrFile) : null;
+
+    status.textContent = '🤖 Analyse du niveau par IA...';
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 120000);
+
+    const res = await fetch('/api/v1/admin/exercises/upload', {
+      method: 'POST',
+      headers: { 'X-Admin-Key': API_KEY, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        exercise_b64,
+        correction_b64,
+        filename_ex: exFile.name,
+        filename_corr: corrFile?.name || 'correction.pdf',
+        title: document.getElementById('ex-title').value || '',
+        exam_type: document.getElementById('ex-exam').value,
+        serie: document.getElementById('ex-serie').value || null,
+        matiere,
+        chapitre: document.getElementById('ex-chapitre').value || null,
+        annee: document.getElementById('ex-annee').value || null,
+        tags: document.getElementById('ex-tags').value.split(',').map(t => t.trim()).filter(Boolean),
+      }),
+      signal: controller.signal,
     });
+    clearTimeout(timeoutId);
+    const data = await res.json();
 
-    try {
-        const exercise_b64 = await toBase64(exFile);
-        const correction_b64 = corrFile ? await toBase64(corrFile) : null;
-
-        status.textContent = '⏳ Analyse du niveau par IA...';
-
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 120000);
-
-        const res = await fetch('/api/v1/admin/exercises/upload', {
-            method: 'POST',
-            headers: { 'X-Admin-Key': API_KEY, 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                exercise_b64,
-                correction_b64,
-                filename_ex: exFile.name,
-                filename_corr: corrFile?.name || 'correction.pdf',
-                title: document.getElementById('exTitle').value || '',
-                exam_type: document.getElementById('exExamType').value,
-                serie: document.getElementById('exSerie').value || null,
-                matiere,
-                chapitre: document.getElementById('exChapitre').value || null,
-                annee: document.getElementById('exAnnee').value || null,
-                tags: document.getElementById('exTags').value
-                    .split(',').map(t => t.trim()).filter(Boolean),
-            }),
-            signal: controller.signal,
-        });
-        clearTimeout(timeoutId);
-
-        const data = await res.json();
-
-        if (data.success) {
-            const niveauLabel = {1: '🟢 Facile', 2: '🟡 Intermédiaire', 3: '🔴 Difficile'}[data.niveau] || data.niveau;
-            status.innerHTML = `
-                ✅ Exercice ajouté !<br>
-                <span style="color:#818cf8">Niveau détecté : <strong>${niveauLabel}</strong></span><br>
-                <span style="color:#94a3b8">${data.matiere} — ${data.chapitre || 'général'} — ${data.exam_type}</span>
-                ${data.correction_path ? '<br><span style="color:#10b981">✅ Correction incluse</span>' : '<br><span style="color:#f59e0b">⚠️ Sans correction</span>'}
-            `;
-            showToast(`Exercice ajouté — Niveau ${data.niveau}`);
-
-            // Reset formulaire
-            document.getElementById('exPdfFile').value = '';
-            document.getElementById('corrPdfFile').value = '';
-            document.getElementById('exPdfName').textContent = '';
-            document.getElementById('corrPdfName').textContent = '';
-            document.getElementById('exTitle').value = '';
-            document.getElementById('exChapitre').value = '';
-            document.getElementById('exAnnee').value = '';
-            document.getElementById('exTags').value = '';
-        } else {
-            status.textContent = '❌ ' + (data.detail || 'Erreur inconnue');
-            showToast('Erreur upload', true);
-        }
-    } catch(e) {
-        status.textContent = e.name === 'AbortError'
-            ? '❌ Timeout — réessaie'
-            : '❌ ' + e.message;
-        showToast('Erreur', true);
+    if (data.success) {
+      const niveauLabel = {1:'🟢 Facile', 2:'🟡 Intermédiaire', 3:'🔴 Difficile'}[data.niveau] || data.niveau;
+      status.innerHTML = `✅ Exercice ajouté ! Niveau : <strong style="color:var(--green)">${niveauLabel}</strong>`;
+      showToast('Exercice ajouté ✅');
+      closeModal('modal-upload-exercise');
+      loadExercises();
+    } else {
+      status.textContent = '❌ ' + (data.detail || 'Erreur');
+      showToast('Erreur upload', 'error');
     }
+  } catch(e) {
+    status.textContent = e.name === 'AbortError' ? '❌ Timeout' : '❌ ' + e.message;
+    showToast('Erreur', 'error');
+  }
+}
+
+// ════════════════════════════════════════════════════════════
+// DOCUMENTS
+// ════════════════════════════════════════════════════════════
+async function loadDocuments() {
+  try {
+    const docs = await api('/admin/documents');
+    renderDocsTable(docs);
+    const totalChunks = docs.reduce((s,d) => s + (d.chunk_count||0), 0);
+    document.getElementById('rag-total').textContent = totalChunks.toLocaleString();
+    const pc = docs.filter(d => d.matiere === 'physique_chimie').reduce((s,d) => s + d.chunk_count, 0);
+    const mt = docs.filter(d => d.matiere === 'maths').reduce((s,d) => s + d.chunk_count, 0);
+    document.getElementById('rag-pc').textContent = pc.toLocaleString();
+    document.getElementById('rag-maths').textContent = mt.toLocaleString();
+    document.getElementById('rag-other').textContent = (totalChunks - pc - mt).toLocaleString();
+  } catch(e) {}
+}
+
+function renderDocsTable(docs) {
+  const statusBadge = s => ({
+    indexed: '<span class="badge green">Indexé</span>',
+    processing: '<span class="badge yellow">En cours</span>',
+    error: '<span class="badge red">Erreur</span>',
+  }[s] || `<span class="badge gray">${s}</span>`);
+
+  const html = docs.map(d => `
+    <tr>
+      <td><div style="max-width:200px;font-size:12px">${d.title}</div></td>
+      <td>${d.exam_type || '—'}</td>
+      <td>${d.serie || '—'}</td>
+      <td>${d.matiere || '—'}</td>
+      <td>${d.doc_type || '—'}</td>
+      <td>${d.page_count}</td>
+      <td><span style="font-family:'JetBrains Mono',monospace">${d.chunk_count}</span></td>
+      <td>${statusBadge(d.status)}</td>
+      <td><button class="btn btn-danger btn-sm btn-icon" onclick="deleteDocument('${d.id}')">🗑</button></td>
+    </tr>
+  `).join('');
+  document.getElementById('docs-table').innerHTML = html || '<tr><td colspan="9"><div class="empty-state"><div class="empty-icon">📚</div><div class="empty-text">Aucun document</div></div></td></tr>';
 }
 
 async function deleteDocument(docId) {
-    if (!confirm('Supprimer ce document et tous ses chunks ?')) return;
-    try {
-        await api('/admin/documents/' + docId, 'DELETE');
-        showToast('Document supprimé');
-        loadDashboard();
-    } catch(e) {
-        showToast('Erreur', true);
-    }
+  if (!confirm('Supprimer ce document et tous ses chunks ?')) return;
+  try {
+    await api('/admin/documents/' + docId, 'DELETE');
+    showToast('Document supprimé');
+    loadDocuments();
+  } catch(e) { showToast('Erreur', 'error'); }
 }
+
+async function uploadDocument() {
+  const file = document.getElementById('doc-file').files[0];
+  if (!file) { showToast('Sélectionne un fichier', 'error'); return; }
+  if (file.size > 10 * 1024 * 1024) { showToast('Max 10MB', 'error'); return; }
+
+  const status = document.getElementById('doc-upload-status');
+  status.textContent = `⏳ Lecture (${(file.size/1024/1024).toFixed(1)}MB)...`;
+  document.getElementById('doc-upload-progress').style.display = 'block';
+
+  const reader = new FileReader();
+  reader.onload = async (e) => {
+    const b64 = e.target.result.split(',')[1];
+    status.textContent = '⏳ Indexation en cours...';
+    document.getElementById('doc-progress-fill').style.width = '30%';
+
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 300000);
+
+      const res = await fetch('/api/v1/admin/documents/upload', {
+        method: 'POST',
+        headers: { 'X-Admin-Key': API_KEY, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          filename: file.name,
+          file_b64: b64,
+          title: document.getElementById('doc-title').value || file.name,
+          exam_type: document.getElementById('doc-exam').value,
+          series: document.getElementById('doc-serie').value,
+          subject: document.getElementById('doc-matiere').value,
+          doc_type: document.getElementById('doc-type').value,
+        }),
+        signal: controller.signal,
+      });
+      clearTimeout(timeoutId);
+      document.getElementById('doc-progress-fill').style.width = '100%';
+
+      if (!res.ok) throw new Error('Erreur ' + res.status);
+      const result = await res.json();
+
+      if (result.success) {
+        status.textContent = `✅ ${result.chunks} chunks, ${result.pages} pages`;
+        showToast('Document indexé ✅');
+        closeModal('modal-upload-doc');
+        loadDocuments();
+      } else {
+        status.textContent = '❌ ' + result.error;
+        showToast('Erreur indexation', 'error');
+      }
+    } catch(e) {
+      status.textContent = e.name === 'AbortError' ? '❌ Timeout' : '❌ ' + e.message;
+      showToast('Erreur', 'error');
+    }
+  };
+  reader.readAsDataURL(file);
+}
+
+// ════════════════════════════════════════════════════════════
+// NOTIFICATIONS
+// ════════════════════════════════════════════════════════════
+async function updateNotifCount() {
+  if (!API_KEY) return;
+  try {
+    const data = await api('/admin/notifications/count', 'POST', {
+      filter_type: document.getElementById('notif-filter')?.value || 'all',
+      exam_type: document.getElementById('notif-exam')?.value || null,
+      series: document.getElementById('notif-series')?.value || null,
+    });
+    document.getElementById('notif-count').textContent = data.count;
+  } catch(e) { document.getElementById('notif-count').textContent = '—'; }
+}
+
+function updateNotifPreview() {
+  const msg = document.getElementById('notif-message').value;
+  const preview = msg
+    .replace(/\{nom\}/g, 'Fatou')
+    .replace(/\{streak\}/g, '5')
+    .replace(/\{jours_restants\}/g, '42')
+    .replace(/\{plan\}/g, 'FREE')
+    .replace(/\{exam\}/g, 'BAC')
+    .replace(/\{serie\}/g, 'S2')
+    .replace(/\{messages\}/g, '28');
+  document.getElementById('notif-preview').textContent = preview || 'Aperçu...';
+}
+
+function useTemplate(type) {
+  document.getElementById('notif-message').value = TEMPLATES[type] || '';
+  updateNotifPreview();
+}
+
+async function sendNotification() {
+  const msg = document.getElementById('notif-message').value.trim();
+  if (!msg) { showToast('Écris un message', 'error'); return; }
+  const count = document.getElementById('notif-count').textContent;
+  if (!confirm(`Envoyer ce message à ${count} élèves ?`)) return;
+
+  const status = document.getElementById('notif-status');
+  status.textContent = '⏳ Envoi en cours...';
+
+  try {
+    const result = await api('/admin/notifications/send', 'POST', {
+      filter_type: document.getElementById('notif-filter').value,
+      message_type: 'custom',
+      custom_message: msg,
+      exam_type: document.getElementById('notif-exam').value || null,
+      series: document.getElementById('notif-series').value || null,
+    });
+    status.textContent = `✅ Envoyé à ${result.sent} élèves` + (result.failed > 0 ? ` (${result.failed} échecs)` : '');
+    showToast(`Notifications envoyées : ${result.sent}`);
+  } catch(e) {
+    status.textContent = '❌ Erreur envoi';
+    showToast('Erreur', 'error');
+  }
+}
+
+// ════════════════════════════════════════════════════════════
+// PAYMENTS
+// ════════════════════════════════════════════════════════════
+async function loadPayments() {
+  try {
+    const data = await api('/admin/subscriptions');
+    document.getElementById('pay-total').textContent = (data.total_revenue_fcfa || 0).toLocaleString();
+    document.getElementById('pay-active').textContent = data.active_count || 0;
+    document.getElementById('pay-rate').textContent = data.conversion_rate || '—';
+
+    const html = (data.subscriptions || []).map(s => `
+      <tr>
+        <td>${s.user_name || s.user_phone || '—'}</td>
+        <td><span class="badge purple">⭐ ${s.plan}</span></td>
+        <td><span style="font-family:'JetBrains Mono',monospace">${(s.amount_fcfa||0).toLocaleString()} FCFA</span></td>
+        <td>${s.payment_method || '—'}</td>
+        <td>${s.started_at ? new Date(s.started_at).toLocaleDateString('fr') : '—'}</td>
+        <td>${s.expires_at ? new Date(s.expires_at).toLocaleDateString('fr') : '—'}</td>
+        <td><span class="badge ${s.status === 'active' ? 'green' : 'gray'}">${s.status}</span></td>
+      </tr>
+    `).join('');
+    document.getElementById('payments-table').innerHTML = html || '<tr><td colspan="7"><div class="empty-state"><div class="empty-icon">💰</div><div class="empty-text">Aucune transaction</div></div></td></tr>';
+  } catch(e) {
+    document.getElementById('payments-table').innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--text3);padding:20px">Données non disponibles</td></tr>';
+  }
+}
+
+// ════════════════════════════════════════════════════════════
+// ANALYTICS
+// ════════════════════════════════════════════════════════════
+function renderAnalytics(stats, users) {
+  const examMap = {};
+  users.forEach(u => { const e = u.exam_type||'—'; examMap[e]=(examMap[e]||0)+1; });
+  document.getElementById('exam-stats').innerHTML = Object.entries(examMap).map(([k,v]) => `
+    <div class="stat-row"><span class="stat-label">${k}</span><span class="stat-val">${v} élèves</span></div>
+  `).join('') || '<div style="color:var(--text3);padding:10px;font-size:12px">Aucune donnée</div>';
+
+  const pb = stats.provider_breakdown || {};
+  document.getElementById('provider-stats').innerHTML = Object.entries(pb).map(([k,v]) => `
+    <div class="stat-row"><span class="stat-label"><span class="badge blue">${k}</span></span><span class="stat-val">${(v.tokens||0).toLocaleString()}</span></div>
+  `).join('') || '<div style="color:var(--text3);padding:10px;font-size:12px">Aucune donnée</div>';
+
+  const seriesMap = {};
+  users.forEach(u => { const s = u.series||'—'; seriesMap[s]=(seriesMap[s]||0)+1; });
+  document.getElementById('series-stats').innerHTML = Object.entries(seriesMap).map(([k,v]) => `
+    <div class="stat-row"><span class="stat-label">${k}</span><span class="stat-val">${v} élèves</span></div>
+  `).join('') || '<div style="color:var(--text3);padding:10px;font-size:12px">Aucune donnée</div>';
+}
+
+// ════════════════════════════════════════════════════════════
+// CONFIG
+// ════════════════════════════════════════════════════════════
+function renderConfig(configs) {
+  const html = configs.map(c => {
+    const safeKey = c.key.replace(/[^a-z0-9]/gi, '_');
+    return `
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 12px;background:var(--surface2);border-radius:var(--radius-sm);border:1px solid var(--border)">
+        <div>
+          <span style="width:8px;height:8px;border-radius:50%;display:inline-block;margin-right:6px;background:${c.is_custom?'var(--accent)':'var(--text3)'}"></span>
+          <span style="font-size:12px;font-family:'JetBrains Mono',monospace;color:var(--text2)">${c.key}</span>
+        </div>
+        <div style="display:flex;gap:6px;align-items:center">
+          <input type="text" value="${c.value}" id="cfg_${safeKey}"
+            style="background:var(--surface);border:1px solid var(--border2);color:var(--text);padding:5px 10px;border-radius:var(--radius-sm);font-size:12px;width:120px;outline:none;font-family:inherit"/>
+          <button class="btn btn-ghost btn-sm" onclick="saveConfig('${c.key}')">✓</button>
+        </div>
+      </div>
+    `;
+  }).join('');
+  document.getElementById('config-grid').innerHTML = html;
+}
+
+async function saveConfig(key) {
+  const safeKey = key.replace(/[^a-z0-9]/gi, '_');
+  const val = document.getElementById('cfg_' + safeKey).value;
+  let parsed = val;
+  if (!isNaN(val) && val !== '') parsed = Number(val);
+  if (val === 'true') parsed = true;
+  if (val === 'false') parsed = false;
+  try {
+    await api('/admin/config', 'POST', { key, value: parsed });
+    showToast(`${key} mis à jour ✅`);
+  } catch(e) { showToast('Erreur', 'error'); }
+}
+
+// ════════════════════════════════════════════════════════════
+// MODALS
+// ════════════════════════════════════════════════════════════
+function openModal(id) { document.getElementById(id).classList.add('open'); }
+function closeModal(id) { document.getElementById(id).classList.remove('open'); }
+document.addEventListener('click', e => {
+  if (e.target.classList.contains('modal-overlay')) e.target.classList.remove('open');
+});
+
+// ════════════════════════════════════════════════════════════
+// TOAST
+// ════════════════════════════════════════════════════════════
+function showToast(msg, type = 'success') {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = type;
+  t.style.display = 'block';
+  setTimeout(() => t.style.display = 'none', 3500);
+}
+
+// ════════════════════════════════════════════════════════════
+// AUTO-REFRESH & INIT
+// ════════════════════════════════════════════════════════════
+setInterval(() => { if (API_KEY) updateNotifCount(); }, 60000);
+document.getElementById('authKey').addEventListener('keydown', e => { if (e.key === 'Enter') login(); });
 </script>
 </body>
 </html>

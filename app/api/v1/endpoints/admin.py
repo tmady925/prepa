@@ -564,6 +564,147 @@ niveau 3 = difficile (demande réflexion avancée, type concours)"""
     }
 
 
+@router.get("/admin/exercises")
+async def get_exercises(
+    db: AsyncSession = Depends(get_db),
+    _: bool = Depends(verify_admin),
+    matiere: str | None = None,
+    niveau: int | None = None,
+    exam_type: str | None = None,
+    limit: int = 100,
+    offset: int = 0,
+):
+    """Liste les exercices avec filtres optionnels."""
+    from app.models.exercise import Exercise
+
+    query = select(Exercise).order_by(Exercise.created_at.desc())
+
+    if matiere:
+        query = query.where(Exercise.matiere == matiere)
+    if niveau is not None:
+        query = query.where(Exercise.niveau == niveau)
+    if exam_type:
+        query = query.where(Exercise.exam_type == exam_type)
+
+    query = query.limit(limit).offset(offset)
+    result = await db.execute(query)
+    exercises = result.scalars().all()
+
+    return [
+        {
+            "id": str(e.id),
+            "title": e.title,
+            "exam_type": e.exam_type,
+            "serie": e.serie,
+            "matiere": e.matiere,
+            "chapitre": e.chapitre,
+            "niveau": e.niveau,
+            "annee": e.annee,
+            "tags": e.tags,
+            "exercise_path": e.exercise_path,
+            "correction_path": e.correction_path,
+            "correction_generated": e.correction_generated,
+            "status": e.status,
+            "error_message": e.error_message,
+            "created_at": e.created_at.isoformat() if e.created_at else None,
+        }
+        for e in exercises
+    ]
+
+
+@router.delete("/admin/exercises/{exercise_id}")
+async def delete_exercise(
+    exercise_id: str,
+    db: AsyncSession = Depends(get_db),
+    _: bool = Depends(verify_admin),
+):
+    """Supprime un exercice (DB + fichiers sur disque)."""
+    import uuid
+    from pathlib import Path
+    from app.models.exercise import Exercise
+
+    try:
+        uid = uuid.UUID(exercise_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="ID invalide")
+
+    result = await db.execute(select(Exercise).where(Exercise.id == uid))
+    exercise = result.scalar_one_or_none()
+    if not exercise:
+        raise HTTPException(status_code=404, detail="Exercice non trouvé")
+
+    # Supprime les fichiers sur disque si présents
+    for path_str in [exercise.exercise_path, exercise.correction_path]:
+        if path_str:
+            p = Path(path_str)
+            if p.exists():
+                try:
+                    p.unlink()
+                    print(f"  → Fichier supprimé : {p}")
+                except Exception as e:
+                    print(f"  → Erreur suppression fichier {p}: {e}")
+
+    await db.delete(exercise)
+    await db.commit()
+    return {"status": "ok", "id": exercise_id}
+
+
+@router.get("/admin/subscriptions")
+async def get_subscriptions(
+    db: AsyncSession = Depends(get_db),
+    _: bool = Depends(verify_admin),
+    limit: int = 100,
+    offset: int = 0,
+):
+    """Liste les abonnements avec infos utilisateur et statistiques."""
+    # Récupère les abonnements avec jointure utilisateur
+    result = await db.execute(
+        select(Subscription, User)
+        .join(User, Subscription.user_id == User.id)
+        .order_by(Subscription.created_at.desc())
+        .limit(limit)
+        .offset(offset)
+    )
+    rows = result.all()
+
+    # Stats globales
+    total_revenue = await db.scalar(
+        select(func.sum(Subscription.amount_fcfa)).where(Subscription.status == "active")
+    ) or 0
+    active_count = await db.scalar(
+        select(func.count(Subscription.id)).where(Subscription.status == "active")
+    ) or 0
+    total_count = await db.scalar(select(func.count(Subscription.id))) or 0
+
+    subscriptions = []
+    for sub, user in rows:
+        subscriptions.append({
+            "id": str(sub.id),
+            "user_id": str(sub.user_id),
+            "user_name": user.name if user else None,
+            "user_phone": user.phone_number if user else None,
+            "plan": sub.plan,
+            "status": sub.status,
+            "amount_fcfa": sub.amount_fcfa,
+            "payment_method": sub.payment_method,
+            "started_at": sub.started_at.isoformat() if sub.started_at else None,
+            "expires_at": sub.expires_at.isoformat() if sub.expires_at else None,
+            "paydunya_token": sub.paydunya_token,
+            "referral_code_used": sub.referral_code_used,
+            "created_at": sub.created_at.isoformat() if sub.created_at else None,
+        })
+
+    return {
+        "subscriptions": subscriptions,
+        "stats": {
+            "total_revenue_fcfa": total_revenue,
+            "active_count": active_count,
+            "total_count": total_count,
+            "conversion_rate": round(active_count / max(total_count, 1) * 100, 1),
+        },
+    }
+
+
 @router.get("/admin/documents")
 async def get_documents(
     db: AsyncSession = Depends(get_db),

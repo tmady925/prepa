@@ -536,44 +536,124 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession):
             )
             return
 
-        # Demande d'exercice → génère un nouvel exercice
-        if detection.get("type_demande") == "exercice" and detected_matiere and detected_chapitre:
-            from app.services.rag.exercise_generator import exercise_generator
+        # Demande d'exercice → cherche d'abord un PDF en DB, sinon génère
+        exercise_keywords = [
+            "exercice", "exercices", "entraîner", "entrainer",
+            "donne moi un exercice", "série", "annale", "pratiquer",
+            "donne un exercice", "fais moi un exercice"
+        ]
+        wants_exercise = (
+            detection.get("type_demande") == "exercice"
+            or any(kw in text.lower() for kw in exercise_keywords)
+        )
 
-            exercise_data = await exercise_generator.generate_exercise(
-                db=db,
-                user_id=user.id,
-                matiere=detected_matiere,
-                chapitre=detected_chapitre,
-                exam_type=user.exam_type or "bac_senegal",
-                serie=user.series or "S2",
+        if wants_exercise and detected_matiere:
+            from app.services.rag.search_service import rag_search
+            from sqlalchemy import select, func
+            from app.models.exercise import Exercise
+
+            # Cherche un exercice PDF en DB
+            query = select(Exercise).where(
+                Exercise.status == "ready",
+                Exercise.exercise_path.isnot(None),
             )
+            if user.exam_type:
+                query = query.where(Exercise.exam_type == user.exam_type)
+            if user.series:
+                query = query.where(Exercise.serie == user.series)
+            if detected_matiere:
+                query = query.where(Exercise.matiere == detected_matiere)
+            if detected_chapitre:
+                query = query.where(Exercise.chapitre == detected_chapitre)
+            query = query.order_by(func.random()).limit(1)
 
-            if exercise_data and exercise_data.get("text"):
-                user.conversation_state = {
-                    "awaiting_answer": True,
-                    "exercise_text": exercise_data["text"],
-                    "exercise_type": exercise_data["type"],
-                    "matiere": detected_matiere,
-                    "chapitre": detected_chapitre,
-                    "hints_asked": 0,
-                    "niveau": exercise_data["niveau"],
-                    "started_at": datetime.now().isoformat(),
-                }
-                await db.flush()
+            result = await db.execute(query)
+            exercise_db = result.scalar_one_or_none()
 
-                await message_repo.save(
+            if not exercise_db:
+                # Fallback sans chapitre
+                query2 = select(Exercise).where(
+                    Exercise.status == "ready",
+                    Exercise.exercise_path.isnot(None),
+                    Exercise.matiere == detected_matiere,
+                ).order_by(func.random()).limit(1)
+                result2 = await db.execute(query2)
+                exercise_db = result2.scalar_one_or_none()
+
+            if exercise_db:
+                # Envoie le PDF
+                from pathlib import Path
+                import base64
+
+                pdf_path = Path(exercise_db.exercise_path)
+                if pdf_path.exists():
+                    annee_str = f" ({exercise_db.annee})" if exercise_db.annee else ""
+                    chapitre_str = f" — {exercise_db.chapitre}" if exercise_db.chapitre else ""
+
+                    intro = (
+                        f"📝 *Exercice {exercise_db.matiere.upper()}{chapitre_str}{annee_str}*\n\n"
+                        f"Voici un exercice adapté à ton niveau.\n\n"
+                        f"- Fais l'exercice sur papier ✏️\n"
+                        f"- Prends une photo de ta copie 📸\n"
+                        f"- Envoie-moi la photo pour que je te corrige\n\n"
+                        f"_Bon courage ! 💪_"
+                    )
+                    await whatsapp_sender.send_text(phone, intro)
+
+                    # Envoie le PDF via base64
+                    pdf_bytes = pdf_path.read_bytes()
+                    b64 = base64.b64encode(pdf_bytes).decode()
+
+                    payload = {
+                        "to": phone,
+                        "document": b64,
+                        "filename": pdf_path.name,
+                        "text": f"Exercice {exercise_db.matiere}",
+                    }
+                    await whatsapp_sender._send(payload)
+
+                    # Sauvegarde l'état — attend la copie
+                    user.conversation_state = {
+                        "awaiting_copy": True,
+                        "exercise_id": str(exercise_db.id),
+                        "exercise_path": str(exercise_db.exercise_path),
+                        "correction_path": str(exercise_db.correction_path) if exercise_db.correction_path else None,
+                        "matiere": detected_matiere,
+                        "chapitre": detected_chapitre,
+                        "started_at": datetime.now().isoformat(),
+                    }
+                    await db.flush()
+                    print(f"Exercice PDF envoyé -> {phone}: {exercise_db.title}")
+                    return
+
+            # Fallback → génère un exercice avec le LLM
+            if detected_chapitre:
+                from app.services.rag.exercise_generator import exercise_generator
+
+                exercise_data = await exercise_generator.generate_exercise(
                     db=db,
                     user_id=user.id,
-                    direction="outbound",
-                    content=exercise_data["text"],
-                    llm_provider="exercise_generator",
-                    from_cache=False,
+                    matiere=detected_matiere,
+                    chapitre=detected_chapitre,
+                    exam_type=user.exam_type or "bac_senegal",
+                    serie=user.series or "S2",
                 )
 
-                await whatsapp_sender.send_text(phone, exercise_data["text"])
-                print(f"Exercice généré -> {phone}: {detected_matiere}/{detected_chapitre} niveau={exercise_data['niveau']}")
-                return
+                if exercise_data and exercise_data.get("text"):
+                    user.conversation_state = {
+                        "awaiting_answer": True,
+                        "exercise_text": exercise_data["text"],
+                        "exercise_type": exercise_data["type"],
+                        "matiere": detected_matiere,
+                        "chapitre": detected_chapitre,
+                        "hints_asked": 0,
+                        "niveau": exercise_data["niveau"],
+                        "started_at": datetime.now().isoformat(),
+                    }
+                    await db.flush()
+                    await whatsapp_sender.send_text(phone, exercise_data["text"])
+                    print(f"Exercice LLM généré -> {phone}: {detected_matiere}/{detected_chapitre}")
+                    return
 
         # ── Mode normal — appel LLM ───────────────────────────────────
         response = await call_llm(

@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime
-from sqlalchemy import String, Integer, Text, Float, DateTime, func, Boolean
+from sqlalchemy import String, Integer, Text, Float, DateTime, func, Boolean, ForeignKey
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 from app.models.base import Base, TimestampMixin
@@ -107,3 +107,49 @@ class KnowledgeBase(Base, TimestampMixin):
     success_rate: Mapped[float] = mapped_column(Float, default=1.0)
 
     is_validated: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
+class Exercise(Base):
+    __tablename__ = "exercises"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+
+    # Document source
+    source_document_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("documents.id", ondelete="SET NULL"), nullable=True
+    )
+    source_filename: Mapped[str | None] = mapped_column(String(255))
+
+    # Métadonnées pédagogiques
+    title: Mapped[str | None] = mapped_column(Text)
+    exam_type: Mapped[str | None] = mapped_column(String(50), index=True)
+    serie: Mapped[str | None] = mapped_column(String(20), index=True)
+    matiere: Mapped[str | None] = mapped_column(String(50), index=True)
+    chapitre: Mapped[str | None] = mapped_column(String(100), index=True)
+    niveau: Mapped[int] = mapped_column(Integer, default=2)
+    annee: Mapped[int | None] = mapped_column(Integer)
+    tags: Mapped[dict | None] = mapped_column(JSONB)
+    bareme: Mapped[dict | None] = mapped_column(JSONB)
+
+    # Position dans le document source
+    exercise_number: Mapped[int | None] = mapped_column(Integer)
+    page_debut: Mapped[int | None] = mapped_column(Integer)
+    page_fin: Mapped[int | None] = mapped_column(Integer)
+
+    # Fichiers générés (chemins locaux sur le serveur)
+    exercise_path: Mapped[str | None] = mapped_column(Text)
+    correction_path: Mapped[str | None] = mapped_column(Text)
+    correction_generated: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    # Statut
+    status: Mapped[str] = mapped_column(String(20), default="pending", index=True)
+    error_message: Mapped[str | None] = mapped_column(Text)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )

@@ -278,6 +278,130 @@ async def upload_document(
     return result
 
 
+@router.post("/admin/documents/upload-exercises")
+async def upload_exercise_document(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    _: bool = Depends(verify_admin),
+):
+    """
+    Upload un document pédagogique, analyse les exercices,
+    génère les PDFs et les corrections.
+    """
+    from app.services.document_analyzer_service import document_analyzer_service
+    from app.services.exercise_extractor_service import exercise_extractor_service
+    from app.models.exercise import Exercise
+    import base64
+
+    data = await request.json()
+    file_b64 = data.get("file_b64")
+    filename = data.get("filename", "document.pdf")
+    exam_type = data.get("exam_type")
+    serie = data.get("serie")
+    matiere = data.get("matiere")
+
+    if not file_b64:
+        raise HTTPException(status_code=400, detail="file_b64 requis")
+
+    # Décode le fichier
+    try:
+        file_bytes = base64.b64decode(file_b64)
+    except Exception:
+        raise HTTPException(status_code=400, detail="file_b64 invalide")
+
+    print(f"Analyse document: {filename} ({len(file_bytes)} bytes)")
+
+    # 1. Analyse du document
+    analysis = await document_analyzer_service.analyze_document(
+        file_bytes=file_bytes,
+        filename=filename,
+        exam_type=exam_type,
+        matiere=matiere,
+        serie=serie,
+    )
+
+    if not analysis.get("success"):
+        raise HTTPException(status_code=422, detail=analysis.get("error"))
+
+    exercises_detected = analysis.get("exercises", [])
+    if not exercises_detected:
+        return {
+            "success": False,
+            "error": "Aucun exercice détecté dans le document",
+            "analysis": analysis,
+        }
+
+    print(f"  → {len(exercises_detected)} exercices détectés")
+
+    # 2. Traite chaque exercice
+    results = []
+    saved_exercises = []
+
+    for ex_data in exercises_detected:
+        print(f"\n  Traitement exercice {ex_data.get('number')}...")
+
+        # Extrait et génère les PDFs
+        result = await exercise_extractor_service.process_exercise(
+            file_bytes=file_bytes,
+            exercise_data=ex_data,
+            source_filename=filename,
+            matiere=analysis.get("matiere") or matiere or "autre",
+            exam_type=analysis.get("exam_type") or exam_type or "bac_senegal",
+            serie=analysis.get("serie") or serie,
+            annee=analysis.get("annee"),
+        )
+
+        # Sauvegarde en DB
+        exercise = Exercise(
+            source_filename=filename,
+            title=ex_data.get("title"),
+            exam_type=analysis.get("exam_type") or exam_type,
+            serie=analysis.get("serie") or serie,
+            matiere=analysis.get("matiere") or matiere,
+            chapitre=ex_data.get("chapitre"),
+            niveau=ex_data.get("niveau", 2),
+            annee=analysis.get("annee"),
+            tags=ex_data.get("tags"),
+            bareme=ex_data.get("bareme"),
+            exercise_number=ex_data.get("number"),
+            page_debut=ex_data.get("page_debut"),
+            page_fin=ex_data.get("page_fin"),
+            exercise_path=result.get("exercise_path"),
+            correction_path=result.get("correction_path"),
+            correction_generated=result.get("correction_generated", False),
+            status="ready" if result.get("exercise_path") else "error",
+            error_message=result.get("error"),
+        )
+        db.add(exercise)
+        saved_exercises.append(exercise)
+        results.append(result)
+
+    await db.commit()
+
+    print(f"\n✅ {len(saved_exercises)} exercices traités et sauvegardés")
+
+    return {
+        "success": True,
+        "filename": filename,
+        "exercises_count": len(saved_exercises),
+        "matiere": analysis.get("matiere"),
+        "exam_type": analysis.get("exam_type"),
+        "serie": analysis.get("serie"),
+        "annee": analysis.get("annee"),
+        "exercises": [
+            {
+                "number": r["exercise_number"],
+                "title": r["title"],
+                "exercise_path": r["exercise_path"],
+                "correction_path": r["correction_path"],
+                "correction_generated": r["correction_generated"],
+                "error": r.get("error"),
+            }
+            for r in results
+        ],
+    }
+
+
 @router.get("/admin/documents")
 async def get_documents(
     db: AsyncSession = Depends(get_db),

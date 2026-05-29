@@ -586,29 +586,14 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession):
                 pdf_path = Path(exercise_db.exercise_path)
                 print(f"  → PDF path: {pdf_path} | exists: {pdf_path.exists()}")
                 if pdf_path.exists():
-                    # Upload sur Cloudinary pour avoir une URL publique
-                    import cloudinary.uploader
-                    import io
-
                     pdf_bytes = pdf_path.read_bytes()
 
-                    # Upload PDF sur Cloudinary
-                    try:
-                        import cloudinary
-                        import cloudinary.uploader
-                        print(f"  → Upload PDF Cloudinary: {pdf_path.name} ({len(pdf_bytes)} bytes)")
-                        result = cloudinary.uploader.upload(
-                            io.BytesIO(pdf_bytes),
-                            folder="prepa/exercises",
-                            resource_type="raw",
-                            format="pdf",
-                            public_id=pdf_path.stem,
-                        )
-                        pdf_url = result.get("secure_url")
-                        print(f"  → PDF Cloudinary URL: {pdf_url}")
-                    except Exception as e:
-                        print(f"  → Erreur upload Cloudinary PDF: {e}")
-                        pdf_url = None
+                    from app.core.settings import get_settings
+                    settings = get_settings()
+
+                    # URL directe via Nginx
+                    pdf_url = f"http://72.62.4.97/exercises/{exercise_db.matiere}/{pdf_path.name}"
+                    print(f"  → PDF URL: {pdf_url}")
 
                     if pdf_url:
                         annee_str = f" ({exercise_db.annee})" if exercise_db.annee else ""
@@ -624,7 +609,7 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession):
                         )
                         await whatsapp_sender.send_text(phone, intro)
 
-                        # Envoie via URL Cloudinary
+                        # Envoie via URL Nginx
                         payload = {
                             "to": phone,
                             "documentUrl": pdf_url,

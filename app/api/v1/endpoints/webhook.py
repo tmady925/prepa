@@ -521,6 +521,39 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession, msg_t
                 )
                 return
 
+        # Élève a un exercice en cours (awaiting_copy)
+        conv_state = user.conversation_state or {}
+        if conv_state.get("awaiting_copy"):
+            # Détecte si l'élève demande directement la correction sans photo
+            correction_keywords = ["correction", "corrige", "corrigé", "solution", "réponse", "reponse"]
+            if any(kw in text.lower() for kw in correction_keywords):
+                await whatsapp_sender.send_text(
+                    phone,
+                    "📸 Pour recevoir la correction, envoie d'abord une photo de ta copie !\n\n"
+                    "Je vais analyser ton travail avant de te donner la correction. 💪\n\n"
+                    "_Si tu veux abandonner cet exercice, tape_ *skip*"
+                )
+                return
+
+            # Élève veut passer l'exercice
+            if text.lower().strip() in ("skip", "passer", "/skip"):
+                user.conversation_state = {}
+                await db.flush()
+                await whatsapp_sender.send_text(
+                    phone,
+                    "✅ Exercice annulé. Pose-moi une nouvelle question ou demande un autre exercice !"
+                )
+                return
+
+            # Tout autre texte pendant awaiting_copy → rappel
+            if msg_type != "image":
+                await whatsapp_sender.send_text(
+                    phone,
+                    "📸 Je t'attends ! Envoie une photo de ta copie pour que je te corrige.\n\n"
+                    "_Tape_ *skip* _pour annuler l'exercice._"
+                )
+                return
+
         # Détecte les commandes spéciales
         command = detect_command(text)
         if command:

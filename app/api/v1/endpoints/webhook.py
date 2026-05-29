@@ -794,34 +794,14 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession, msg_t
                         print(f"Exercice PDF envoyé -> {phone}: {exercise_db.title}")
                         return
 
-            # Fallback → génère un exercice avec le LLM
-            if detected_chapitre:
-                from app.services.rag.exercise_generator import exercise_generator
-
-                exercise_data = await exercise_generator.generate_exercise(
-                    db=db,
-                    user_id=user.id,
-                    matiere=detected_matiere,
-                    chapitre=detected_chapitre,
-                    exam_type=user.exam_type or "bac_senegal",
-                    serie=user.series or "S2",
-                )
-
-                if exercise_data and exercise_data.get("text"):
-                    user.conversation_state = {
-                        "awaiting_answer": True,
-                        "exercise_text": exercise_data["text"],
-                        "exercise_type": exercise_data["type"],
-                        "matiere": detected_matiere,
-                        "chapitre": detected_chapitre,
-                        "hints_asked": 0,
-                        "niveau": exercise_data["niveau"],
-                        "started_at": datetime.now().isoformat(),
-                    }
-                    await db.flush()
-                    await whatsapp_sender.send_text(phone, exercise_data["text"])
-                    print(f"Exercice LLM généré -> {phone}: {detected_matiere}/{detected_chapitre}")
-                    return
+            # Pas d'exercice en DB → message à l'élève
+            await whatsapp_sender.send_text(
+                phone,
+                f"😔 Je n'ai pas encore d'exercice disponible pour *{detected_matiere}*"
+                + (f" — *{detected_chapitre}*" if detected_chapitre else "")
+                + ".\n\nPose-moi une question de cours en attendant ! 📚"
+            )
+            return
 
         # ── Mode normal — appel LLM ───────────────────────────────────
         response = await call_llm(

@@ -591,8 +591,11 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession):
 
                     pdf_bytes = pdf_path.read_bytes()
 
+                    # Upload PDF sur Cloudinary
                     try:
                         import cloudinary
+                        import cloudinary.uploader
+                        print(f"  → Upload PDF Cloudinary: {pdf_path.name} ({len(pdf_bytes)} bytes)")
                         result = cloudinary.uploader.upload(
                             io.BytesIO(pdf_bytes),
                             folder="prepa/exercises",
@@ -601,8 +604,9 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession):
                             public_id=pdf_path.stem,
                         )
                         pdf_url = result.get("secure_url")
+                        print(f"  → PDF Cloudinary URL: {pdf_url}")
                     except Exception as e:
-                        print(f"Erreur upload Cloudinary: {e}")
+                        print(f"  → Erreur upload Cloudinary PDF: {e}")
                         pdf_url = None
 
                     if pdf_url:

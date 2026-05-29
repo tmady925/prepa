@@ -119,10 +119,7 @@ class WhatsAppSender:
                     headers=_headers(),
                 )
                 result = response.json()
-
-                if response.status_code not in (200, 201):
-                    print(f"Wasender API error {response.status_code}: {result}")
-
+                print(f"Wasender response {response.status_code}: {str(result)[:200]}")
                 return result
 
             except httpx.TimeoutException:

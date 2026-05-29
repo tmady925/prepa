@@ -39,3 +39,14 @@ app.include_router(admin.router, prefix="/api/v1")
 app.include_router(tasks.router, prefix="/api/v1")
 
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
+
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(
+        "main:app",
+        host="0.0.0.0",
+        port=8000,
+        timeout_keep_alive=300,   # 5 min — pour les uploads longs (exercices)
+        h11_max_incomplete_event_size=16 * 1024 * 1024,  # 16 MB
+    )

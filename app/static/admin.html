@@ -627,12 +627,21 @@ async function uploadExercises() {
 
     const status = document.getElementById('exStatus');
     const results = document.getElementById('exResults');
-    status.textContent = '⏳ Analyse en cours... (peut prendre 1-2 minutes)';
     results.innerHTML = '';
+
+    if (file.size > 100 * 1024 * 1024) {
+        showToast('Fichier trop grand (max 100MB)', true);
+        status.textContent = '❌ Fichier trop grand. Max 100MB.';
+        return;
+    }
+    status.textContent = `⏳ Lecture fichier (${(file.size/1024/1024).toFixed(1)}MB)...`;
 
     const reader = new FileReader();
     reader.onload = async (e) => {
         const b64 = e.target.result.split(',')[1];
+
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 600000); // 10 minutes
 
         try {
             const res = await fetch('/api/v1/admin/documents/upload-exercises', {
@@ -645,8 +654,9 @@ async function uploadExercises() {
                     serie: document.getElementById('exSerie').value || null,
                     matiere: document.getElementById('exMatiere').value || null,
                 }),
+                signal: controller.signal,
             });
-
+            clearTimeout(timeoutId);
             const data = await res.json();
 
             if (data.success) {
@@ -681,7 +691,12 @@ async function uploadExercises() {
                 showToast('Erreur analyse', true);
             }
         } catch(e) {
-            status.textContent = '❌ ' + e.message;
+            clearTimeout(timeoutId);
+            if (e.name === 'AbortError') {
+                status.textContent = '❌ Timeout — analyse trop longue, réessaie avec un fichier plus petit';
+            } else {
+                status.textContent = '❌ ' + e.message;
+            }
             showToast('Erreur', true);
         }
     };

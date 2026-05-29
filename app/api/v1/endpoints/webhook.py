@@ -222,6 +222,8 @@ async def process_message(message: dict, db: AsyncSession):
     if not phone:
         return
 
+    # Détecte les images (copies manuscrites)
+    image_data = None
     text = ""
     if msg_type == "text":
         # Wasender : le corps du message est dans "body" directement
@@ -236,8 +238,17 @@ async def process_message(message: dict, db: AsyncSession):
     elif msg_type == "button":
         # Certains providers renvoient les réponses bouton comme type "button"
         text = message.get("button", {}).get("payload", "") or message.get("body", "")
+    else:
+        # Vérifie si c'est une image
+        raw_msg = message.get("message", {}) or {}
+        if "imageMessage" in raw_msg:
+            image_data = {
+                "key": message.get("key", {}),
+                "message": raw_msg,
+            }
+            msg_type = "image"
 
-    if not text:
+    if not text and not image_data:
         return
 
     user, created = await user_service.get_or_create(db, phone)
@@ -279,11 +290,11 @@ async def process_message(message: dict, db: AsyncSession):
             )
             return
 
-    await handle_onboarding(phone, text, user, db)
+    await handle_onboarding(phone, text, user, db, msg_type=msg_type, image_data=image_data)
     await user_service.increment_message_count(db, user)
 
 
-async def handle_onboarding(phone: str, text: str, user, db: AsyncSession):
+async def handle_onboarding(phone: str, text: str, user, db: AsyncSession, msg_type: str = "text", image_data: dict = None):
     step = user.onboarding_step
 
     if step == "start":
@@ -396,6 +407,119 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession):
                 messages.QUOTA_BUTTONS,
             )
             return
+
+        # Traitement copie manuscrite
+        if msg_type == "image" and image_data:
+            conv_state = user.conversation_state or {}
+            if conv_state.get("awaiting_copy"):
+                from app.services.copy_analyzer_service import copy_analyzer_service
+                from app.models.exercise import Exercise
+                from sqlalchemy import select
+                import uuid as uuid_module
+
+                await whatsapp_sender.send_text(phone, "📸 Je reçois ta copie... ⏳ Analyse en cours...")
+
+                # Décrypte l'image
+                image_url = await copy_analyzer_service.decrypt_media(image_data)
+                if not image_url:
+                    await whatsapp_sender.send_text(phone, "❌ Impossible de lire l'image. Réessaie avec une meilleure photo.")
+                    return
+
+                # Télécharge l'image
+                image_bytes = await copy_analyzer_service.download_image(image_url)
+                if not image_bytes:
+                    await whatsapp_sender.send_text(phone, "❌ Erreur téléchargement image. Réessaie.")
+                    return
+
+                # Récupère l'exercice en DB
+                exercise_id = conv_state.get("exercise_id")
+                exercise_db = None
+                correction_text = ""
+                exercise_text = ""
+
+                if exercise_id:
+                    result_ex = await db.execute(
+                        select(Exercise).where(Exercise.id == uuid_module.UUID(exercise_id))
+                    )
+                    exercise_db = result_ex.scalar_one_or_none()
+
+                if exercise_db:
+                    # Extrait le texte de l'exercice
+                    try:
+                        import fitz
+                        from pathlib import Path
+                        ex_path = Path(exercise_db.exercise_path)
+                        if ex_path.exists():
+                            doc = fitz.open(str(ex_path))
+                            for page in doc:
+                                exercise_text += page.get_text("text")
+                            doc.close()
+                    except Exception:
+                        pass
+
+                    # Extrait le texte de la correction si disponible
+                    if exercise_db.correction_path:
+                        try:
+                            corr_path = Path(exercise_db.correction_path)
+                            if corr_path.exists():
+                                doc = fitz.open(str(corr_path))
+                                for page in doc:
+                                    correction_text += page.get_text("text")
+                                doc.close()
+                        except Exception:
+                            pass
+
+                # Analyse la copie
+                analysis = await copy_analyzer_service.analyze_copy(
+                    image_bytes=image_bytes,
+                    exercise_text=exercise_text,
+                    correction_text=correction_text,
+                    matiere=conv_state.get("matiere", ""),
+                    chapitre=conv_state.get("chapitre", ""),
+                    niveau=exercise_db.niveau if exercise_db else 2,
+                    student_name=user.name or "élève",
+                )
+
+                if not analysis:
+                    await whatsapp_sender.send_text(
+                        phone,
+                        "❌ Impossible d'analyser ta copie. Réessaie avec une photo plus nette."
+                    )
+                    return
+
+                # Envoie le feedback
+                feedback = copy_analyzer_service.format_feedback(analysis, user.name or "élève")
+                await whatsapp_sender.send_text(phone, feedback)
+
+                # Envoie la correction PDF si disponible
+                if exercise_db and exercise_db.correction_path:
+                    from pathlib import Path
+                    corr_path = Path(exercise_db.correction_path)
+                    if corr_path.exists():
+                        corr_url = f"http://72.62.4.97/corrections/{exercise_db.matiere}/{corr_path.name}"
+                        payload = {
+                            "to": phone,
+                            "documentUrl": corr_url,
+                            "fileName": corr_path.name,
+                            "text": "📄 Voici la correction complète",
+                        }
+                        await whatsapp_sender._send(payload)
+
+                # Réinitialise l'état
+                user.conversation_state = {}
+                await db.flush()
+
+                print(f"Copie analysée -> {phone}: score={analysis.get('score')}")
+                return
+            else:
+                # Image reçue sans exercice en cours
+                await whatsapp_sender.send_text(
+                    phone,
+                    "📸 J'ai reçu ton image !\n\n"
+                    "Pour que je puisse corriger ta copie, demande-moi d'abord un exercice :\n"
+                    "_\"Donne moi un exercice de maths\"_"
+                )
+                return
 
         # Détecte les commandes spéciales
         command = detect_command(text)

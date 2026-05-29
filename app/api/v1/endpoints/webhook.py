@@ -582,48 +582,65 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession):
             if exercise_db:
                 # Envoie le PDF
                 from pathlib import Path
-                import base64
 
                 pdf_path = Path(exercise_db.exercise_path)
                 if pdf_path.exists():
-                    annee_str = f" ({exercise_db.annee})" if exercise_db.annee else ""
-                    chapitre_str = f" — {exercise_db.chapitre}" if exercise_db.chapitre else ""
+                    # Upload sur Cloudinary pour avoir une URL publique
+                    import cloudinary.uploader
+                    import io
 
-                    intro = (
-                        f"📝 *Exercice {exercise_db.matiere.upper()}{chapitre_str}{annee_str}*\n\n"
-                        f"Voici un exercice adapté à ton niveau.\n\n"
-                        f"- Fais l'exercice sur papier ✏️\n"
-                        f"- Prends une photo de ta copie 📸\n"
-                        f"- Envoie-moi la photo pour que je te corrige\n\n"
-                        f"_Bon courage ! 💪_"
-                    )
-                    await whatsapp_sender.send_text(phone, intro)
-
-                    # Envoie le PDF via base64
                     pdf_bytes = pdf_path.read_bytes()
-                    b64 = base64.b64encode(pdf_bytes).decode()
 
-                    payload = {
-                        "to": phone,
-                        "document": b64,
-                        "filename": pdf_path.name,
-                        "text": f"Exercice {exercise_db.matiere}",
-                    }
-                    await whatsapp_sender._send(payload)
+                    try:
+                        import cloudinary
+                        result = cloudinary.uploader.upload(
+                            io.BytesIO(pdf_bytes),
+                            folder="prepa/exercises",
+                            resource_type="raw",
+                            format="pdf",
+                            public_id=pdf_path.stem,
+                        )
+                        pdf_url = result.get("secure_url")
+                    except Exception as e:
+                        print(f"Erreur upload Cloudinary: {e}")
+                        pdf_url = None
 
-                    # Sauvegarde l'état — attend la copie
-                    user.conversation_state = {
-                        "awaiting_copy": True,
-                        "exercise_id": str(exercise_db.id),
-                        "exercise_path": str(exercise_db.exercise_path),
-                        "correction_path": str(exercise_db.correction_path) if exercise_db.correction_path else None,
-                        "matiere": detected_matiere,
-                        "chapitre": detected_chapitre,
-                        "started_at": datetime.now().isoformat(),
-                    }
-                    await db.flush()
-                    print(f"Exercice PDF envoyé -> {phone}: {exercise_db.title}")
-                    return
+                    if pdf_url:
+                        annee_str = f" ({exercise_db.annee})" if exercise_db.annee else ""
+                        chapitre_str = f" — {exercise_db.chapitre}" if exercise_db.chapitre else ""
+
+                        intro = (
+                            f"📝 *Exercice {exercise_db.matiere.upper()}{chapitre_str}{annee_str}*\n\n"
+                            f"Voici un exercice adapté à ton niveau.\n\n"
+                            f"- Fais l'exercice sur papier ✏️\n"
+                            f"- Prends une photo de ta copie 📸\n"
+                            f"- Envoie-moi la photo pour que je te corrige\n\n"
+                            f"_Bon courage ! 💪_"
+                        )
+                        await whatsapp_sender.send_text(phone, intro)
+
+                        # Envoie via URL Cloudinary
+                        payload = {
+                            "to": phone,
+                            "documentUrl": pdf_url,
+                            "fileName": pdf_path.name,
+                            "text": f"Exercice {exercise_db.matiere}",
+                        }
+                        await whatsapp_sender._send(payload)
+
+                        # Sauvegarde état
+                        user.conversation_state = {
+                            "awaiting_copy": True,
+                            "exercise_id": str(exercise_db.id),
+                            "exercise_path": str(exercise_db.exercise_path),
+                            "correction_path": str(exercise_db.correction_path) if exercise_db.correction_path else None,
+                            "matiere": detected_matiere,
+                            "chapitre": detected_chapitre,
+                            "started_at": datetime.now().isoformat(),
+                        }
+                        await db.flush()
+                        print(f"Exercice PDF envoyé -> {phone}: {exercise_db.title}")
+                        return
 
             # Fallback → génère un exercice avec le LLM
             if detected_chapitre:

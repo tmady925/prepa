@@ -63,37 +63,41 @@ class CopyAnalyzerService:
         try:
             image_b64 = base64.b64encode(image_bytes).decode()
 
-            prompt = f"""Tu es un professeur expert qui corrige une copie d'élève.
+            prompt = f"""Tu es un professeur expert du programme BAC Sénégal qui corrige une copie d'élève.
 
 Élève : {student_name}
 Matière : {matiere}
 Chapitre : {chapitre or 'général'}
-Niveau : {niveau}
 
-Énoncé de l'exercice :
+ÉNONCÉ DE L'EXERCICE :
 ---
 {exercise_text[:2000]}
 ---
 
-Correction officielle :
+CORRECTION OFFICIELLE :
 ---
-{correction_text[:2000] if correction_text else "Non disponible — évalue selon tes connaissances du programme sénégalais."}
+{correction_text[:2000] if correction_text else "Non disponible"}
 ---
 
-Analyse la copie manuscrite de l'élève et retourne UNIQUEMENT ce JSON :
+INSTRUCTIONS :
+1. Lis attentivement la copie manuscrite de l'élève dans l'image
+2. Compare chaque réponse avec la correction officielle
+3. Identifie les erreurs précises (calcul, méthode, unités, raisonnement)
+4. Donne un score RÉEL basé sur ce que tu vois dans la copie
+
+Retourne UNIQUEMENT ce JSON :
 {{
-  "score": 75,
-  "mention": "Bien",
-  "points_forts": ["Démarche correcte", "Résultat juste"],
-  "erreurs": ["Unité manquante", "Calcul intermédiaire faux"],
-  "methodologie": "commentaire sur la méthode",
-  "conseils": ["Conseil 1", "Conseil 2"],
+  "score": 0-100,
+  "mention": "Excellent|Très bien|Bien|Assez bien|Insuffisant|À revoir",
+  "points_forts": ["ce que l'élève a bien fait"],
+  "erreurs": ["erreur précise 1", "erreur précise 2"],
+  "methodologie": "commentaire sur la méthode utilisée",
+  "conseils": ["conseil concret 1", "conseil concret 2"],
   "notions_a_revoir": ["notion1", "notion2"],
-  "encouragement": "Message d'encouragement personnalisé"
+  "encouragement": "message personnalisé pour {student_name}"
 }}
 
-score = 0-100
-mention = Excellent/Très bien/Bien/Assez bien/Insuffisant/À revoir"""
+IMPORTANT : Si la copie est vide ou illisible, score = 0 et dis-le clairement."""
 
             async with httpx.AsyncClient(timeout=60.0) as client:
                 response = await client.post(

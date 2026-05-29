@@ -89,7 +89,7 @@ async def webhook_receive(
             if already_processed:
                 print(f"Message {msg_id} déjà traité, ignoré")
                 continue
-            await redis.setex(cache_key, 300, "1")
+            await redis.setex(cache_key, 3600, "1")  # 1 heure
 
         try:
             await process_message(message, db)
@@ -466,6 +466,8 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession, msg_t
                             pass
 
                 # Analyse la copie
+                print(f"  → Exercise text ({len(exercise_text)} chars): {exercise_text[:200]}")
+                print(f"  → Correction text ({len(correction_text)} chars): {correction_text[:200]}")
                 analysis = await copy_analyzer_service.analyze_copy(
                     image_bytes=image_bytes,
                     exercise_text=exercise_text,

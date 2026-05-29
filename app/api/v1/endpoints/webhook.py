@@ -584,6 +584,7 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession):
                 from pathlib import Path
 
                 pdf_path = Path(exercise_db.exercise_path)
+                print(f"  → PDF path: {pdf_path} | exists: {pdf_path.exists()}")
                 if pdf_path.exists():
                     # Upload sur Cloudinary pour avoir une URL publique
                     import cloudinary.uploader

@@ -247,6 +247,58 @@ Révise avec moi aujourd'hui ! 📚" oninput="updatePreview()"></textarea>
             </div>
 
             <div class="section">
+                <h2>📝 Upload Exercices</h2>
+                <p style="font-size:11px;color:#94a3b8;margin-bottom:12px">
+                    Uploade un document contenant des exercices — le système détecte automatiquement
+                    chaque exercice, génère les PDFs et crée les corrections.
+                </p>
+                <div style="margin-bottom:16px;display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap">
+                    <div>
+                        <div style="font-size:11px;color:#94a3b8;margin-bottom:4px">Fichier PDF</div>
+                        <input type="file" id="exFile" accept=".pdf"
+                            style="background:#0f0f1a;border:1px solid #3d3d6e;color:#e2e8f0;padding:6px;border-radius:6px;font-size:12px"/>
+                    </div>
+                    <div>
+                        <div style="font-size:11px;color:#94a3b8;margin-bottom:4px">Examen</div>
+                        <select id="exExam">
+                            <option value="">-- Examen --</option>
+                            <option value="bac_senegal">BAC Sénégal</option>
+                            <option value="bfem">BFEM</option>
+                            <option value="concours">Concours</option>
+                        </select>
+                    </div>
+                    <div>
+                        <div style="font-size:11px;color:#94a3b8;margin-bottom:4px">Série</div>
+                        <select id="exSerie">
+                            <option value="">-- Série --</option>
+                            <option value="S1">S1</option>
+                            <option value="S2">S2</option>
+                            <option value="S3">S3</option>
+                            <option value="L1">L1</option>
+                            <option value="L2">L2</option>
+                            <option value="T">T</option>
+                        </select>
+                    </div>
+                    <div>
+                        <div style="font-size:11px;color:#94a3b8;margin-bottom:4px">Matière</div>
+                        <select id="exMatiere">
+                            <option value="">-- Matière --</option>
+                            <option value="maths">Maths</option>
+                            <option value="physique_chimie">Physique-Chimie</option>
+                            <option value="svt">SVT</option>
+                            <option value="francais">Français</option>
+                            <option value="philosophie">Philosophie</option>
+                            <option value="histoire_geo">Histoire-Géo</option>
+                            <option value="anglais">Anglais</option>
+                        </select>
+                    </div>
+                    <button class="btn-sm btn-green" onclick="uploadExercises()" style="padding:8px 16px">🔍 Analyser et Extraire</button>
+                </div>
+                <div id="exStatus" style="font-size:12px;color:#94a3b8;margin-bottom:12px"></div>
+                <div id="exResults"></div>
+            </div>
+
+            <div class="section">
                 <h2>📚 Documents RAG</h2>
                 <p style="font-size:11px;color:#94a3b8;margin-bottom:12px">Max 10MB par fichier. Pour les fichiers plus grands : <code style="background:#0f0f1a;padding:2px 6px;border-radius:4px">python scripts/index_documents.py</code></p>
                 <div style="margin-bottom:16px;display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap">
@@ -563,6 +615,73 @@ async function uploadDocument() {
             }
         } catch(e) {
             status.textContent = e.name === 'AbortError' ? '❌ Timeout' : '❌ ' + e.message;
+            showToast('Erreur', true);
+        }
+    };
+    reader.readAsDataURL(file);
+}
+
+async function uploadExercises() {
+    const file = document.getElementById('exFile').files[0];
+    if (!file) { showToast('Sélectionne un fichier PDF', true); return; }
+
+    const status = document.getElementById('exStatus');
+    const results = document.getElementById('exResults');
+    status.textContent = '⏳ Analyse en cours... (peut prendre 1-2 minutes)';
+    results.innerHTML = '';
+
+    const reader = new FileReader();
+    reader.onload = async (e) => {
+        const b64 = e.target.result.split(',')[1];
+
+        try {
+            const res = await fetch('/api/v1/admin/documents/upload-exercises', {
+                method: 'POST',
+                headers: { 'X-Admin-Key': API_KEY, 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    filename: file.name,
+                    file_b64: b64,
+                    exam_type: document.getElementById('exExam').value || null,
+                    serie: document.getElementById('exSerie').value || null,
+                    matiere: document.getElementById('exMatiere').value || null,
+                }),
+            });
+
+            const data = await res.json();
+
+            if (data.success) {
+                status.textContent = `✅ ${data.exercises_count} exercices extraits — ${data.matiere} ${data.exam_type} ${data.annee || ''}`;
+                results.innerHTML = `
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>N°</th>
+                                <th>Titre</th>
+                                <th>Exercice PDF</th>
+                                <th>Correction PDF</th>
+                                <th>Statut</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${data.exercises.map(ex => `
+                                <tr>
+                                    <td>${ex.number}</td>
+                                    <td>${ex.title}</td>
+                                    <td>${ex.exercise_path ? '✅' : '❌'}</td>
+                                    <td>${ex.correction_path ? (ex.correction_generated ? '✅ générée' : '✅ extraite') : '❌'}</td>
+                                    <td>${ex.error ? '❌ ' + ex.error : '✅'}</td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                `;
+                showToast(`${data.exercises_count} exercices extraits`);
+            } else {
+                status.textContent = '❌ ' + (data.error || 'Erreur inconnue');
+                showToast('Erreur analyse', true);
+            }
+        } catch(e) {
+            status.textContent = '❌ ' + e.message;
             showToast('Erreur', true);
         }
     };

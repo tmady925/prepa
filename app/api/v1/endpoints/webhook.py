@@ -548,7 +548,6 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession):
         )
 
         if wants_exercise and detected_matiere:
-            from app.services.rag.search_service import rag_search
             from sqlalchemy import select, func
             from app.models.exercise import Exercise
 

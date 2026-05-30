@@ -462,12 +462,19 @@ class SubjectDetector:
 Message : "{text}"
 Contexte : Examen={exam}, Série={serie}
 
-Réponds UNIQUEMENT avec ce JSON valide, sans texte avant ou après :
+RÈGLE IMPORTANTE pour type_demande :
+- "exercice" si l'élève veut faire un exercice, s'entraîner, avoir un problème à résoudre
+  Exemples : "donne moi un exo", "je veux un exercice", "donne un exo de chimie",
+             "je veux m'entraîner", "propose moi un problème", "donne un exercice de maths"
+- "cours" si l'élève pose une question de cours ou veut une explication
+- "correction" si l'élève soumet une réponse à corriger
+
+Réponds UNIQUEMENT avec ce JSON valide :
 {{
-  "matiere": "maths ou physique ou chimie ou svt ou physique_chimie ou francais ou philosophie ou histoire_geo ou anglais ou null",
+  "matiere": "maths|physique_chimie|svt|francais|philosophie|histoire_geo|anglais|null",
   "chapitre": "nom_chapitre_snake_case ou null",
-  "type_demande": "cours ou exercice ou correction ou methode ou revision ou null",
-  "niveau_question": "debutant ou intermediaire ou avance",
+  "type_demande": "cours|exercice|correction|methode|revision|null",
+  "niveau_question": "debutant|intermediaire|avance",
   "mots_cles": ["concept1", "concept2"],
   "confiance": 0.9
 }}
@@ -540,8 +547,14 @@ Exemples chapitres : derivees, probabilites, suites, equations, mecanique, elect
 
     def _detect_type(self, text: str) -> str:
         if any(kw in text for kw in [
-            "exercice", "entraîne", "pratique", "donne moi un exo",
-            "donne moi un exercice", "propose un exercice", "fais moi"
+            "exercice", "exercices", "exo", "exos",
+            "entraîne", "entraine", "entraînement",
+            "pratique", "pratiquer",
+            "donne", "propose", "fais moi", "donne-moi",
+            "je veux", "je voudrais", "j'aimerais",
+            "annale", "série", "serie",
+            "problème", "probleme", "question",
+            "m'entraîner", "m'entrainer", "travailler",
         ]):
             return "exercice"
         if any(kw in text for kw in [

@@ -998,6 +998,36 @@ async def create_concours(
     return {"success": True, "id": str(c.id)}
 
 
+@router.put("/admin/concours/{concours_id}")
+async def update_concours(
+    concours_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    _: bool = Depends(verify_admin),
+):
+    from app.models.exam import Concours, ConcoursSeriesLink
+    from sqlalchemy import delete as sa_delete
+    data = await request.json()
+    result = await db.execute(sa_select(Concours).where(Concours.id == uuid.UUID(concours_id)))
+    c = result.scalar_one_or_none()
+    if not c:
+        raise HTTPException(status_code=404, detail="Concours non trouvé")
+    for field in ["name", "pays", "niveau_requis", "description", "matieres_epreuves", "is_active"]:
+        if field in data:
+            setattr(c, field, data[field])
+    if "series_ids" in data:
+        await db.execute(
+            sa_delete(ConcoursSeriesLink).where(ConcoursSeriesLink.concours_id == c.id)
+        )
+        for series_id in data["series_ids"]:
+            db.add(ConcoursSeriesLink(
+                concours_id=c.id,
+                series_id=uuid.UUID(series_id),
+            ))
+    await db.commit()
+    return {"success": True}
+
+
 @router.delete("/admin/concours/{concours_id}")
 async def delete_concours(
     concours_id: str,

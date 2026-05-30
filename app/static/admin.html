@@ -2325,7 +2325,8 @@ function renderExamsTable(exams) {
       <td>${e.is_active ? '<span class="badge green">Actif</span>' : '<span class="badge gray">Inactif</span>'}</td>
       <td>
         <div style="display:flex;gap:4px">
-          <button class="btn btn-ghost btn-sm" onclick="toggleExam('${e.id}',${!e.is_active})">${e.is_active ? '⏸' : '▶'}</button>
+          <button class="btn btn-ghost btn-sm btn-icon" onclick="editExam('${e.id}','${e.code}','${e.name}','${e.pays}','${e.niveau}','${(e.description||'').replace(/'/g,'\\'')}')" title="Modifier">✏️</button>
+          <button class="btn btn-ghost btn-sm btn-icon" onclick="toggleExam('${e.id}',${!e.is_active})">${e.is_active ? '⏸' : '▶'}</button>
           <button class="btn btn-danger btn-sm btn-icon" onclick="deleteExam('${e.id}','${e.name}')">🗑</button>
         </div>
       </td>
@@ -2400,6 +2401,7 @@ async function loadSeries() {
     const examId = document.getElementById('filter-series-exam')?.value;
     const url = '/admin/series' + (examId ? '?exam_id=' + examId : '');
     const series = await api(url);
+    window._allSeries = series;
     renderSeriesTable(series);
   } catch(e) { showToast('Erreur chargement séries', 'error'); }
 }
@@ -2418,6 +2420,7 @@ function renderSeriesTable(series) {
         <td>${s.is_active ? '<span class="badge green">Actif</span>' : '<span class="badge gray">Inactif</span>'}</td>
         <td>
           <div style="display:flex;gap:4px">
+            <button class="btn btn-ghost btn-sm btn-icon" onclick="editSeries('${s.id}','${s.code}','${s.name}','${s.exam_id||''}','${(s.description||'').replace(/'/g,'\\'')}')" title="Modifier">✏️</button>
             <button class="btn btn-danger btn-sm btn-icon" onclick="deleteSeries('${s.id}','${s.code}')">🗑</button>
           </div>
         </td>
@@ -2483,6 +2486,7 @@ function renderConcoursGrid(list) {
         </div>
         <div style="display:flex;gap:4px">
           <span class="badge ${c.niveau_requis === 'bac' ? 'blue' : 'purple'}">${c.niveau_requis}</span>
+          <button class="btn btn-ghost btn-sm btn-icon" onclick="editConcours('${c.id}')" title="Modifier">✏️</button>
           <button class="btn btn-danger btn-sm btn-icon" onclick="deleteConcours('${c.id}','${c.name}')">🗑</button>
         </div>
       </div>
@@ -2577,6 +2581,125 @@ document.getElementById('ex-exam')?.addEventListener('change', async function() 
       series.map(s => `<option value="${s.code}">${s.code} — ${s.name}</option>`).join('');
   } catch(e) {}
 });
+
+// ════════════════════════════════════════════════════════════
+// EDIT — EXAMS / SERIES / CONCOURS
+// ════════════════════════════════════════════════════════════
+function editExam(id, code, name, pays, niveau, desc) {
+  document.getElementById('exam-code').value = code;
+  document.getElementById('exam-name').value = name;
+  document.getElementById('exam-pays').value = pays;
+  document.getElementById('exam-niveau').value = niveau;
+  document.getElementById('exam-desc').value = desc;
+  document.querySelector('#modal-exam .btn-primary').textContent = '💾 Enregistrer';
+  document.querySelector('#modal-exam .btn-primary').onclick = () => updateExam(id);
+  document.querySelector('#modal-exam .modal-title').textContent = '✏️ Modifier l\'examen';
+  openModal('modal-exam');
+}
+
+async function updateExam(id) {
+  try {
+    await api('/admin/exams/' + id, 'PUT', {
+      name: document.getElementById('exam-name').value,
+      pays: document.getElementById('exam-pays').value,
+      niveau: document.getElementById('exam-niveau').value,
+      description: document.getElementById('exam-desc').value,
+    });
+    showToast('Examen mis à jour ✅');
+    closeModal('modal-exam');
+    document.querySelector('#modal-exam .btn-primary').textContent = 'Créer l\'examen';
+    document.querySelector('#modal-exam .btn-primary').onclick = createExam;
+    document.querySelector('#modal-exam .modal-title').textContent = '🎓 Nouvel examen';
+    loadExams();
+  } catch(e) { showToast('Erreur', 'error'); }
+}
+
+function editSeries(id, code, name, examId, desc) {
+  document.getElementById('series-code').value = code;
+  document.getElementById('series-name').value = name;
+  document.getElementById('series-exam-id').value = examId;
+  document.getElementById('series-desc').value = desc;
+  // Charge les matières depuis la liste en mémoire
+  const s = (window._allSeries || []).find(x => x.id === id);
+  document.getElementById('series-matieres').value = s?.matieres ? JSON.stringify(s.matieres, null, 2) : '';
+  document.querySelector('#modal-series .btn-primary').textContent = '💾 Enregistrer';
+  document.querySelector('#modal-series .btn-primary').onclick = () => updateSeries(id);
+  document.querySelector('#modal-series .modal-title').textContent = '✏️ Modifier la série';
+  openModal('modal-series');
+}
+
+async function updateSeries(id) {
+  let matieres = null;
+  const raw = document.getElementById('series-matieres').value.trim();
+  if (raw) {
+    try { matieres = JSON.parse(raw); }
+    catch(e) { showToast('JSON invalide', 'error'); return; }
+  }
+  try {
+    await api('/admin/series/' + id, 'PUT', {
+      code: document.getElementById('series-code').value,
+      name: document.getElementById('series-name').value,
+      exam_id: document.getElementById('series-exam-id').value,
+      description: document.getElementById('series-desc').value,
+      matieres,
+    });
+    showToast('Série mise à jour ✅');
+    closeModal('modal-series');
+    document.querySelector('#modal-series .btn-primary').textContent = 'Créer la série';
+    document.querySelector('#modal-series .btn-primary').onclick = createSeries;
+    document.querySelector('#modal-series .modal-title').textContent = '📋 Nouvelle série';
+    loadSeries();
+  } catch(e) { showToast('Erreur', 'error'); }
+}
+
+async function editConcours(id) {
+  const list = await api('/admin/concours');
+  const c = list.find(x => x.id === id);
+  if (!c) return;
+  document.getElementById('concours-code').value = c.code;
+  document.getElementById('concours-name').value = c.name;
+  document.getElementById('concours-pays').value = c.pays;
+  document.getElementById('concours-niveau').value = c.niveau_requis;
+  document.getElementById('concours-desc').value = c.description || '';
+  document.getElementById('concours-matieres').value = JSON.stringify(c.matieres_epreuves || {}, null, 2);
+  await loadConcoursSeriesChecks();
+  c.series_eligibles.forEach(s => {
+    const cb = document.querySelector(`#concours-series-checks input[value="${s.id}"]`);
+    if (cb) cb.checked = true;
+  });
+  document.querySelector('#modal-concours .btn-primary').textContent = '💾 Enregistrer';
+  document.querySelector('#modal-concours .btn-primary').onclick = () => updateConcours(id);
+  document.querySelector('#modal-concours .modal-title').textContent = '✏️ Modifier le concours';
+  openModal('modal-concours');
+}
+
+async function updateConcours(id) {
+  let matieres = null;
+  const raw = document.getElementById('concours-matieres').value.trim();
+  if (raw) {
+    try { matieres = JSON.parse(raw); }
+    catch(e) { showToast('JSON invalide', 'error'); return; }
+  }
+  const seriesIds = Array.from(
+    document.querySelectorAll('#concours-series-checks input:checked')
+  ).map(el => el.value);
+  try {
+    await api('/admin/concours/' + id, 'PUT', {
+      name: document.getElementById('concours-name').value,
+      pays: document.getElementById('concours-pays').value,
+      niveau_requis: document.getElementById('concours-niveau').value,
+      description: document.getElementById('concours-desc').value,
+      matieres_epreuves: matieres,
+      series_ids: seriesIds,
+    });
+    showToast('Concours mis à jour ✅');
+    closeModal('modal-concours');
+    document.querySelector('#modal-concours .btn-primary').textContent = 'Créer le concours';
+    document.querySelector('#modal-concours .btn-primary').onclick = createConcours;
+    document.querySelector('#modal-concours .modal-title').textContent = '🏆 Nouveau concours';
+    loadConcours();
+  } catch(e) { showToast('Erreur', 'error'); }
+}
 
 // ════════════════════════════════════════════════════════════
 // AUTO-REFRESH & INIT

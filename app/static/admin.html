@@ -580,6 +580,17 @@ tr:hover td { background: rgba(255,255,255,0.02); }
       <span class="icon">⚙️</span> Configuration
     </a>
 
+    <div class="sidebar-section">Référentiels</div>
+    <a class="nav-item" onclick="showPage('exams')" data-page="exams">
+      <span class="icon">🎓</span> Examens
+    </a>
+    <a class="nav-item" onclick="showPage('series')" data-page="series">
+      <span class="icon">📋</span> Séries
+    </a>
+    <a class="nav-item" onclick="showPage('concours')" data-page="concours">
+      <span class="icon">🏆</span> Concours
+    </a>
+
     <div class="sidebar-footer">
       <div class="admin-card">
         <div class="admin-avatar">A</div>
@@ -1095,6 +1106,72 @@ tr:hover td { background: rgba(255,255,255,0.02); }
       </div>
     </div>
 
+
+    <!-- PAGE: EXAMS -->
+    <div class="page" id="page-exams">
+      <div class="section-header">
+        <div>
+          <div class="section-title">🎓 Examens</div>
+          <div class="section-sub">Gérer les systèmes éducatifs nationaux</div>
+        </div>
+        <button class="btn btn-primary" onclick="openModal('modal-exam')">+ Nouvel examen</button>
+      </div>
+      <div class="card">
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>Nom</th><th>Code</th><th>Pays</th><th>Niveau</th><th>Statut</th><th>Actions</th></tr>
+            </thead>
+            <tbody id="exams-table">
+              <tr><td colspan="6" style="text-align:center;padding:40px;color:var(--text3)">Chargement...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- PAGE: SERIES -->
+    <div class="page" id="page-series">
+      <div class="section-header">
+        <div>
+          <div class="section-title">📋 Séries</div>
+          <div class="section-sub">Gérer les séries par examen</div>
+        </div>
+        <button class="btn btn-primary" onclick="openModal('modal-series')">+ Nouvelle série</button>
+      </div>
+      <div class="filter-bar">
+        <select class="filter-select" id="filter-series-exam" onchange="loadSeries()">
+          <option value="">Tous les examens</option>
+        </select>
+      </div>
+      <div class="card">
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>Code</th><th>Nom</th><th>Examen</th><th>Matières & Coefficients</th><th>Statut</th><th>Actions</th></tr>
+            </thead>
+            <tbody id="series-table">
+              <tr><td colspan="6" style="text-align:center;padding:40px;color:var(--text3)">Chargement...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- PAGE: CONCOURS -->
+    <div class="page" id="page-concours">
+      <div class="section-header">
+        <div>
+          <div class="section-title">🏆 Concours</div>
+          <div class="section-sub">Gérer les concours et séries éligibles</div>
+        </div>
+        <button class="btn btn-primary" onclick="openModal('modal-concours'); loadConcoursSeriesChecks()">+ Nouveau concours</button>
+      </div>
+      <div id="concours-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:16px">
+        <div style="text-align:center;padding:40px;color:var(--text3)">Chargement...</div>
+      </div>
+    </div>
+
   </main>
 </div>
 
@@ -1292,6 +1369,144 @@ tr:hover td { background: rgba(255,255,255,0.02); }
   </div>
 </div>
 
+<!-- Modal: Exam -->
+<div class="modal-overlay" id="modal-exam">
+  <div class="modal">
+    <div class="modal-header">
+      <div class="modal-title">🎓 Nouvel examen</div>
+      <button class="modal-close" onclick="closeModal('modal-exam')">✕</button>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">Code *</label>
+        <input type="text" class="form-input" id="exam-code" placeholder="bac_senegal"/>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Nom *</label>
+        <input type="text" class="form-input" id="exam-name" placeholder="BAC Sénégal"/>
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">Pays</label>
+        <input type="text" class="form-input" id="exam-pays" placeholder="senegal"/>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Niveau</label>
+        <select class="form-select" id="exam-niveau">
+          <option value="bac">BAC</option>
+          <option value="brevet">Brevet/BFEM</option>
+          <option value="cap">CAP</option>
+          <option value="autre">Autre</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Description</label>
+      <textarea class="form-textarea" id="exam-desc" rows="2"></textarea>
+    </div>
+    <div id="exam-status" style="font-size:12px;color:var(--text2);margin-bottom:12px"></div>
+    <div style="display:flex;gap:10px;justify-content:flex-end">
+      <button class="btn btn-ghost" onclick="closeModal('modal-exam')">Annuler</button>
+      <button class="btn btn-primary" onclick="createExam()">Créer l'examen</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: Series -->
+<div class="modal-overlay" id="modal-series">
+  <div class="modal">
+    <div class="modal-header">
+      <div class="modal-title">📋 Nouvelle série</div>
+      <button class="modal-close" onclick="closeModal('modal-series')">✕</button>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">Code *</label>
+        <input type="text" class="form-input" id="series-code" placeholder="S2"/>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Nom *</label>
+        <input type="text" class="form-input" id="series-name" placeholder="Série S2"/>
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Examen *</label>
+      <select class="form-select" id="series-exam-id">
+        <option value="">-- Choisir un examen --</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Description</label>
+      <input type="text" class="form-input" id="series-desc" placeholder="Sciences de la Vie et de la Terre"/>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Matières & Coefficients <span style="color:var(--text3);font-weight:400">(JSON)</span></label>
+      <textarea class="form-textarea" id="series-matieres" rows="4"
+        placeholder='{"maths": 4, "physique_chimie": 4, "svt": 5}'></textarea>
+    </div>
+    <div id="series-status" style="font-size:12px;color:var(--text2);margin-bottom:12px"></div>
+    <div style="display:flex;gap:10px;justify-content:flex-end">
+      <button class="btn btn-ghost" onclick="closeModal('modal-series')">Annuler</button>
+      <button class="btn btn-primary" onclick="createSeries()">Créer la série</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: Concours -->
+<div class="modal-overlay" id="modal-concours">
+  <div class="modal">
+    <div class="modal-header">
+      <div class="modal-title">🏆 Nouveau concours</div>
+      <button class="modal-close" onclick="closeModal('modal-concours')">✕</button>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">Code *</label>
+        <input type="text" class="form-input" id="concours-code" placeholder="concours_ensept"/>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Nom *</label>
+        <input type="text" class="form-input" id="concours-name" placeholder="Concours ENSEPT"/>
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">Pays</label>
+        <input type="text" class="form-input" id="concours-pays" placeholder="senegal"/>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Niveau requis</label>
+        <select class="form-select" id="concours-niveau">
+          <option value="bac">BAC</option>
+          <option value="brevet">Brevet/BFEM</option>
+          <option value="licence">Licence</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Description</label>
+      <textarea class="form-textarea" id="concours-desc" rows="2"></textarea>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Matières d'épreuve <span style="color:var(--text3);font-weight:400">(JSON)</span></label>
+      <textarea class="form-textarea" id="concours-matieres" rows="3"
+        placeholder='{"maths": 4, "physique_chimie": 4}'></textarea>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Séries éligibles</label>
+      <div id="concours-series-checks" style="display:flex;flex-wrap:wrap;gap:8px;padding:10px;background:var(--surface2);border-radius:var(--radius-sm)">
+        Chargement...
+      </div>
+    </div>
+    <div id="concours-status" style="font-size:12px;color:var(--text2);margin-bottom:12px"></div>
+    <div style="display:flex;gap:10px;justify-content:flex-end">
+      <button class="btn btn-ghost" onclick="closeModal('modal-concours')">Annuler</button>
+      <button class="btn btn-primary" onclick="createConcours()">Créer le concours</button>
+    </div>
+  </div>
+</div>
+
 <!-- Toast -->
 <div id="toast"></div>
 
@@ -1311,6 +1526,9 @@ const PAGE_TITLES = {
   payments: 'Paiements',
   analytics: 'Analytics',
   config: 'Configuration',
+  exams: 'Examens',
+  series: 'Séries',
+  concours: 'Concours',
 };
 const TEMPLATES = {
   motivation: "🔥 Salut {nom} !\n\nTon streak de *{streak} jours* est impressionnant !\n\nIl te reste *{jours_restants} jours* avant ton examen.\n\nContinue comme ça 💪",
@@ -1368,6 +1586,7 @@ async function loadDashboard() {
       api('/admin/config'),
       api('/admin/documents'),
     ]);
+    loadExams();
 
     document.getElementById('auth-overlay').style.display = 'none';
     document.getElementById('app').style.display = 'block';
@@ -1447,6 +1666,9 @@ function showPage(name) {
   if (name === 'exercises') loadExercises();
   if (name === 'documents') loadDocuments();
   if (name === 'payments') loadPayments();
+  if (name === 'exams') loadExams();
+  if (name === 'series') { loadExams(); loadSeries(); }
+  if (name === 'concours') loadConcours();
 }
 
 // ════════════════════════════════════════════════════════════
@@ -2078,6 +2300,283 @@ function showToast(msg, type = 'success') {
   t.style.display = 'block';
   setTimeout(() => t.style.display = 'none', 3500);
 }
+
+// ════════════════════════════════════════════════════════════
+// EXAMS
+// ════════════════════════════════════════════════════════════
+let allExams = [];
+
+async function loadExams() {
+  try {
+    const exams = await api('/admin/exams');
+    allExams = exams;
+    renderExamsTable(exams);
+    populateExamDropdowns(exams);
+  } catch(e) { showToast('Erreur chargement examens', 'error'); }
+}
+
+function renderExamsTable(exams) {
+  const html = exams.map(e => `
+    <tr>
+      <td><strong>${e.name}</strong></td>
+      <td><span style="font-family:'JetBrains Mono',monospace;font-size:11px">${e.code}</span></td>
+      <td><span class="badge blue">${e.pays}</span></td>
+      <td><span class="badge purple">${e.niveau}</span></td>
+      <td>${e.is_active ? '<span class="badge green">Actif</span>' : '<span class="badge gray">Inactif</span>'}</td>
+      <td>
+        <div style="display:flex;gap:4px">
+          <button class="btn btn-ghost btn-sm" onclick="toggleExam('${e.id}',${!e.is_active})">${e.is_active ? '⏸' : '▶'}</button>
+          <button class="btn btn-danger btn-sm btn-icon" onclick="deleteExam('${e.id}','${e.name}')">🗑</button>
+        </div>
+      </td>
+    </tr>
+  `).join('');
+  const tbody = document.getElementById('exams-table');
+  if (tbody) tbody.innerHTML = html || '<tr><td colspan="6"><div class="empty-state"><div class="empty-icon">🎓</div><div class="empty-text">Aucun examen</div></div></td></tr>';
+}
+
+function populateExamDropdowns(exams) {
+  const filterEl = document.getElementById('filter-series-exam');
+  if (filterEl) {
+    filterEl.innerHTML = '<option value="">Tous les examens</option>' +
+      exams.map(e => `<option value="${e.id}">${e.name}</option>`).join('');
+  }
+  const seriesExamEl = document.getElementById('series-exam-id');
+  if (seriesExamEl) {
+    seriesExamEl.innerHTML = '<option value="">-- Choisir un examen --</option>' +
+      exams.map(e => `<option value="${e.id}">${e.name}</option>`).join('');
+  }
+  const exExamEl = document.getElementById('ex-exam');
+  if (exExamEl) {
+    // Conserve les options statiques existantes, complète avec les examens DB
+    const existing = Array.from(exExamEl.options).map(o => o.value);
+    exams.forEach(e => {
+      if (!existing.includes(e.code)) {
+        exExamEl.add(new Option(e.name, e.code));
+      }
+    });
+  }
+}
+
+async function createExam() {
+  const code = document.getElementById('exam-code').value.trim();
+  const name = document.getElementById('exam-name').value.trim();
+  if (!code || !name) { showToast('Code et nom requis', 'error'); return; }
+  try {
+    await api('/admin/exams', 'POST', {
+      code, name,
+      pays: document.getElementById('exam-pays').value || 'senegal',
+      niveau: document.getElementById('exam-niveau').value,
+      description: document.getElementById('exam-desc').value,
+    });
+    showToast('Examen créé ✅');
+    closeModal('modal-exam');
+    loadExams();
+  } catch(e) { showToast('Erreur création examen', 'error'); }
+}
+
+async function toggleExam(id, isActive) {
+  try {
+    await api('/admin/exams/' + id, 'PUT', { is_active: isActive });
+    showToast(isActive ? 'Examen activé' : 'Examen désactivé');
+    loadExams();
+  } catch(e) { showToast('Erreur', 'error'); }
+}
+
+async function deleteExam(id, name) {
+  if (!confirm(`Supprimer "${name}" et toutes ses séries ?`)) return;
+  try {
+    await api('/admin/exams/' + id, 'DELETE');
+    showToast('Examen supprimé');
+    loadExams();
+  } catch(e) { showToast('Erreur', 'error'); }
+}
+
+// ════════════════════════════════════════════════════════════
+// SERIES
+// ════════════════════════════════════════════════════════════
+async function loadSeries() {
+  try {
+    const examId = document.getElementById('filter-series-exam')?.value;
+    const url = '/admin/series' + (examId ? '?exam_id=' + examId : '');
+    const series = await api(url);
+    renderSeriesTable(series);
+  } catch(e) { showToast('Erreur chargement séries', 'error'); }
+}
+
+function renderSeriesTable(series) {
+  const html = series.map(s => {
+    const matieres = s.matieres
+      ? Object.entries(s.matieres).map(([m,c]) => `<span class="badge blue" style="margin:2px">${m}: ${c}</span>`).join('')
+      : '—';
+    return `
+      <tr>
+        <td><strong style="font-family:'JetBrains Mono',monospace">${s.code}</strong></td>
+        <td>${s.name}</td>
+        <td><span class="badge purple">${s.exam_name || '—'}</span></td>
+        <td style="max-width:250px">${matieres}</td>
+        <td>${s.is_active ? '<span class="badge green">Actif</span>' : '<span class="badge gray">Inactif</span>'}</td>
+        <td>
+          <div style="display:flex;gap:4px">
+            <button class="btn btn-danger btn-sm btn-icon" onclick="deleteSeries('${s.id}','${s.code}')">🗑</button>
+          </div>
+        </td>
+      </tr>
+    `;
+  }).join('');
+  const tbody = document.getElementById('series-table');
+  if (tbody) tbody.innerHTML = html || '<tr><td colspan="6"><div class="empty-state"><div class="empty-icon">📋</div><div class="empty-text">Aucune série</div></div></td></tr>';
+}
+
+async function createSeries() {
+  const code = document.getElementById('series-code').value.trim();
+  const name = document.getElementById('series-name').value.trim();
+  const exam_id = document.getElementById('series-exam-id').value;
+  if (!code || !name || !exam_id) { showToast('Code, nom et examen requis', 'error'); return; }
+
+  let matieres = null;
+  const matieresRaw = document.getElementById('series-matieres').value.trim();
+  if (matieresRaw) {
+    try { matieres = JSON.parse(matieresRaw); }
+    catch(e) { showToast('JSON matières invalide', 'error'); return; }
+  }
+
+  try {
+    await api('/admin/series', 'POST', {
+      code, name, exam_id,
+      description: document.getElementById('series-desc').value,
+      matieres,
+    });
+    showToast('Série créée ✅');
+    closeModal('modal-series');
+    loadSeries();
+    loadExams();
+  } catch(e) { showToast('Erreur création série', 'error'); }
+}
+
+async function deleteSeries(id, code) {
+  if (!confirm(`Supprimer la série "${code}" ?`)) return;
+  try {
+    await api('/admin/series/' + id, 'DELETE');
+    showToast('Série supprimée');
+    loadSeries();
+  } catch(e) { showToast('Erreur', 'error'); }
+}
+
+// ════════════════════════════════════════════════════════════
+// CONCOURS
+// ════════════════════════════════════════════════════════════
+async function loadConcours() {
+  try {
+    const list = await api('/admin/concours');
+    renderConcoursGrid(list);
+  } catch(e) { showToast('Erreur chargement concours', 'error'); }
+}
+
+function renderConcoursGrid(list) {
+  const html = list.map(c => `
+    <div class="card" style="border-left:3px solid var(--yellow)">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px">
+        <div>
+          <div style="font-weight:700;font-size:14px">${c.name}</div>
+          <div style="font-size:11px;color:var(--text3);margin-top:2px">${c.code}</div>
+        </div>
+        <div style="display:flex;gap:4px">
+          <span class="badge ${c.niveau_requis === 'bac' ? 'blue' : 'purple'}">${c.niveau_requis}</span>
+          <button class="btn btn-danger btn-sm btn-icon" onclick="deleteConcours('${c.id}','${c.name}')">🗑</button>
+        </div>
+      </div>
+      ${c.description ? `<div style="font-size:12px;color:var(--text2);margin-bottom:10px">${c.description}</div>` : ''}
+      ${c.matieres_epreuves ? `
+        <div style="margin-bottom:10px">
+          <div style="font-size:10px;color:var(--text3);margin-bottom:4px;text-transform:uppercase">Épreuves</div>
+          <div>${Object.entries(c.matieres_epreuves).map(([m,coef]) =>
+            `<span class="badge blue" style="margin:2px">${m}: coef ${coef}</span>`
+          ).join('')}</div>
+        </div>
+      ` : ''}
+      <div>
+        <div style="font-size:10px;color:var(--text3);margin-bottom:6px;text-transform:uppercase">Séries éligibles</div>
+        <div>${c.series_eligibles.length
+          ? c.series_eligibles.map(s => `<span class="badge green" style="margin:2px">${s.code}</span>`).join('')
+          : '<span style="font-size:12px;color:var(--text3)">Aucune série définie</span>'
+        }</div>
+      </div>
+      <div style="font-size:11px;color:var(--text2);margin-top:8px">🌍 ${c.pays}</div>
+    </div>
+  `).join('');
+  const grid = document.getElementById('concours-grid');
+  if (grid) grid.innerHTML = html || '<div class="empty-state"><div class="empty-icon">🏆</div><div class="empty-text">Aucun concours</div></div>';
+}
+
+async function loadConcoursSeriesChecks() {
+  try {
+    const series = await api('/admin/series');
+    const container = document.getElementById('concours-series-checks');
+    if (!container) return;
+    container.innerHTML = series.map(s => `
+      <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer;
+        background:var(--surface3);padding:5px 10px;border-radius:20px">
+        <input type="checkbox" value="${s.id}" style="cursor:pointer"/>
+        ${s.code} <span style="color:var(--text3)">(${s.exam_name || '?'})</span>
+      </label>
+    `).join('') || '<span style="color:var(--text3);font-size:12px">Aucune série disponible — créez des séries d\'abord</span>';
+  } catch(e) {}
+}
+
+async function createConcours() {
+  const code = document.getElementById('concours-code').value.trim();
+  const name = document.getElementById('concours-name').value.trim();
+  if (!code || !name) { showToast('Code et nom requis', 'error'); return; }
+
+  let matieres = null;
+  const matRaw = document.getElementById('concours-matieres').value.trim();
+  if (matRaw) {
+    try { matieres = JSON.parse(matRaw); }
+    catch(e) { showToast('JSON matières invalide', 'error'); return; }
+  }
+
+  const seriesIds = Array.from(
+    document.querySelectorAll('#concours-series-checks input:checked')
+  ).map(el => el.value);
+
+  try {
+    await api('/admin/concours', 'POST', {
+      code, name,
+      pays: document.getElementById('concours-pays').value || 'senegal',
+      niveau_requis: document.getElementById('concours-niveau').value,
+      description: document.getElementById('concours-desc').value,
+      matieres_epreuves: matieres,
+      series_ids: seriesIds,
+    });
+    showToast('Concours créé ✅');
+    closeModal('modal-concours');
+    loadConcours();
+  } catch(e) { showToast('Erreur création concours', 'error'); }
+}
+
+async function deleteConcours(id, name) {
+  if (!confirm(`Supprimer le concours "${name}" ?`)) return;
+  try {
+    await api('/admin/concours/' + id, 'DELETE');
+    showToast('Concours supprimé');
+    loadConcours();
+  } catch(e) { showToast('Erreur', 'error'); }
+}
+
+// Série dynamique selon l'examen choisi dans le modal upload exercice
+document.getElementById('ex-exam')?.addEventListener('change', async function() {
+  const examCode = this.value;
+  const exam = allExams.find(e => e.code === examCode);
+  if (!exam) return;
+  try {
+    const series = await api('/admin/series?exam_id=' + exam.id);
+    const el = document.getElementById('ex-serie');
+    if (!el) return;
+    el.innerHTML = '<option value="">— Série —</option>' +
+      series.map(s => `<option value="${s.code}">${s.code} — ${s.name}</option>`).join('');
+  } catch(e) {}
+});
 
 // ════════════════════════════════════════════════════════════
 // AUTO-REFRESH & INIT

@@ -2325,7 +2325,7 @@ function renderExamsTable(exams) {
       <td>${e.is_active ? '<span class="badge green">Actif</span>' : '<span class="badge gray">Inactif</span>'}</td>
       <td>
         <div style="display:flex;gap:4px">
-          <button class="btn btn-ghost btn-sm btn-icon" onclick="editExam('${e.id}','${e.code}','${e.name}','${e.pays}','${e.niveau}','${(e.description||'').replace(/'/g,'\\'')}')" title="Modifier">✏️</button>
+          <button class="btn btn-ghost btn-sm btn-icon" onclick="editExamById('${e.id}')" title="Modifier">✏️</button>
           <button class="btn btn-ghost btn-sm btn-icon" onclick="toggleExam('${e.id}',${!e.is_active})">${e.is_active ? '⏸' : '▶'}</button>
           <button class="btn btn-danger btn-sm btn-icon" onclick="deleteExam('${e.id}','${e.name}')">🗑</button>
         </div>
@@ -2420,7 +2420,7 @@ function renderSeriesTable(series) {
         <td>${s.is_active ? '<span class="badge green">Actif</span>' : '<span class="badge gray">Inactif</span>'}</td>
         <td>
           <div style="display:flex;gap:4px">
-            <button class="btn btn-ghost btn-sm btn-icon" onclick="editSeries('${s.id}','${s.code}','${s.name}','${s.exam_id||''}','${(s.description||'').replace(/'/g,'\\'')}')" title="Modifier">✏️</button>
+            <button class="btn btn-ghost btn-sm btn-icon" onclick="editSeriesById('${s.id}')" title="Modifier">✏️</button>
             <button class="btn btn-danger btn-sm btn-icon" onclick="deleteSeries('${s.id}','${s.code}')">🗑</button>
           </div>
         </td>
@@ -2585,6 +2585,26 @@ document.getElementById('ex-exam')?.addEventListener('change', async function() 
 // ════════════════════════════════════════════════════════════
 // EDIT — EXAMS / SERIES / CONCOURS
 // ════════════════════════════════════════════════════════════
+function editExamById(id) {
+  const e = allExams.find(x => x.id === id);
+  if (!e) return;
+  editExam(e.id, e.code, e.name, e.pays, e.niveau, e.description || '');
+}
+
+async function editSeriesById(id) {
+  const s = (window._allSeries || []).find(x => x.id === id);
+  if (!s) return;
+  document.getElementById('series-code').value = s.code;
+  document.getElementById('series-name').value = s.name;
+  document.getElementById('series-exam-id').value = s.exam_id || '';
+  document.getElementById('series-desc').value = s.description || '';
+  document.getElementById('series-matieres').value = JSON.stringify(s.matieres || {}, null, 2);
+  document.querySelector('#modal-series .btn-primary').textContent = '💾 Enregistrer';
+  document.querySelector('#modal-series .btn-primary').onclick = () => updateSeries(id);
+  document.querySelector('#modal-series .modal-title').textContent = '✏️ Modifier la série';
+  openModal('modal-series');
+}
+
 function editExam(id, code, name, pays, niveau, desc) {
   document.getElementById('exam-code').value = code;
   document.getElementById('exam-name').value = name;
@@ -2612,20 +2632,6 @@ async function updateExam(id) {
     document.querySelector('#modal-exam .modal-title').textContent = '🎓 Nouvel examen';
     loadExams();
   } catch(e) { showToast('Erreur', 'error'); }
-}
-
-function editSeries(id, code, name, examId, desc) {
-  document.getElementById('series-code').value = code;
-  document.getElementById('series-name').value = name;
-  document.getElementById('series-exam-id').value = examId;
-  document.getElementById('series-desc').value = desc;
-  // Charge les matières depuis la liste en mémoire
-  const s = (window._allSeries || []).find(x => x.id === id);
-  document.getElementById('series-matieres').value = s?.matieres ? JSON.stringify(s.matieres, null, 2) : '';
-  document.querySelector('#modal-series .btn-primary').textContent = '💾 Enregistrer';
-  document.querySelector('#modal-series .btn-primary').onclick = () => updateSeries(id);
-  document.querySelector('#modal-series .modal-title').textContent = '✏️ Modifier la série';
-  openModal('modal-series');
 }
 
 async function updateSeries(id) {

@@ -499,7 +499,11 @@ Exemples chapitres : derivees, probabilites, suites, equations, mecanique, elect
                 raw = data["choices"][0]["message"]["content"].strip()
                 json_match = re.search(r'\{.*\}', raw, re.DOTALL)
                 if json_match:
-                    return json.loads(json_match.group())
+                    result = json.loads(json_match.group())
+                    # Normalise physique / chimie → physique_chimie (nom en DB)
+                    if result.get("matiere") in ("physique", "chimie"):
+                        result["matiere"] = "physique_chimie"
+                    return result
         except Exception as e:
             print(f"Erreur détection LLM: {e}")
 

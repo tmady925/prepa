@@ -1,8 +1,10 @@
+import uuid
 from datetime import date, datetime, timezone
 from fastapi import APIRouter, Request, Depends, HTTPException, Header
 from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, cast, Date
+sa_select = select
 from app.db.database import get_db
 from app.core.settings import get_settings
 from app.models.user import User
@@ -763,6 +765,253 @@ async def notifications_send(
         series=data.get("series"),
     )
     return result
+
+
+# ── EXAMENS ────────────────────────────────────────────────────────────
+
+@router.get("/admin/exams")
+async def get_exams(
+    db: AsyncSession = Depends(get_db),
+    _: bool = Depends(verify_admin),
+):
+    from app.models.exam import Exam
+    result = await db.execute(sa_select(Exam).order_by(Exam.pays, Exam.name))
+    exams = result.scalars().all()
+    return [
+        {
+            "id": str(e.id), "code": e.code, "name": e.name,
+            "pays": e.pays, "niveau": e.niveau,
+            "description": e.description, "is_active": e.is_active,
+        }
+        for e in exams
+    ]
+
+
+@router.post("/admin/exams")
+async def create_exam(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    _: bool = Depends(verify_admin),
+):
+    from app.models.exam import Exam
+    data = await request.json()
+    exam = Exam(
+        code=data["code"],
+        name=data["name"],
+        pays=data.get("pays", "senegal"),
+        niveau=data.get("niveau", "bac"),
+        description=data.get("description"),
+        is_active=data.get("is_active", True),
+    )
+    db.add(exam)
+    await db.commit()
+    return {"success": True, "id": str(exam.id), "code": exam.code}
+
+
+@router.put("/admin/exams/{exam_id}")
+async def update_exam(
+    exam_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    _: bool = Depends(verify_admin),
+):
+    from app.models.exam import Exam
+    data = await request.json()
+    result = await db.execute(sa_select(Exam).where(Exam.id == uuid.UUID(exam_id)))
+    exam = result.scalar_one_or_none()
+    if not exam:
+        raise HTTPException(status_code=404, detail="Examen non trouvé")
+    for field in ["name", "pays", "niveau", "description", "is_active"]:
+        if field in data:
+            setattr(exam, field, data[field])
+    await db.commit()
+    return {"success": True}
+
+
+@router.delete("/admin/exams/{exam_id}")
+async def delete_exam(
+    exam_id: str,
+    db: AsyncSession = Depends(get_db),
+    _: bool = Depends(verify_admin),
+):
+    from app.models.exam import Exam
+    result = await db.execute(sa_select(Exam).where(Exam.id == uuid.UUID(exam_id)))
+    exam = result.scalar_one_or_none()
+    if not exam:
+        raise HTTPException(status_code=404, detail="Examen non trouvé")
+    await db.delete(exam)
+    await db.commit()
+    return {"success": True}
+
+
+# ── SÉRIES ─────────────────────────────────────────────────────────────
+
+@router.get("/admin/series")
+async def get_series(
+    exam_id: str = None,
+    db: AsyncSession = Depends(get_db),
+    _: bool = Depends(verify_admin),
+):
+    from app.models.exam import Series, Exam
+    query = (
+        sa_select(Series, Exam.name.label("exam_name"), Exam.code.label("exam_code"))
+        .outerjoin(Exam, Series.exam_id == Exam.id)
+        .order_by(Exam.name, Series.code)
+    )
+    if exam_id:
+        query = query.where(Series.exam_id == uuid.UUID(exam_id))
+    result = await db.execute(query)
+    rows = result.all()
+    return [
+        {
+            "id": str(s.id), "code": s.code, "name": s.name,
+            "exam_id": str(s.exam_id) if s.exam_id else None,
+            "exam_name": exam_name, "exam_code": exam_code,
+            "description": s.description,
+            "matieres": s.matieres,
+            "is_active": s.is_active,
+        }
+        for s, exam_name, exam_code in rows
+    ]
+
+
+@router.post("/admin/series")
+async def create_series(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    _: bool = Depends(verify_admin),
+):
+    from app.models.exam import Series
+    data = await request.json()
+    series = Series(
+        code=data["code"],
+        name=data["name"],
+        exam_id=uuid.UUID(data["exam_id"]) if data.get("exam_id") else None,
+        description=data.get("description"),
+        matieres=data.get("matieres"),
+        is_active=data.get("is_active", True),
+    )
+    db.add(series)
+    await db.commit()
+    return {"success": True, "id": str(series.id)}
+
+
+@router.put("/admin/series/{series_id}")
+async def update_series(
+    series_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    _: bool = Depends(verify_admin),
+):
+    from app.models.exam import Series
+    data = await request.json()
+    result = await db.execute(sa_select(Series).where(Series.id == uuid.UUID(series_id)))
+    series = result.scalar_one_or_none()
+    if not series:
+        raise HTTPException(status_code=404, detail="Série non trouvée")
+    for field in ["code", "name", "description", "matieres", "is_active"]:
+        if field in data:
+            setattr(series, field, data[field])
+    if "exam_id" in data:
+        series.exam_id = uuid.UUID(data["exam_id"]) if data["exam_id"] else None
+    await db.commit()
+    return {"success": True}
+
+
+@router.delete("/admin/series/{series_id}")
+async def delete_series(
+    series_id: str,
+    db: AsyncSession = Depends(get_db),
+    _: bool = Depends(verify_admin),
+):
+    from app.models.exam import Series
+    result = await db.execute(sa_select(Series).where(Series.id == uuid.UUID(series_id)))
+    series = result.scalar_one_or_none()
+    if not series:
+        raise HTTPException(status_code=404, detail="Série non trouvée")
+    await db.delete(series)
+    await db.commit()
+    return {"success": True}
+
+
+# ── CONCOURS ───────────────────────────────────────────────────────────
+
+@router.get("/admin/concours")
+async def get_concours(
+    db: AsyncSession = Depends(get_db),
+    _: bool = Depends(verify_admin),
+):
+    from app.models.exam import Concours, ConcoursSeriesLink, Series
+    result = await db.execute(
+        sa_select(Concours).where(Concours.is_active == True).order_by(Concours.name)
+    )
+    concours_list = result.scalars().all()
+
+    output = []
+    for c in concours_list:
+        series_result = await db.execute(
+            sa_select(Series).join(
+                ConcoursSeriesLink, ConcoursSeriesLink.series_id == Series.id
+            ).where(ConcoursSeriesLink.concours_id == c.id)
+        )
+        series = series_result.scalars().all()
+        output.append({
+            "id": str(c.id), "code": c.code, "name": c.name,
+            "pays": c.pays, "niveau_requis": c.niveau_requis,
+            "description": c.description,
+            "matieres_epreuves": c.matieres_epreuves,
+            "is_active": c.is_active,
+            "series_eligibles": [
+                {"id": str(s.id), "code": s.code, "name": s.name} for s in series
+            ],
+        })
+    return output
+
+
+@router.post("/admin/concours")
+async def create_concours(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    _: bool = Depends(verify_admin),
+):
+    from app.models.exam import Concours, ConcoursSeriesLink
+    data = await request.json()
+    c = Concours(
+        code=data["code"],
+        name=data["name"],
+        pays=data.get("pays", "senegal"),
+        niveau_requis=data.get("niveau_requis", "bac"),
+        description=data.get("description"),
+        matieres_epreuves=data.get("matieres_epreuves"),
+        is_active=data.get("is_active", True),
+    )
+    db.add(c)
+    await db.flush()
+
+    for series_id in data.get("series_ids", []):
+        db.add(ConcoursSeriesLink(
+            concours_id=c.id,
+            series_id=uuid.UUID(series_id),
+        ))
+
+    await db.commit()
+    return {"success": True, "id": str(c.id)}
+
+
+@router.delete("/admin/concours/{concours_id}")
+async def delete_concours(
+    concours_id: str,
+    db: AsyncSession = Depends(get_db),
+    _: bool = Depends(verify_admin),
+):
+    from app.models.exam import Concours
+    result = await db.execute(sa_select(Concours).where(Concours.id == uuid.UUID(concours_id)))
+    c = result.scalar_one_or_none()
+    if not c:
+        raise HTTPException(status_code=404, detail="Concours non trouvé")
+    await db.delete(c)
+    await db.commit()
+    return {"success": True}
 
 
 # ── DASHBOARD ─────────────────────────────────────────────────────────

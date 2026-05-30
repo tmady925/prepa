@@ -503,11 +503,26 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession, msg_t
                         }
                         await whatsapp_sender._send(payload)
 
+                # Met à jour la maîtrise du chapitre selon le score de la copie
+                score_copie = analysis.get("score", 0)
+                if conv_state.get("chapitre"):
+                    try:
+                        await mastery_service.update_after_interaction(
+                            db=db,
+                            user_id=user.id,
+                            matiere=conv_state.get("matiere", ""),
+                            chapitre=conv_state.get("chapitre", ""),
+                            detection={"confiance": 0.9},
+                            response_text=f"Score copie: {score_copie}/100",
+                        )
+                    except Exception as e:
+                        print(f"  → Mastery update error: {e}")
+
                 # Réinitialise l'état
                 user.conversation_state = {}
                 await db.flush()
 
-                print(f"Copie analysée -> {phone}: score={analysis.get('score')}")
+                print(f"Copie analysée -> {phone}: score={score_copie}")
                 return
             else:
                 # Image reçue sans exercice en cours
@@ -713,42 +728,107 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession, msg_t
             from sqlalchemy import select, func
             from app.models.exercise import Exercise
 
-            # Cherche un exercice PDF en DB
-            query = select(Exercise).where(
-                Exercise.status == "ready",
-                Exercise.exercise_path.isnot(None),
-            )
-            if user.exam_type:
-                query = query.where(Exercise.exam_type == user.exam_type)
-            if user.series:
-                query = query.where(Exercise.serie == user.series)
-            if detected_matiere:
-                query = query.where(Exercise.matiere == detected_matiere)
+            # ── Détermine le niveau adapté au profil élève ────────────
+            niveau_cible = 2  # défaut intermédiaire
+
+            score = getattr(user, "engagement_score", 50) or 50
+            if score < 30:
+                niveau_cible = 1
+            elif score > 70:
+                niveau_cible = 3
+
+            # Affine avec la maîtrise du chapitre si disponible
             if detected_chapitre:
-                query = query.where(Exercise.chapitre == detected_chapitre)
-            query = query.order_by(func.random()).limit(1)
+                try:
+                    profile = await mastery_service.get_student_profile(db, user.id)
+                    if profile and detected_matiere in profile:
+                        chapitre_data = profile[detected_matiere].get(detected_chapitre, {})
+                        maitrise = chapitre_data.get("level", 0.5)
+                        if maitrise < 0.3:
+                            niveau_cible = 1
+                        elif maitrise > 0.6:
+                            niveau_cible = min(3, niveau_cible + 1)
+                except Exception:
+                    pass
 
-            result = await db.execute(query)
-            exercise_db = result.scalar_one_or_none()
+            print(f"  → Niveau cible pour {user.name}: {niveau_cible} (score={score})")
 
-            if not exercise_db:
-                # Fallback sans chapitre
-                query2 = select(Exercise).where(
+            # ── Cherche un exercice du bon niveau ─────────────────────
+            def _base_query():
+                return select(Exercise).where(
                     Exercise.status == "ready",
                     Exercise.exercise_path.isnot(None),
                     Exercise.matiere == detected_matiere,
-                ).order_by(func.random()).limit(1)
-                result2 = await db.execute(query2)
-                exercise_db = result2.scalar_one_or_none()
+                )
+
+            def _add_filters(q, niveau=None):
+                if niveau is not None:
+                    q = q.where(Exercise.niveau == niveau)
+                if user.exam_type:
+                    q = q.where(Exercise.exam_type == user.exam_type)
+                if user.series:
+                    q = q.where(Exercise.serie == user.series)
+                if detected_chapitre:
+                    q = q.where(Exercise.chapitre == detected_chapitre)
+                return q.order_by(func.random()).limit(1)
+
+            result = await db.execute(_add_filters(_base_query(), niveau_cible))
+            exercise_db = result.scalar_one_or_none()
+
+            # Fallback niveau ±1 puis sans filtre niveau/chapitre
+            if not exercise_db:
+                for niveau_fallback in [niveau_cible - 1, niveau_cible + 1, None]:
+                    if niveau_fallback is not None and niveau_fallback not in (1, 2, 3):
+                        continue
+                    r = await db.execute(_add_filters(_base_query(), niveau_fallback))
+                    exercise_db = r.scalar_one_or_none()
+                    if exercise_db:
+                        break
 
             if exercise_db:
                 # Envoie le PDF
                 from pathlib import Path
+                import fitz as _fitz
 
                 pdf_path = Path(exercise_db.exercise_path)
                 print(f"  → PDF path: {pdf_path} | exists: {pdf_path.exists()}")
                 if pdf_path.exists():
-                    pdf_bytes = pdf_path.read_bytes()
+                    # Vérifie que le contenu correspond à la sous-demande (physique vs chimie)
+                    pdf_text = ""
+                    try:
+                        doc = _fitz.open(str(pdf_path))
+                        for page in doc:
+                            pdf_text += page.get_text("text")
+                        doc.close()
+                    except Exception:
+                        pass
+
+                    demande_lower = text.lower()
+                    contenu_ok = True
+
+                    if "physique" in demande_lower and "chimie" not in demande_lower:
+                        physique_keywords = [
+                            "vitesse", "force", "énergie", "energie", "tension",
+                            "courant", "circuit", "optique", "mécanique", "mecanique",
+                            "mouvement", "accélération", "acceleration", "électrique", "electrique",
+                        ]
+                        contenu_ok = any(kw in pdf_text.lower() for kw in physique_keywords)
+
+                    elif "chimie" in demande_lower and "physique" not in demande_lower:
+                        chimie_keywords = [
+                            "acide", "base", "mol", "réaction", "reaction", "ph",
+                            "alcool", "ester", "oxydation", "titrage",
+                            "concentration", "solution", "atome", "ion",
+                        ]
+                        contenu_ok = any(kw in pdf_text.lower() for kw in chimie_keywords)
+
+                    if not contenu_ok:
+                        await whatsapp_sender.send_text(
+                            phone,
+                            f"😔 Je n'ai pas encore d'exercice de *{demande_lower}* disponible.\n\n"
+                            f"Pose-moi une question de cours en attendant ! 📚"
+                        )
+                        return
 
                     from app.core.settings import get_settings
                     settings = get_settings()

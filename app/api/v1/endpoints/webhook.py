@@ -370,23 +370,27 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession, msg_t
             await db.flush()
 
     elif step == "confirm_pays":
-        conv_state = user.conversation_state or {}
-        text_lower = text.lower().strip()
+        from app.services.choice_detector import detect_choice
 
-        if text_lower in ("pays_oui", "oui", "yes", "✅ oui"):
+        choices = [
+            {"id": "pays_oui", "title": "Oui", "value": "oui"},
+            {"id": "pays_non", "title": "Non", "value": "non"},
+        ]
+        choice = detect_choice(text, choices)
+
+        if choice and choice["value"] == "oui":
+            conv_state = user.conversation_state or {}
             user.pays = conv_state.get("detected_pays")
             user.conversation_state = {}
             await db.flush()
             await _ask_exam(phone, user, db)
-
-        elif text_lower in ("pays_non", "non", "no", "❌ non, autre pays"):
+        elif choice and choice["value"] == "non":
             await whatsapp_sender.send_text(phone, messages.ask_pays_manuel())
             user.onboarding_step = "saisie_pays"
             user.conversation_state = {}
             await db.flush()
-
         else:
-            # Relance la confirmation
+            conv_state = user.conversation_state or {}
             await whatsapp_sender.send_buttons(
                 phone,
                 messages.ask_confirm_pays(
@@ -424,25 +428,38 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession, msg_t
         await _ask_exam(phone, user, db)
 
     elif step == "exam":
-        print(f"DEBUG exam step: text='{text}' phone={phone}")
-        # Format: "exam_bac_senegal" ou "exam_bfem" etc.
-        exam_code = text.replace("exam_", "") if text.startswith("exam_") else text
+        from app.models.exam import Exam, Series
+        from app.services.choice_detector import detect_choice
 
-        from app.models.exam import Exam
-        result = await db.execute(
-            sa_select(Exam).where(Exam.code == exam_code)
-        )
-        exam = result.scalar_one_or_none()
+        # Charge les examens disponibles (même filtre que _ask_exam)
+        query = sa_select(Exam).where(Exam.is_active == True)
+        if user.pays:
+            query = query.where(Exam.pays == user.pays)
+        query = query.order_by(Exam.niveau, Exam.name)
+        result = await db.execute(query)
+        all_exams = result.scalars().all()
 
-        if not exam:
-            # Fallback — relance la liste
+        # Construit la liste de choix
+        choices = [
+            {
+                "id": f"exam_{e.code}",
+                "title": e.name,
+                "value": e.code,
+                "obj": e,
+            }
+            for e in all_exams
+        ]
+
+        choice = detect_choice(text, choices)
+
+        if not choice:
             await _ask_exam(phone, user, db)
             return
 
+        exam = choice["obj"]
         user = await user_service.set_exam(db, user, exam.code)
 
         # Charge les séries de cet examen depuis DB
-        from app.models.exam import Series
         series_result = await db.execute(
             sa_select(Series).where(
                 Series.exam_id == exam.id,
@@ -470,8 +487,53 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession, msg_t
             await whatsapp_sender.send_text(phone, messages.ask_subjects(user.name))
 
     elif step == "series":
-        # Format: "serie_s2" ou "S2" directement
-        series_code = text.replace("serie_", "").upper() if text.startswith("serie_") else text.upper()
+        from app.models.exam import Series, Exam
+        from app.services.choice_detector import detect_choice
+
+        # Charge les séries de l'examen de l'élève
+        exam_result = await db.execute(
+            sa_select(Exam).where(Exam.code == user.exam_type)
+        )
+        exam = exam_result.scalar_one_or_none()
+
+        all_series = []
+        if exam:
+            series_result = await db.execute(
+                sa_select(Series).where(
+                    Series.exam_id == exam.id,
+                    Series.is_active == True,
+                ).order_by(Series.code)
+            )
+            all_series = series_result.scalars().all()
+
+        choices = [
+            {
+                "id": f"serie_{s.code.lower()}",
+                "title": s.code,
+                "value": s.code,
+                "obj": s,
+            }
+            for s in all_series
+        ]
+
+        choice = detect_choice(text, choices)
+
+        if not choice and all_series:
+            # Relance la liste
+            series_data = [
+                {"code": s.code, "name": s.name, "description": s.description or ""}
+                for s in all_series
+            ]
+            series_list_config = messages.build_series_list(series_data, exam.name if exam else "")
+            await whatsapp_sender.send_list(
+                phone,
+                "Je n'ai pas compris 😅 Choisis ta série :",
+                series_list_config["button"],
+                series_list_config["sections"],
+            )
+            return
+
+        series_code = choice["value"] if choice else text.upper()
         user = await user_service.set_series(db, user, series_code)
         await whatsapp_sender.send_text(phone, messages.ask_subjects(user.name))
 

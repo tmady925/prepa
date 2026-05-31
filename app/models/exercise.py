@@ -146,6 +146,7 @@ class Exercise(Base):
     # Statut
     status: Mapped[str] = mapped_column(String(20), default="pending", index=True)
     error_message: Mapped[str | None] = mapped_column(Text)
+    file_hash: Mapped[str | None] = mapped_column(String(64), index=True)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()

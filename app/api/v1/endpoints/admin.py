@@ -266,6 +266,17 @@ async def upload_document(
     if len(file_bytes) > 10 * 1024 * 1024:
         raise HTTPException(status_code=413, detail="Fichier trop grand (max 10MB).")
 
+    from app.services.duplicate_detector import compute_hash, check_duplicate_document
+    file_hash = compute_hash(file_bytes)
+    duplicate = await check_duplicate_document(db, file_hash)
+    if duplicate:
+        return {
+            "success": False,
+            "duplicate": True,
+            "message": f"Ce document existe déjà : {duplicate['title']}",
+            "existing": duplicate,
+        }
+
     result = await indexing_service.index_document(
         db=db,
         file_bytes=file_bytes,
@@ -277,6 +288,18 @@ async def upload_document(
         doc_type=doc_type,
         uploaded_by="admin",
     )
+
+    # Sauvegarde le hash sur le document créé
+    if result.get("success") and result.get("document_id"):
+        from app.models.document import Document
+        from sqlalchemy import update as sa_update
+        await db.execute(
+            sa_update(Document)
+            .where(Document.id == uuid.UUID(result["document_id"]))
+            .values(file_hash=file_hash)
+        )
+        await db.commit()
+
     return result
 
 
@@ -453,6 +476,18 @@ async def upload_exercise(
         except Exception:
             pass
 
+    # Vérification doublon exercice
+    from app.services.duplicate_detector import compute_hash, check_duplicate_exercise
+    exercise_hash = compute_hash(exercise_bytes)
+    duplicate = await check_duplicate_exercise(db, exercise_hash)
+    if duplicate:
+        return {
+            "success": False,
+            "duplicate": True,
+            "message": f"Cet exercice existe déjà : {duplicate['title']} ({duplicate['matiere']})",
+            "existing": duplicate,
+        }
+
     # Détermine le niveau automatiquement avec Mistral
     niveau = 2  # défaut
     try:
@@ -548,6 +583,7 @@ niveau 3 = difficile (demande réflexion avancée, type concours)"""
         correction_path=str(corr_path) if corr_path else None,
         correction_generated=False,
         status="ready",
+        file_hash=exercise_hash,
     )
     db.add(exercise)
     await db.commit()

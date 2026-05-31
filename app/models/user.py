@@ -27,6 +27,7 @@ class User(Base, TimestampMixin):
     exam_type: Mapped[str | None] = mapped_column(String(50))
     series: Mapped[str | None] = mapped_column(String(20))
     exam_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    pays: Mapped[str | None] = mapped_column(String(50), nullable=True)
 
     # Matières choisies pendant onboarding
     subjects: Mapped[list | None] = mapped_column(JSONB)

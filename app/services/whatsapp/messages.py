@@ -16,54 +16,89 @@ class Messages:
         "Pour commencer — *comment tu t'appelles ?*"
     )
 
-    def ask_exam(self, name: str) -> str:
-        return (
-            f"Enchanté *{name}* ! 🎓\n\n"
-            "Tu prépares quel examen ?"
-        )
-
-    EXAM_BUTTONS = [
-        {"id": "exam_bac", "title": "BAC"},
-        {"id": "exam_bfem", "title": "BFEM"},
-        {"id": "exam_concours", "title": "Concours"},
-    ]
-
     def ask_series_bac(self, name: str) -> str:
         return f"Super {name} ! Tu es en quelle série ?"
 
-    SERIES_BAC_BUTTONS = [
-        {"id": "serie_s1", "title": "S1"},
-        {"id": "serie_s2", "title": "S2"},
-        {"id": "serie_l1", "title": "L1 / L2"},
+    # ── Onboarding dynamique ──────────────────────────────────────
+
+    def ask_confirm_pays(self, name: str, pays_nom: str, flag: str) -> str:
+        return (
+            f"Bonjour *{name}* ! 👋\n\n"
+            f"Je vois que tu es de *{pays_nom}* {flag}\n\n"
+            f"C'est bien ça ?"
+        )
+
+    CONFIRM_PAYS_BUTTONS = [
+        {"id": "pays_oui", "title": "✅ Oui"},
+        {"id": "pays_non", "title": "❌ Non, autre pays"},
     ]
 
-    SERIES_BAC_LIST = {
-        "button": "Choisir ma série",
-        "sections": [
+    def ask_pays_manuel(self) -> str:
+        return (
+            "Dans quel pays es-tu ? 🌍\n\n"
+            "Réponds avec le nom de ton pays.\n"
+            "Exemple : *Sénégal*, *Côte d'Ivoire*, *Mali*..."
+        )
+
+    def ask_exam_dynamic(self, name: str, exams: list) -> str:
+        """exams = liste de dicts {code, name, pays}"""
+        return f"Enchanté *{name}* ! 🎓\n\nTu prépares quel examen ?"
+
+    def build_exam_buttons(self, exams: list) -> list:
+        """Construit les boutons d'examens depuis la DB."""
+        return [
+            {"id": f"exam_{e['code']}", "title": e["name"][:20]}
+            for e in exams[:3]  # WhatsApp limite à 3 boutons
+        ]
+
+    def build_exam_list(self, exams: list) -> dict:
+        """Construit la liste d'examens si > 3."""
+        rows = [
             {
-                "title": "Sciences",
-                "rows": [
-                    {"id": "serie_s1", "title": "S1", "description": "Maths - Physique"},
-                    {"id": "serie_s2", "title": "S2", "description": "SVT - Physique"},
-                    {"id": "serie_s3", "title": "S3", "description": "Sciences de l'ingénieur"},
-                ],
-            },
-            {
-                "title": "Littéraire",
-                "rows": [
-                    {"id": "serie_l1", "title": "L1", "description": "Philosophie - Lettres"},
-                    {"id": "serie_l2", "title": "L2", "description": "Langues"},
-                ],
-            },
-            {
-                "title": "Technique",
-                "rows": [
-                    {"id": "serie_t", "title": "T", "description": "Technique"},
-                    {"id": "serie_steg", "title": "STEG", "description": "Sciences économiques"},
-                ],
-            },
-        ],
-    }
+                "id": f"exam_{e['code']}",
+                "title": e["name"][:24],
+                "description": e.get("pays", "")[:72],
+            }
+            for e in exams
+        ]
+        return {
+            "button": "Choisir mon examen",
+            "sections": [{"title": "Examens disponibles", "rows": rows}],
+        }
+
+    def build_series_list(self, series: list, exam_name: str) -> dict:
+        """Construit la liste des séries d'un examen."""
+        sciences   = [s for s in series if s["code"] in ("S1", "S2", "S3", "C", "D")]
+        litteraire = [s for s in series if s["code"] in ("L1", "L2", "A")]
+        technique  = [s for s in series if s["code"] in ("T", "STEG", "G")]
+        autres     = [s for s in series if s not in sciences + litteraire + technique]
+
+        def to_rows(lst):
+            return [
+                {
+                    "id": f"serie_{s['code'].lower()}",
+                    "title": s["code"],
+                    "description": s.get("description", "")[:72],
+                }
+                for s in lst
+            ]
+
+        sections = []
+        if sciences:
+            sections.append({"title": "Sciences", "rows": to_rows(sciences)})
+        if litteraire:
+            sections.append({"title": "Littéraire", "rows": to_rows(litteraire)})
+        if technique:
+            sections.append({"title": "Technique", "rows": to_rows(technique)})
+        if autres:
+            sections.append({"title": "Autres", "rows": to_rows(autres)})
+
+        return {
+            "button": "Choisir ma série",
+            "sections": sections if sections else [
+                {"title": exam_name, "rows": to_rows(series)}
+            ],
+        }
 
     def ask_subjects(self, name: str) -> str:
         return (

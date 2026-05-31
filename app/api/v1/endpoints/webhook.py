@@ -290,6 +290,50 @@ async def process_message(message: dict, db: AsyncSession):
     await user_service.increment_message_count(db, user)
 
 
+async def _ask_exam(phone: str, user, db: AsyncSession):
+    """Charge les examens depuis DB et les envoie à l'élève."""
+    from app.models.exam import Exam
+
+    query = sa_select(Exam).where(Exam.is_active == True)
+    if user.pays:
+        query = query.where(Exam.pays == user.pays)
+    query = query.order_by(Exam.niveau, Exam.name)
+
+    result = await db.execute(query)
+    exams = result.scalars().all()
+
+    if not exams:
+        # Fallback — charge tous les examens actifs
+        result2 = await db.execute(
+            sa_select(Exam).where(Exam.is_active == True).order_by(Exam.name)
+        )
+        exams = result2.scalars().all()
+
+    exams_data = [
+        {"code": e.code, "name": e.name, "pays": e.pays}
+        for e in exams
+    ]
+
+    user.onboarding_step = "exam"
+    await db.flush()
+
+    if len(exams_data) <= 3:
+        buttons = messages.build_exam_buttons(exams_data)
+        await whatsapp_sender.send_buttons(
+            phone,
+            messages.ask_exam_dynamic(user.name, exams_data),
+            buttons,
+        )
+    else:
+        list_config = messages.build_exam_list(exams_data)
+        await whatsapp_sender.send_list(
+            phone,
+            messages.ask_exam_dynamic(user.name, exams_data),
+            list_config["button"],
+            list_config["sections"],
+        )
+
+
 async def handle_onboarding(phone: str, text: str, user, db: AsyncSession, msg_type: str = "text", image_data: dict = None):
     step = user.onboarding_step
 
@@ -300,41 +344,134 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession, msg_t
 
     elif step == "name":
         user = await user_service.set_name(db, user, text)
-        await whatsapp_sender.send_buttons(
-            phone,
-            messages.ask_exam(user.name),
-            messages.EXAM_BUTTONS,
-        )
+
+        # Détecte le pays depuis l'indicatif
+        from app.services.phone_detector import detect_pays
+        pays_info = detect_pays(phone)
+
+        if pays_info:
+            user.conversation_state = {
+                "detected_pays": pays_info["pays"],
+                "detected_pays_nom": pays_info["nom"],
+                "detected_pays_flag": pays_info["flag"],
+            }
+            await db.flush()
+            await whatsapp_sender.send_buttons(
+                phone,
+                messages.ask_confirm_pays(user.name, pays_info["nom"], pays_info["flag"]),
+                messages.CONFIRM_PAYS_BUTTONS,
+            )
+            user.onboarding_step = "confirm_pays"
+            await db.flush()
+        else:
+            # Pays non détecté → demande manuel
+            await whatsapp_sender.send_text(phone, messages.ask_pays_manuel())
+            user.onboarding_step = "saisie_pays"
+            await db.flush()
+
+    elif step == "confirm_pays":
+        conv_state = user.conversation_state or {}
+        text_lower = text.lower().strip()
+
+        if text_lower in ("pays_oui", "oui", "yes", "✅ oui"):
+            user.pays = conv_state.get("detected_pays")
+            user.conversation_state = {}
+            await db.flush()
+            await _ask_exam(phone, user, db)
+
+        elif text_lower in ("pays_non", "non", "no", "❌ non, autre pays"):
+            await whatsapp_sender.send_text(phone, messages.ask_pays_manuel())
+            user.onboarding_step = "saisie_pays"
+            user.conversation_state = {}
+            await db.flush()
+
+        else:
+            # Relance la confirmation
+            await whatsapp_sender.send_buttons(
+                phone,
+                messages.ask_confirm_pays(
+                    user.name,
+                    conv_state.get("detected_pays_nom", ""),
+                    conv_state.get("detected_pays_flag", ""),
+                ),
+                messages.CONFIRM_PAYS_BUTTONS,
+            )
+
+    elif step == "saisie_pays":
+        from app.services.phone_detector import PAYS_MAP
+        pays_trouve = None
+        text_lower = text.lower().strip()
+
+        for data in PAYS_MAP.values():
+            if (data["nom"].lower() in text_lower or
+                    data["pays"].replace("_", " ") in text_lower or
+                    text_lower in data["nom"].lower()):
+                pays_trouve = data
+                break
+
+        if pays_trouve:
+            user.pays = pays_trouve["pays"]
+            await db.flush()
+            await whatsapp_sender.send_text(
+                phone,
+                f"Super ! {pays_trouve['flag']} *{pays_trouve['nom']}* noté !\n"
+            )
+        else:
+            # Pays non reconnu → met senegal par défaut
+            user.pays = "senegal"
+            await db.flush()
+
+        await _ask_exam(phone, user, db)
 
     elif step == "exam":
-        exam_map = {
-            "exam_bac": "bac_senegal",
-            "exam_bfem": "bfem",
-            "exam_concours": "concours",
-        }
-        exam_type = exam_map.get(text, text)
-        user = await user_service.set_exam(db, user, exam_type)
+        # Format: "exam_bac_senegal" ou "exam_bfem" etc.
+        exam_code = text.replace("exam_", "") if text.startswith("exam_") else text
 
-        if exam_type == "bac_senegal":
+        from app.models.exam import Exam
+        result = await db.execute(
+            sa_select(Exam).where(Exam.code == exam_code)
+        )
+        exam = result.scalar_one_or_none()
+
+        if not exam:
+            # Fallback — relance la liste
+            await _ask_exam(phone, user, db)
+            return
+
+        user = await user_service.set_exam(db, user, exam.code)
+
+        # Charge les séries de cet examen depuis DB
+        from app.models.exam import Series
+        series_result = await db.execute(
+            sa_select(Series).where(
+                Series.exam_id == exam.id,
+                Series.is_active == True,
+            ).order_by(Series.code)
+        )
+        series_list = series_result.scalars().all()
+
+        if series_list:
+            series_data = [
+                {"code": s.code, "name": s.name, "description": s.description or ""}
+                for s in series_list
+            ]
+            series_list_config = messages.build_series_list(series_data, exam.name)
             await whatsapp_sender.send_list(
                 phone,
                 messages.ask_series_bac(user.name),
-                messages.SERIES_BAC_LIST["button"],
-                messages.SERIES_BAC_LIST["sections"],
+                series_list_config["button"],
+                series_list_config["sections"],
             )
         else:
+            # Pas de série pour cet examen → passe aux matières
             user.onboarding_step = "subjects"
             await db.flush()
             await whatsapp_sender.send_text(phone, messages.ask_subjects(user.name))
 
     elif step == "series":
-        series_map = {
-            "serie_s1": "S1", "serie_s2": "S2", "serie_s3": "S3",
-            "serie_l1": "L1", "serie_l2": "L2",
-            "serie_t": "T", "serie_steg": "STEG",
-        }
-        series = series_map.get(text, text.upper())
-        user = await user_service.set_series(db, user, series)
+        # Format: "serie_s2" ou "S2" directement
+        series_code = text.replace("serie_", "").upper() if text.startswith("serie_") else text.upper()
+        user = await user_service.set_series(db, user, series_code)
         await whatsapp_sender.send_text(phone, messages.ask_subjects(user.name))
 
     elif step == "subjects":
@@ -351,7 +488,7 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession, msg_t
         if not chosen:
             await whatsapp_sender.send_text(
                 phone,
-                "Reponds avec les numeros separes par des virgules. Ex: *1,2,4*"
+                "Réponds avec les numéros séparés par des virgules. Ex: *1,2,4*"
             )
             return
         user = await user_service.set_subjects(db, user, chosen)
@@ -361,7 +498,6 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession, msg_t
         try:
             exam_date = datetime.strptime(text, "%d/%m/%Y")
             user = await user_service.set_exam_date(db, user, exam_date)
-            # set_exam_date passe onboarding_step à "plan"
             await whatsapp_sender.send_buttons(
                 phone,
                 messages.ask_plan(user.name),
@@ -383,7 +519,6 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession, msg_t
             phone,
             messages.onboarding_complete(user.name, days_left)
         )
-        # Si l'élève veut passer Pro directement → envoie le lien de paiement
         if text in ("onboarding_pro", "action_pro"):
             from app.services.payment_service import payment_service
             invoice = await payment_service.create_invoice(user=user, plan="pro")

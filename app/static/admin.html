@@ -2139,14 +2139,17 @@ async function uploadExercise() {
 
     if (data.duplicate) {
       const ex = data.existing;
+      const typeLabel = ex.type === 'exact' ? '📋 Fichier identique' : '📝 Contenu identique';
       status.innerHTML = `
-        ⚠️ <strong>Doublon détecté !</strong><br>
-        Cet exercice existe déjà dans la base :<br>
-        <span style="color:var(--accent2)">${ex.title}</span> —
-        ${ex.matiere} · Niveau ${ex.niveau}<br>
-        <span style="font-size:10px;color:var(--text3)">Ajouté le ${new Date(ex.created_at).toLocaleDateString('fr')}</span>
+        ⚠️ <strong>Doublon détecté !</strong> ${typeLabel}<br>
+        <span style="color:var(--accent2)">${ex.title || data.message}</span><br>
+        ${ex.matiere ? `Matière : ${ex.matiere}` : ''}
+        ${ex.niveau ? ` · Niveau ${ex.niveau}` : ''}<br>
+        <span style="font-size:10px;color:var(--text3)">
+          Ajouté le ${new Date(ex.created_at).toLocaleDateString('fr')}
+        </span>
       `;
-      showToast('Doublon détecté — exercice déjà présent', 'error');
+      showToast('Doublon détecté', 'error');
       return;
     }
     if (data.success) {
@@ -2254,9 +2257,16 @@ async function uploadDocument() {
       const result = await res.json();
 
       if (result.duplicate) {
+        const ex = result.existing;
+        const typeLabel = ex.type === 'exact' ? '📋 Fichier identique' : '📝 Contenu identique';
         status.innerHTML = `
-          ⚠️ <strong>Doublon détecté !</strong><br>
-          Ce document existe déjà : <span style="color:var(--accent2)">${result.existing.title}</span>
+          ⚠️ <strong>Doublon détecté !</strong> ${typeLabel}<br>
+          <span style="color:var(--accent2)">${ex.title || result.message}</span><br>
+          ${ex.matiere ? `Matière : ${ex.matiere}` : ''}
+          ${ex.doc_type ? ` · ${ex.doc_type}` : ''}<br>
+          <span style="font-size:10px;color:var(--text3)">
+            Ajouté le ${new Date(ex.created_at).toLocaleDateString('fr')}
+          </span>
         `;
         showToast('Doublon détecté', 'error');
         return;

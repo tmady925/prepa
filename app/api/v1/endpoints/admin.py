@@ -266,14 +266,16 @@ async def upload_document(
     if len(file_bytes) > 10 * 1024 * 1024:
         raise HTTPException(status_code=413, detail="Fichier trop grand (max 10MB).")
 
-    from app.services.duplicate_detector import compute_hash, check_duplicate_document
+    from app.services.duplicate_detector import compute_hash, compute_content_hash, check_duplicate_document
     file_hash = compute_hash(file_bytes)
-    duplicate = await check_duplicate_document(db, file_hash)
+    content_hash = compute_content_hash(file_bytes)
+    duplicate = await check_duplicate_document(db, file_hash, content_hash)
     if duplicate:
+        type_label = "fichier identique" if duplicate["type"] == "exact" else "contenu identique"
         return {
             "success": False,
             "duplicate": True,
-            "message": f"Ce document existe déjà : {duplicate['title']}",
+            "message": f"Doublon détecté ({type_label}) : {duplicate['title']}",
             "existing": duplicate,
         }
 
@@ -289,14 +291,14 @@ async def upload_document(
         uploaded_by="admin",
     )
 
-    # Sauvegarde le hash sur le document créé
+    # Sauvegarde les hashes sur le document créé
     if result.get("success") and result.get("document_id"):
         from app.models.document import Document
         from sqlalchemy import update as sa_update
         await db.execute(
             sa_update(Document)
             .where(Document.id == uuid.UUID(result["document_id"]))
-            .values(file_hash=file_hash)
+            .values(file_hash=file_hash, content_hash=content_hash)
         )
         await db.commit()
 
@@ -476,15 +478,17 @@ async def upload_exercise(
         except Exception:
             pass
 
-    # Vérification doublon exercice
-    from app.services.duplicate_detector import compute_hash, check_duplicate_exercise
+    # Vérification doublon exercice (niveau 1 : fichier, niveau 2 : contenu)
+    from app.services.duplicate_detector import compute_hash, compute_content_hash, check_duplicate_exercise
     exercise_hash = compute_hash(exercise_bytes)
-    duplicate = await check_duplicate_exercise(db, exercise_hash)
+    exercise_content_hash = compute_content_hash(exercise_bytes)
+    duplicate = await check_duplicate_exercise(db, exercise_hash, exercise_content_hash)
     if duplicate:
+        type_label = "fichier identique" if duplicate["type"] == "exact" else "contenu identique"
         return {
             "success": False,
             "duplicate": True,
-            "message": f"Cet exercice existe déjà : {duplicate['title']} ({duplicate['matiere']})",
+            "message": f"Doublon détecté ({type_label}) : {duplicate['title']} — {duplicate['matiere']}",
             "existing": duplicate,
         }
 
@@ -584,6 +588,7 @@ niveau 3 = difficile (demande réflexion avancée, type concours)"""
         correction_generated=False,
         status="ready",
         file_hash=exercise_hash,
+        content_hash=exercise_content_hash,
     )
     db.add(exercise)
     await db.commit()

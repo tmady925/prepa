@@ -51,6 +51,7 @@ class Document(Base, TimestampMixin):
     error_message: Mapped[str | None] = mapped_column(Text)
     uploaded_by: Mapped[str | None] = mapped_column(String(100))
     file_hash: Mapped[str | None] = mapped_column(String(64), index=True)
+    content_hash: Mapped[str | None] = mapped_column(String(64), index=True)
 
 
 class DocumentChunk(Base):

@@ -1044,6 +1044,224 @@ async def delete_concours(
     return {"success": True}
 
 
+# ── SIMULATIONS ───────────────────────────────────────────────────────
+
+@router.get("/admin/simulations")
+async def get_simulations(
+    db: AsyncSession = Depends(get_db),
+    _: bool = Depends(verify_admin),
+    statut: str | None = None,
+):
+    from app.models.simulation import Simulation, SimulationParticipation
+    query = sa_select(Simulation).order_by(Simulation.date_debut.desc())
+    if statut:
+        query = query.where(Simulation.statut == statut)
+    result = await db.execute(query)
+    simulations = result.scalars().all()
+
+    output = []
+    for s in simulations:
+        # Compte les participants
+        count_result = await db.scalar(
+            select(func.count(SimulationParticipation.id)).where(
+                SimulationParticipation.simulation_id == s.id
+            )
+        )
+        output.append({
+            "id": str(s.id),
+            "titre": s.titre,
+            "type": s.type,
+            "exam_id": str(s.exam_id) if s.exam_id else None,
+            "concours_id": str(s.concours_id) if s.concours_id else None,
+            "matiere": s.matiere,
+            "serie": s.serie,
+            "date_debut": s.date_debut.isoformat(),
+            "duree_minutes": s.duree_minutes,
+            "series_eligibles": s.series_eligibles,
+            "statut": s.statut,
+            "notif_j1_sent": s.notif_j1_sent,
+            "notif_debut_sent": s.notif_debut_sent,
+            "resultats_envoyes": s.resultats_envoyes,
+            "nb_participants": count_result or 0,
+            "sujet_pdf_path": s.sujet_pdf_path,
+            "correction_pdf_path": s.correction_pdf_path,
+            "created_at": s.created_at.isoformat() if s.created_at else None,
+        })
+    return output
+
+
+@router.post("/admin/simulations")
+async def create_simulation(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    _: bool = Depends(verify_admin),
+):
+    import base64
+    from pathlib import Path
+    from app.models.simulation import Simulation
+
+    data = await request.json()
+
+    # Sauvegarde le sujet PDF si fourni en base64
+    sujet_path = None
+    if data.get("sujet_b64"):
+        try:
+            sujet_bytes = base64.b64decode(data["sujet_b64"])
+            sim_dir = Path("/home/prepa/app/simulations/sujets")
+            sim_dir.mkdir(parents=True, exist_ok=True)
+            filename = f"sujet_{data.get('titre','sim').replace(' ','_')}_{uuid.uuid4().hex[:6]}.pdf"
+            p = sim_dir / filename
+            p.write_bytes(sujet_bytes)
+            p.chmod(0o644)
+            sujet_path = str(p)
+        except Exception as e:
+            print(f"Erreur sauvegarde sujet: {e}")
+
+    # Sauvegarde la correction PDF si fournie
+    correction_path = None
+    if data.get("correction_b64"):
+        try:
+            corr_bytes = base64.b64decode(data["correction_b64"])
+            corr_dir = Path("/home/prepa/app/simulations/corrections")
+            corr_dir.mkdir(parents=True, exist_ok=True)
+            filename = f"correction_{data.get('titre','sim').replace(' ','_')}_{uuid.uuid4().hex[:6]}.pdf"
+            p = corr_dir / filename
+            p.write_bytes(corr_bytes)
+            p.chmod(0o644)
+            correction_path = str(p)
+        except Exception as e:
+            print(f"Erreur sauvegarde correction: {e}")
+
+    sim = Simulation(
+        titre=data["titre"],
+        type=data.get("type", "examen"),
+        exam_id=uuid.UUID(data["exam_id"]) if data.get("exam_id") else None,
+        concours_id=uuid.UUID(data["concours_id"]) if data.get("concours_id") else None,
+        matiere=data.get("matiere"),
+        serie=data.get("serie"),
+        sujet_pdf_path=sujet_path,
+        correction_pdf_path=correction_path,
+        date_debut=datetime.fromisoformat(data["date_debut"]),
+        duree_minutes=int(data.get("duree_minutes", 240)),
+        series_eligibles=data.get("series_eligibles", []),
+        statut="scheduled",
+    )
+    db.add(sim)
+    await db.commit()
+    return {"success": True, "id": str(sim.id), "titre": sim.titre, "statut": sim.statut}
+
+
+@router.put("/admin/simulations/{simulation_id}")
+async def update_simulation(
+    simulation_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    _: bool = Depends(verify_admin),
+):
+    from app.models.simulation import Simulation
+    data = await request.json()
+    result = await db.execute(sa_select(Simulation).where(Simulation.id == uuid.UUID(simulation_id)))
+    sim = result.scalar_one_or_none()
+    if not sim:
+        raise HTTPException(status_code=404, detail="Simulation non trouvée")
+    for field in ["titre", "type", "matiere", "serie", "duree_minutes", "series_eligibles", "statut"]:
+        if field in data:
+            setattr(sim, field, data[field])
+    if "date_debut" in data:
+        sim.date_debut = datetime.fromisoformat(data["date_debut"])
+    if "exam_id" in data:
+        sim.exam_id = uuid.UUID(data["exam_id"]) if data["exam_id"] else None
+    if "concours_id" in data:
+        sim.concours_id = uuid.UUID(data["concours_id"]) if data["concours_id"] else None
+    await db.commit()
+    return {"success": True}
+
+
+@router.delete("/admin/simulations/{simulation_id}")
+async def delete_simulation(
+    simulation_id: str,
+    db: AsyncSession = Depends(get_db),
+    _: bool = Depends(verify_admin),
+):
+    from app.models.simulation import Simulation
+    result = await db.execute(sa_select(Simulation).where(Simulation.id == uuid.UUID(simulation_id)))
+    sim = result.scalar_one_or_none()
+    if not sim:
+        raise HTTPException(status_code=404, detail="Simulation non trouvée")
+    await db.delete(sim)
+    await db.commit()
+    return {"success": True}
+
+
+@router.post("/admin/simulations/{simulation_id}/lancer")
+async def lancer_simulation_now(
+    simulation_id: str,
+    db: AsyncSession = Depends(get_db),
+    _: bool = Depends(verify_admin),
+):
+    """Force le lancement immédiat d'une simulation (hors scheduler)."""
+    from app.models.simulation import Simulation
+    from app.services.simulation_service import simulation_service
+    result = await db.execute(sa_select(Simulation).where(Simulation.id == uuid.UUID(simulation_id)))
+    sim = result.scalar_one_or_none()
+    if not sim:
+        raise HTTPException(status_code=404, detail="Simulation non trouvée")
+    if sim.statut not in ("draft", "scheduled"):
+        raise HTTPException(status_code=400, detail=f"Statut actuel : {sim.statut}")
+    sim.statut = "scheduled"
+    await db.flush()
+    await simulation_service.lancer_simulation(db, sim)
+    return {"success": True, "message": f"Simulation '{sim.titre}' lancée"}
+
+
+@router.post("/admin/simulations/{simulation_id}/corriger")
+async def corriger_simulation_now(
+    simulation_id: str,
+    db: AsyncSession = Depends(get_db),
+    _: bool = Depends(verify_admin),
+):
+    """Force la correction immédiate de toutes les copies."""
+    from app.models.simulation import Simulation
+    from app.services.simulation_service import simulation_service
+    result = await db.execute(sa_select(Simulation).where(Simulation.id == uuid.UUID(simulation_id)))
+    sim = result.scalar_one_or_none()
+    if not sim:
+        raise HTTPException(status_code=404, detail="Simulation non trouvée")
+    await simulation_service.corriger_toutes_copies(db, sim)
+    return {"success": True, "message": f"Correction lancée pour '{sim.titre}'"}
+
+
+@router.get("/admin/simulations/{simulation_id}/participants")
+async def get_simulation_participants(
+    simulation_id: str,
+    db: AsyncSession = Depends(get_db),
+    _: bool = Depends(verify_admin),
+):
+    from app.models.simulation import SimulationParticipation
+    result = await db.execute(
+        sa_select(SimulationParticipation, User)
+        .join(User, User.id == SimulationParticipation.user_id)
+        .where(SimulationParticipation.simulation_id == uuid.UUID(simulation_id))
+        .order_by(SimulationParticipation.classement.nulls_last(), SimulationParticipation.score.desc().nulls_last())
+    )
+    rows = result.all()
+    return [
+        {
+            "id": str(p.id),
+            "user_id": str(p.user_id),
+            "user_name": u.name,
+            "user_phone": u.phone_number,
+            "statut": p.statut,
+            "score": p.score,
+            "mention": p.mention,
+            "classement": p.classement,
+            "submitted_at": p.submitted_at.isoformat() if p.submitted_at else None,
+            "corrected_at": p.corrected_at.isoformat() if p.corrected_at else None,
+        }
+        for p, u in rows
+    ]
+
+
 # ── DASHBOARD ─────────────────────────────────────────────────────────
 
 @router.get("/admin", response_class=FileResponse)

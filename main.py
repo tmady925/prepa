@@ -1,3 +1,4 @@
+import asyncio
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
@@ -10,7 +11,20 @@ settings = get_settings()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await connect_redis()
+
+    # Lance le scheduler simulations en arrière-plan
+    from app.services.simulation_scheduler import run_scheduler
+    scheduler_task = asyncio.create_task(run_scheduler())
+
     yield
+
+    # Arrêt propre du scheduler
+    scheduler_task.cancel()
+    try:
+        await scheduler_task
+    except asyncio.CancelledError:
+        pass
+
     await disconnect_redis()
 
 

@@ -590,6 +590,9 @@ tr:hover td { background: rgba(255,255,255,0.02); }
     <a class="nav-item" onclick="showPage('concours')" data-page="concours">
       <span class="icon">🏆</span> Concours
     </a>
+    <a class="nav-item" onclick="showPage('simulations')" data-page="simulations">
+      <span class="icon">🎯</span> Simulations
+    </a>
 
     <div class="sidebar-footer">
       <div class="admin-card">
@@ -1172,6 +1175,20 @@ tr:hover td { background: rgba(255,255,255,0.02); }
       </div>
     </div>
 
+    <!-- PAGE: SIMULATIONS -->
+    <div class="page" id="page-simulations">
+      <div class="section-header">
+        <div>
+          <div class="section-title">🎯 Simulations</div>
+          <div class="section-sub">Examens blancs et concours simulés</div>
+        </div>
+        <button class="btn btn-primary" onclick="openModal('modal-simulation')">+ Nouvelle simulation</button>
+      </div>
+      <div id="simulations-grid" style="display:flex;flex-direction:column;gap:12px">
+        <div style="text-align:center;padding:40px;color:var(--text3)">Chargement...</div>
+      </div>
+    </div>
+
   </main>
 </div>
 
@@ -1507,6 +1524,107 @@ tr:hover td { background: rgba(255,255,255,0.02); }
   </div>
 </div>
 
+<!-- Modal: Simulation -->
+<div class="modal-overlay" id="modal-simulation">
+  <div class="modal" style="width:600px">
+    <div class="modal-header">
+      <div class="modal-title">🎯 Nouvelle simulation</div>
+      <button class="modal-close" onclick="closeModal('modal-simulation')">✕</button>
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">Titre *</label>
+      <input type="text" class="form-input" id="sim-titre" placeholder="BAC Blanc Physique-Chimie S2 — Juin 2026"/>
+    </div>
+
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">Type</label>
+        <select class="form-select" id="sim-type">
+          <option value="examen">Examen</option>
+          <option value="concours">Concours</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Matière</label>
+        <select class="form-select" id="sim-matiere">
+          <option value="">-- Matière --</option>
+          <option value="maths">Maths</option>
+          <option value="physique_chimie">Physique-Chimie</option>
+          <option value="svt">SVT</option>
+          <option value="francais">Français</option>
+          <option value="philosophie">Philosophie</option>
+          <option value="histoire_geo">Histoire-Géo</option>
+          <option value="anglais">Anglais</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">Examen</label>
+        <select class="form-select" id="sim-exam-id" onchange="loadSimSeries()">
+          <option value="">-- Examen --</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Série principale</label>
+        <select class="form-select" id="sim-serie">
+          <option value="">-- Série --</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">Date et heure début *</label>
+        <input type="datetime-local" class="form-input" id="sim-date"/>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Durée (minutes)</label>
+        <input type="number" class="form-input" id="sim-duree" value="240" min="30" max="480"/>
+      </div>
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">Séries éligibles</label>
+      <div id="sim-series-checks" style="display:flex;flex-wrap:wrap;gap:8px;padding:10px;background:var(--surface2);border-radius:var(--radius-sm)">
+        Sélectionne d'abord un examen
+      </div>
+    </div>
+
+    <div class="grid-2" style="margin-bottom:16px">
+      <div>
+        <label class="form-label">📄 Sujet PDF *</label>
+        <div class="upload-zone" id="zone-sim-sujet" onclick="document.getElementById('sim-sujet-file').click()">
+          <div class="upload-icon">📝</div>
+          <div class="upload-text">Sujet de l'épreuve</div>
+        </div>
+        <input type="file" id="sim-sujet-file" accept=".pdf" style="display:none"
+          onchange="onFileSelect('sim-sujet-file','zone-sim-sujet','sim-sujet-name')"/>
+        <div id="sim-sujet-name" style="font-size:11px;color:var(--green);margin-top:4px"></div>
+      </div>
+      <div>
+        <label class="form-label">✅ Correction PDF <span style="color:var(--text3)">(optionnel)</span></label>
+        <div class="upload-zone" id="zone-sim-corr" onclick="document.getElementById('sim-corr-file').click()">
+          <div class="upload-icon">✅</div>
+          <div class="upload-text">Correction officielle</div>
+        </div>
+        <input type="file" id="sim-corr-file" accept=".pdf" style="display:none"
+          onchange="onFileSelect('sim-corr-file','zone-sim-corr','sim-corr-name')"/>
+        <div id="sim-corr-name" style="font-size:11px;color:var(--green);margin-top:4px"></div>
+      </div>
+    </div>
+
+    <div id="sim-status" style="font-size:12px;color:var(--text2);margin-bottom:12px"></div>
+
+    <div style="display:flex;gap:10px;justify-content:flex-end">
+      <button class="btn btn-ghost" onclick="closeModal('modal-simulation')">Annuler</button>
+      <button class="btn btn-primary" onclick="createSimulation()">🎯 Créer la simulation</button>
+    </div>
+  </div>
+</div>
+
 <!-- Toast -->
 <div id="toast"></div>
 
@@ -1529,6 +1647,7 @@ const PAGE_TITLES = {
   exams: 'Examens',
   series: 'Séries',
   concours: 'Concours',
+  simulations: 'Simulations',
 };
 const TEMPLATES = {
   motivation: "🔥 Salut {nom} !\n\nTon streak de *{streak} jours* est impressionnant !\n\nIl te reste *{jours_restants} jours* avant ton examen.\n\nContinue comme ça 💪",
@@ -1669,6 +1788,7 @@ function showPage(name) {
   if (name === 'exams') loadExams();
   if (name === 'series') { loadExams(); loadSeries(); }
   if (name === 'concours') loadConcours();
+  if (name === 'simulations') loadSimulations();
 }
 
 // ════════════════════════════════════════════════════════════
@@ -2357,6 +2477,11 @@ function populateExamDropdowns(exams) {
       }
     });
   }
+  const simExamEl = document.getElementById('sim-exam-id');
+  if (simExamEl) {
+    simExamEl.innerHTML = '<option value="">-- Examen --</option>' +
+      exams.map(e => `<option value="${e.id}">${e.name}</option>`).join('');
+  }
 }
 
 async function createExam() {
@@ -2704,6 +2829,198 @@ async function updateConcours(id) {
     document.querySelector('#modal-concours .btn-primary').onclick = createConcours;
     document.querySelector('#modal-concours .modal-title').textContent = '🏆 Nouveau concours';
     loadConcours();
+  } catch(e) { showToast('Erreur', 'error'); }
+}
+
+// ════════════════════════════════════════════════════════════
+// SIMULATIONS
+// ════════════════════════════════════════════════════════════
+async function loadSimulations() {
+  try {
+    const sims = await api('/admin/simulations');
+    renderSimulationsGrid(sims);
+  } catch(e) { showToast('Erreur chargement simulations', 'error'); }
+}
+
+function renderSimulationsGrid(sims) {
+  if (!sims.length) {
+    document.getElementById('simulations-grid').innerHTML = '<div class="empty-state"><div class="empty-icon">🎯</div><div class="empty-text">Aucune simulation</div><div class="empty-sub">Créez votre premier examen blanc</div></div>';
+    return;
+  }
+
+  const statutColors = { draft: 'gray', scheduled: 'blue', active: 'green', closed: 'purple' };
+  const statutLabels = { draft: 'Brouillon', scheduled: '⏰ Programmée', active: '🔴 En cours', closed: '✅ Terminée' };
+
+  document.getElementById('simulations-grid').innerHTML = sims.map(s => {
+    const dateDebut = new Date(s.date_debut);
+    const dateFin = new Date(dateDebut.getTime() + s.duree_minutes * 60000);
+    return `
+      <div class="card" style="border-left:3px solid ${s.statut === 'active' ? 'var(--green)' : s.statut === 'scheduled' ? 'var(--accent)' : 'var(--border)'}">
+        <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:16px">
+          <div style="flex:1">
+            <div style="font-weight:700;font-size:15px;margin-bottom:4px">${s.titre}</div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
+              <span class="badge ${statutColors[s.statut] || 'gray'}">${statutLabels[s.statut] || s.statut}</span>
+              ${s.matiere ? `<span class="badge blue">${s.matiere}</span>` : ''}
+              ${s.serie ? `<span class="badge purple">${s.serie}</span>` : ''}
+              <span class="badge yellow">⏱ ${s.duree_minutes}min</span>
+              <span class="badge green">👥 ${s.nb_participants} inscrits</span>
+            </div>
+            <div style="font-size:12px;color:var(--text2)">
+              📅 ${dateDebut.toLocaleDateString('fr')} à ${dateDebut.toLocaleTimeString('fr',{hour:'2-digit',minute:'2-digit'})}
+              → ${dateFin.toLocaleTimeString('fr',{hour:'2-digit',minute:'2-digit'})}
+            </div>
+            <div style="font-size:11px;color:var(--text3);margin-top:4px">
+              ${s.notif_j1_sent ? '✅ Notif J-1' : '⏳ Notif J-1'} &nbsp;·&nbsp;
+              ${s.notif_debut_sent ? '✅ Lancée' : '⏳ Pas encore lancée'} &nbsp;·&nbsp;
+              ${s.resultats_envoyes ? '✅ Résultats envoyés' : '⏳ Résultats en attente'}
+            </div>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:6px;align-items:flex-end">
+            ${s.statut === 'scheduled' ? `
+              <button class="btn btn-success btn-sm" onclick="lancerSimulation('${s.id}','${s.titre.replace(/'/g,"\\'")}')">▶ Lancer</button>
+            ` : ''}
+            ${s.statut === 'active' ? `
+              <button class="btn btn-primary btn-sm" onclick="corrigerSimulation('${s.id}')">📝 Corriger</button>
+            ` : ''}
+            ${s.statut === 'closed' ? `
+              <button class="btn btn-ghost btn-sm" onclick="voirParticipations('${s.id}')">📊 Résultats</button>
+            ` : ''}
+            <button class="btn btn-danger btn-sm btn-icon" onclick="deleteSimulation('${s.id}','${s.titre.replace(/'/g,"\\'")}')">🗑</button>
+          </div>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+async function loadSimSeries() {
+  const examId = document.getElementById('sim-exam-id').value;
+  if (!examId) return;
+  try {
+    const series = await api('/admin/series?exam_id=' + examId);
+    document.getElementById('sim-serie').innerHTML = '<option value="">-- Série --</option>' +
+      series.map(s => `<option value="${s.code}">${s.code} — ${s.name}</option>`).join('');
+    document.getElementById('sim-series-checks').innerHTML = series.map(s => `
+      <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer;
+        background:var(--surface3);padding:5px 10px;border-radius:20px">
+        <input type="checkbox" value="${s.code}" style="cursor:pointer"/> ${s.code}
+      </label>
+    `).join('');
+  } catch(e) {}
+}
+
+async function createSimulation() {
+  const titre = document.getElementById('sim-titre').value.trim();
+  const date = document.getElementById('sim-date').value;
+  if (!titre || !date) { showToast('Titre et date requis', 'error'); return; }
+
+  const sujetFile = document.getElementById('sim-sujet-file').files[0];
+  if (!sujetFile) { showToast('Sujet PDF requis', 'error'); return; }
+
+  const status = document.getElementById('sim-status');
+  status.textContent = '⏳ Upload en cours...';
+
+  try {
+    const sujet_b64 = await toBase64(sujetFile);
+    const corrFile = document.getElementById('sim-corr-file').files[0];
+    const correction_b64 = corrFile ? await toBase64(corrFile) : null;
+
+    const seriesEligibles = Array.from(
+      document.querySelectorAll('#sim-series-checks input:checked')
+    ).map(el => el.value);
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 120000);
+
+    const res = await fetch('/api/v1/admin/simulations', {
+      method: 'POST',
+      headers: { 'X-Admin-Key': API_KEY, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        titre,
+        type: document.getElementById('sim-type').value,
+        matiere: document.getElementById('sim-matiere').value || null,
+        serie: document.getElementById('sim-serie').value || null,
+        exam_id: document.getElementById('sim-exam-id').value || null,
+        date_debut: new Date(date).toISOString(),
+        duree_minutes: parseInt(document.getElementById('sim-duree').value),
+        series_eligibles: seriesEligibles,
+        sujet_b64,
+        correction_b64,
+      }),
+      signal: controller.signal,
+    });
+    clearTimeout(timeoutId);
+    const data = await res.json();
+
+    if (data.success) {
+      showToast('Simulation créée ✅');
+      closeModal('modal-simulation');
+      loadSimulations();
+    } else {
+      status.textContent = '❌ ' + (data.detail || 'Erreur');
+    }
+  } catch(e) {
+    status.textContent = e.name === 'AbortError' ? '❌ Timeout' : '❌ ' + e.message;
+  }
+}
+
+async function lancerSimulation(id, titre) {
+  if (!confirm(`Lancer "${titre}" maintenant ?`)) return;
+  try {
+    await api('/admin/simulations/' + id + '/lancer', 'POST');
+    showToast('Simulation lancée ! Sujets envoyés aux élèves 🚀');
+    loadSimulations();
+  } catch(e) { showToast('Erreur', 'error'); }
+}
+
+async function corrigerSimulation(id) {
+  if (!confirm('Lancer la correction de toutes les copies ?')) return;
+  try {
+    await api('/admin/simulations/' + id + '/corriger', 'POST');
+    showToast('Correction lancée ! Résultats en cours d\'envoi 📊');
+    loadSimulations();
+  } catch(e) { showToast('Erreur', 'error'); }
+}
+
+async function voirParticipations(id) {
+  try {
+    const parts = await api('/admin/simulations/' + id + '/participants');
+    const html = parts.map((p, i) => `
+      <div style="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--border)">
+        <span style="font-size:18px">${i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i+1}.`}</span>
+        <div style="flex:1">
+          <div style="font-weight:600">${p.user_name || p.user_phone}</div>
+          <div style="font-size:11px;color:var(--text3)">${p.statut}</div>
+        </div>
+        <div style="text-align:right">
+          <div style="font-weight:700;color:${p.score >= 70 ? 'var(--green)' : p.score >= 50 ? 'var(--yellow)' : 'var(--red)'}">${p.score ?? '—'}/100</div>
+          <div style="font-size:10px;color:var(--text3)">${p.mention || ''}</div>
+        </div>
+      </div>
+    `).join('');
+
+    const modal = document.createElement('div');
+    modal.className = 'modal-overlay open';
+    modal.innerHTML = `
+      <div class="modal">
+        <div class="modal-header">
+          <div class="modal-title">📊 Classement</div>
+          <button class="modal-close" onclick="this.closest('.modal-overlay').remove()">✕</button>
+        </div>
+        <div style="max-height:400px;overflow-y:auto">${html || '<div class="empty-state"><div class="empty-text">Aucun participant</div></div>'}</div>
+      </div>
+    `;
+    document.body.appendChild(modal);
+  } catch(e) { showToast('Erreur', 'error'); }
+}
+
+async function deleteSimulation(id, titre) {
+  if (!confirm(`Supprimer "${titre}" ?`)) return;
+  try {
+    await api('/admin/simulations/' + id, 'DELETE');
+    showToast('Simulation supprimée');
+    loadSimulations();
   } catch(e) { showToast('Erreur', 'error'); }
 }
 

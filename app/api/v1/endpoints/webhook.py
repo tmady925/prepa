@@ -138,6 +138,109 @@ def detect_command(text: str) -> str | None:
     return commands.get(text.lower().strip())
 
 
+async def _extract_exercise_text(msg_type: str, image_data: dict, message: dict) -> str:
+    """Extrait le texte d'un exercice depuis une image ou un PDF."""
+    from app.services.copy_analyzer_service import copy_analyzer_service
+    import base64
+    text = ""
+
+    if msg_type == "image" and image_data:
+        image_url = await copy_analyzer_service.decrypt_media(image_data)
+        if image_url:
+            image_bytes = await copy_analyzer_service.download_image(image_url)
+            if image_bytes:
+                text = await _transcribe_image_b64(base64.b64encode(image_bytes).decode())
+
+    elif msg_type == "document":
+        raw_msg = message.get("message", {}) or {}
+        doc_image_data = {
+            "key": message.get("key", {}),
+            "message": raw_msg,
+        }
+        doc_url = await copy_analyzer_service.decrypt_media(doc_image_data)
+        if doc_url:
+            doc_bytes = await copy_analyzer_service.download_image(doc_url)
+            if doc_bytes:
+                try:
+                    import fitz
+                    doc = fitz.open(stream=doc_bytes, filetype="pdf")
+                    for page in doc:
+                        text += page.get_text("text")
+                    doc.close()
+                except Exception as e:
+                    print(f"Erreur lecture PDF: {e}")
+
+    return text.strip()
+
+
+async def _transcribe_image_b64(image_b64: str) -> str:
+    """Transcrit le texte d'une image via Mistral Vision."""
+    from app.core.settings import get_settings
+    import httpx
+    settings = get_settings()
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.post(
+                "https://api.mistral.ai/v1/chat/completions",
+                headers={"Authorization": f"Bearer {settings.mistral_api_key}"},
+                json={
+                    "model": "pixtral-12b-2409",
+                    "messages": [{
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "image_url",
+                                "image_url": f"data:image/jpeg;base64,{image_b64}"
+                            },
+                            {
+                                "type": "text",
+                                "text": "Transcris exactement le texte de cet exercice scolaire. Inclus toutes les questions, données et barèmes."
+                            }
+                        ]
+                    }],
+                    "temperature": 0.1,
+                    "max_tokens": 2000,
+                }
+            )
+            data = resp.json()
+            if "choices" in data:
+                return data["choices"][0]["message"]["content"].strip()
+    except Exception as e:
+        print(f"Erreur transcription image: {e}")
+    return ""
+
+
+async def _do_free_correction(
+    phone: str, user, db, copie_bytes: bytes, exercise_text: str
+):
+    """Lance la correction libre et envoie le feedback."""
+    from app.services.copy_analyzer_service import copy_analyzer_service
+    from app.services.whatsapp.sender import whatsapp_sender
+
+    analysis = await copy_analyzer_service.analyze_copy(
+        image_bytes=copie_bytes,
+        exercise_text=exercise_text,
+        correction_text="",
+        matiere=user.subjects[0] if user.subjects else "",
+        chapitre="",
+        niveau=2,
+        student_name=user.name or "élève",
+    )
+
+    if not analysis:
+        await whatsapp_sender.send_text(
+            phone,
+            "❌ Impossible d'analyser ta copie. Réessaie avec une photo plus nette."
+        )
+    else:
+        feedback = copy_analyzer_service.format_feedback(analysis, user.name or "élève")
+        await whatsapp_sender.send_text(phone, feedback)
+        print(f"Correction libre -> {phone}: score={analysis.get('score')}")
+
+    user.conversation_state = {}
+    await db.flush()
+
+
 async def handle_command(command: str, phone: str, user, db: AsyncSession):
     if command == "aide":
         days_left = 0
@@ -783,13 +886,99 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession, msg_t
                 return
             else:
                 # Image reçue sans exercice en cours
-                await whatsapp_sender.send_text(
-                    phone,
-                    "📸 J'ai reçu ton image !\n\n"
-                    "Pour que je puisse corriger ta copie, demande-moi d'abord un exercice :\n"
-                    "_\"Donne moi un exercice de maths\"_"
-                )
-                return
+                # Détecte l'intention via le caption
+                raw_msg = message.get("message", {}) or {}
+                caption = ""
+                if msg_type == "image":
+                    caption = (raw_msg.get("imageMessage", {}).get("caption", "") or "").lower()
+                elif msg_type == "document":
+                    caption = (raw_msg.get("documentMessage", {}).get("caption", "") or "").lower()
+
+                exercise_indicators = [
+                    "exercice", "enoncé", "enonce", "sujet", "question",
+                    "corrige", "voici", "l'exercice", "probleme", "problème",
+                ]
+                copy_indicators = [
+                    "copie", "essai", "essaie", "réponse", "reponse",
+                    "mon travail", "ma réponse", "j'ai fait",
+                ]
+
+                is_exercise = any(kw in caption for kw in exercise_indicators)
+                is_copy = any(kw in caption for kw in copy_indicators)
+
+                if is_exercise:
+                    # Élève envoie l'exercice en premier
+                    await whatsapp_sender.send_text(phone, "⏳ Je lis l'exercice...")
+                    exercise_text = await _extract_exercise_text(msg_type, image_data, message)
+                    if not exercise_text:
+                        await whatsapp_sender.send_text(
+                            phone,
+                            "❌ Je n'ai pas pu lire l'exercice.\n"
+                            "Envoie une photo plus nette ou un PDF."
+                        )
+                        return
+                    user.conversation_state = {
+                        "awaiting_copy_for_free_correction": True,
+                        "exercise_text": exercise_text,
+                    }
+                    await db.flush()
+                    await whatsapp_sender.send_text(
+                        phone,
+                        "📄 Exercice reçu ✅\n\n"
+                        "Maintenant envoie-moi *ta copie* 📸\n"
+                        "_Photo claire de ta feuille de réponse_"
+                    )
+                    return
+
+                elif is_copy:
+                    # Élève envoie sa copie en premier
+                    image_url = await copy_analyzer_service.decrypt_media(image_data)
+                    if not image_url:
+                        await whatsapp_sender.send_text(phone, "❌ Impossible de lire l'image.")
+                        return
+                    image_bytes = await copy_analyzer_service.download_image(image_url)
+                    if not image_bytes:
+                        await whatsapp_sender.send_text(phone, "❌ Erreur téléchargement.")
+                        return
+                    import base64
+                    user.conversation_state = {
+                        "awaiting_exercise_for_correction": True,
+                        "copie_b64": base64.b64encode(image_bytes).decode(),
+                    }
+                    await db.flush()
+                    await whatsapp_sender.send_text(
+                        phone,
+                        "📸 Copie reçue ✅\n\n"
+                        "Maintenant envoie-moi *l'exercice* 📄\n\n"
+                        "- Une photo de l'énoncé 📸\n"
+                        "- Ou un PDF 📎"
+                    )
+                    return
+
+                else:
+                    # Ambiguïté — demande clarification
+                    if msg_type == "image":
+                        image_url = await copy_analyzer_service.decrypt_media(image_data)
+                        if image_url:
+                            image_bytes = await copy_analyzer_service.download_image(image_url)
+                            if image_bytes:
+                                import base64
+                                user.conversation_state = {
+                                    "awaiting_clarification": True,
+                                    "pending_image_b64": base64.b64encode(image_bytes).decode(),
+                                    "pending_type": "image",
+                                }
+                                await db.flush()
+
+                    await whatsapp_sender.send_buttons(
+                        phone,
+                        "📸 J'ai reçu ton image !\n\nC'est quoi ?",
+                        [
+                            {"id": "clarif_copie", "title": "📝 Ma copie"},
+                            {"id": "clarif_exercice", "title": "📄 L'exercice"},
+                        ],
+                    )
+                    return
 
         # Élève a un exercice en cours (awaiting_copy)
         conv_state = user.conversation_state or {}
@@ -823,6 +1012,116 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession, msg_t
                     "_Tape_ *skip* _pour annuler l'exercice._"
                 )
                 return
+
+        # ── Correction libre ─────────────────────────────────────────
+        conv_state = user.conversation_state or {}
+
+        # Bloc 1 — Clarification en attente (texte reçu)
+        if conv_state.get("awaiting_clarification") and msg_type == "text":
+            from app.services.choice_detector import detect_choice
+            import base64
+
+            choices = [
+                {"id": "clarif_copie", "title": "Ma copie", "value": "copie"},
+                {"id": "clarif_exercice", "title": "L'exercice", "value": "exercice"},
+            ]
+            choice = detect_choice(text, choices)
+
+            if choice and choice["value"] == "copie":
+                pending_b64 = conv_state.get("pending_image_b64", "")
+                user.conversation_state = {
+                    "awaiting_exercise_for_correction": True,
+                    "copie_b64": pending_b64,
+                }
+                await db.flush()
+                await whatsapp_sender.send_text(
+                    phone,
+                    "📸 Copie enregistrée !\n\n"
+                    "Envoie maintenant *l'exercice* (photo ou PDF) 📄"
+                )
+                return
+
+            elif choice and choice["value"] == "exercice":
+                pending_b64 = conv_state.get("pending_image_b64", "")
+                if pending_b64:
+                    exercise_text = await _transcribe_image_b64(pending_b64)
+                    if exercise_text:
+                        user.conversation_state = {
+                            "awaiting_copy_for_free_correction": True,
+                            "exercise_text": exercise_text,
+                        }
+                        await db.flush()
+                        await whatsapp_sender.send_text(
+                            phone,
+                            "📄 Exercice enregistré !\n\n"
+                            "Envoie maintenant *ta copie* 📸"
+                        )
+                        return
+
+            else:
+                await whatsapp_sender.send_buttons(
+                    phone,
+                    "C'est quoi cette image ?",
+                    [
+                        {"id": "clarif_copie", "title": "📝 Ma copie"},
+                        {"id": "clarif_exercice", "title": "📄 L'exercice"},
+                    ],
+                )
+                return
+
+        # Bloc 2 — Bot a la copie, attend l'exercice
+        if conv_state.get("awaiting_exercise_for_correction"):
+            if msg_type not in ("image", "document"):
+                await whatsapp_sender.send_text(
+                    phone,
+                    "📄 Envoie une *photo* ou un *PDF* de l'exercice."
+                )
+                return
+
+            await whatsapp_sender.send_text(phone, "⏳ J'analyse l'exercice et ta copie...")
+            exercise_text = await _extract_exercise_text(msg_type, image_data, message)
+
+            if not exercise_text:
+                await whatsapp_sender.send_text(
+                    phone,
+                    "❌ Je n'ai pas pu lire l'exercice. Envoie une photo plus nette."
+                )
+                return
+
+            import base64
+            copie_b64 = conv_state.get("copie_b64", "")
+            if not copie_b64:
+                await whatsapp_sender.send_text(phone, "❌ Ta copie a expiré. Renvoie-la.")
+                user.conversation_state = {}
+                await db.flush()
+                return
+
+            copie_bytes = base64.b64decode(copie_b64)
+            await _do_free_correction(phone, user, db, copie_bytes, exercise_text)
+            return
+
+        # Bloc 3 — Bot a l'exercice, attend la copie
+        if conv_state.get("awaiting_copy_for_free_correction"):
+            if msg_type != "image":
+                await whatsapp_sender.send_text(
+                    phone,
+                    "📸 Envoie une *photo* de ta copie."
+                )
+                return
+
+            await whatsapp_sender.send_text(phone, "⏳ J'analyse ta copie...")
+            image_url = await copy_analyzer_service.decrypt_media(image_data)
+            if not image_url:
+                await whatsapp_sender.send_text(phone, "❌ Impossible de lire l'image.")
+                return
+            image_bytes = await copy_analyzer_service.download_image(image_url)
+            if not image_bytes:
+                await whatsapp_sender.send_text(phone, "❌ Erreur téléchargement.")
+                return
+
+            exercise_text = conv_state.get("exercise_text", "")
+            await _do_free_correction(phone, user, db, image_bytes, exercise_text)
+            return
 
         # Détecte les commandes spéciales
         command = detect_command(text)

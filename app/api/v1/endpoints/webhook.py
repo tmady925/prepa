@@ -424,6 +424,7 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession, msg_t
         await _ask_exam(phone, user, db)
 
     elif step == "exam":
+        print(f"DEBUG exam step: text='{text}' phone={phone}")
         # Format: "exam_bac_senegal" ou "exam_bfem" etc.
         exam_code = text.replace("exam_", "") if text.startswith("exam_") else text
 

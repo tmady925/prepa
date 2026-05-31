@@ -63,41 +63,61 @@ class CopyAnalyzerService:
         try:
             image_b64 = base64.b64encode(image_bytes).decode()
 
-            prompt = f"""Tu es un professeur expert du programme BAC Sénégal qui corrige une copie d'élève.
+            prompt = f"""Tu es un correcteur expert du programme BAC Sénégal.
 
 Élève : {student_name}
 Matière : {matiere}
 Chapitre : {chapitre or 'général'}
 
-ÉNONCÉ DE L'EXERCICE :
+SUJET DE L'EXERCICE :
 ---
-{exercise_text[:2000]}
+{exercise_text[:3000]}
 ---
 
 CORRECTION OFFICIELLE :
 ---
-{correction_text[:2000] if correction_text else "Non disponible"}
+{correction_text[:3000] if correction_text else "Non disponible — évalue selon tes connaissances du programme sénégalais BAC."}
 ---
 
-INSTRUCTIONS :
-1. Lis attentivement la copie manuscrite de l'élève dans l'image
-2. Compare chaque réponse avec la correction officielle
-3. Identifie les erreurs précises (calcul, méthode, unités, raisonnement)
-4. Donne un score RÉEL basé sur ce que tu vois dans la copie
+INSTRUCTIONS DE CORRECTION :
+1. Identifie TOUTES les questions du sujet avec leur barème (points attribués)
+2. Pour CHAQUE question, cherche la réponse de l'élève dans l'image de la copie
+3. Évalue chaque réponse : correcte / partielle / incorrecte / non traitée
+4. Calcule le score RÉEL basé sur les points obtenus vs points totaux
 
-Retourne UNIQUEMENT ce JSON :
+RÈGLES STRICTES :
+- Si une question n'est pas traitée → 0 point pour cette question
+- Si la réponse est partiellement correcte → attribue les points partiels
+- Si le barème n'est pas mentionné dans le sujet → répartis 20 points équitablement entre les questions
+- Le score final = (points obtenus / points totaux) × 100
+- JAMAIS donner un score > 0 si la copie est vide ou illisible
+
+Retourne UNIQUEMENT ce JSON valide :
 {{
-  "score": 0-100,
-  "mention": "Excellent|Très bien|Bien|Assez bien|Insuffisant|À revoir",
-  "points_forts": ["ce que l'élève a bien fait"],
-  "erreurs": ["erreur précise 1", "erreur précise 2"],
-  "methodologie": "commentaire sur la méthode utilisée",
-  "conseils": ["conseil concret 1", "conseil concret 2"],
-  "notions_a_revoir": ["notion1", "notion2"],
-  "encouragement": "message personnalisé pour {student_name}"
+  "questions": [
+    {{
+      "numero": "1",
+      "enonce_court": "résumé de la question en 10 mots max",
+      "bareme": 4,
+      "points_obtenus": 2,
+      "statut": "partiel",
+      "commentaire": "démarche correcte mais résultat faux"
+    }}
+  ],
+  "score": 45,
+  "score_detail": "9/20 points",
+  "mention": "Insuffisant",
+  "points_forts": ["ce que l'élève maîtrise"],
+  "erreurs": ["erreur précise 1"],
+  "methodologie": "commentaire sur la méthode globale",
+  "conseils": ["conseil concret 1"],
+  "notions_a_revoir": ["notion1"],
+  "encouragement": "message personnalisé motivant pour {student_name}",
+  "copie_lisible": true
 }}
 
-IMPORTANT : Si la copie est vide ou illisible, score = 0 et dis-le clairement."""
+statut par question : "correct" | "partiel" | "incorrect" | "non_traite"
+mention globale : "Excellent" (≥85) | "Très bien" (≥75) | "Bien" (≥65) | "Assez bien" (≥55) | "Passable" (≥45) | "Insuffisant" (<45)"""
 
             async with httpx.AsyncClient(timeout=60.0) as client:
                 response = await client.post(
@@ -141,35 +161,71 @@ IMPORTANT : Si la copie est vide ou illisible, score = 0 et dis-le clairement.""
         """Formate le compte rendu pour WhatsApp."""
         score = analysis.get("score", 0)
         mention = analysis.get("mention", "")
+        score_detail = analysis.get("score_detail", f"{score}/100")
         points_forts = analysis.get("points_forts", [])
         erreurs = analysis.get("erreurs", [])
         conseils = analysis.get("conseils", [])
         notions = analysis.get("notions_a_revoir", [])
         encouragement = analysis.get("encouragement", "Continue ! 💪")
         methodologie = analysis.get("methodologie", "")
+        questions = analysis.get("questions", [])
+        copie_lisible = analysis.get("copie_lisible", True)
+
+        if not copie_lisible:
+            return (
+                f"📸 *{student_name}*, ta copie est difficile à lire.\n\n"
+                f"Prends une photo plus nette et renvoie-la. 📷"
+            )
 
         # Emoji score
-        if score >= 80:
+        if score >= 85:
+            score_emoji = "🏆"
+        elif score >= 75:
             score_emoji = "🟢"
-        elif score >= 60:
+        elif score >= 55:
             score_emoji = "🟡"
-        elif score >= 40:
+        elif score >= 45:
             score_emoji = "🟠"
         else:
             score_emoji = "🔴"
 
         msg = f"{score_emoji} *Correction de ta copie, {student_name}*\n\n"
-        msg += f"*Score : {score}/100 — {mention}*\n\n"
+        msg += f"*Score : {score}/100 — {score_detail} — {mention}*\n\n"
+
+        # Détail par question
+        if questions:
+            msg += "*📋 Détail par question :*\n"
+            for q in questions:
+                statut = q.get("statut", "")
+                pts_obtenus = q.get("points_obtenus", 0)
+                bareme = q.get("bareme", 0)
+                enonce = q.get("enonce_court", f"Q{q.get('numero', '?')}")
+                commentaire = q.get("commentaire", "")
+
+                if statut == "correct":
+                    icon = "✅"
+                elif statut == "partiel":
+                    icon = "⚠️"
+                elif statut == "non_traite":
+                    icon = "⬜"
+                else:
+                    icon = "❌"
+
+                msg += f"{icon} Q{q.get('numero', '?')} — {pts_obtenus}/{bareme}pt"
+                if commentaire:
+                    msg += f" _{commentaire}_"
+                msg += "\n"
+            msg += "\n"
 
         if points_forts:
             msg += "*✅ Points forts :*\n"
-            for p in points_forts[:3]:
+            for p in points_forts[:2]:
                 msg += f"- {p}\n"
             msg += "\n"
 
         if erreurs:
-            msg += "*❌ Points à corriger :*\n"
-            for e in erreurs[:3]:
+            msg += "*❌ À corriger :*\n"
+            for e in erreurs[:2]:
                 msg += f"- {e}\n"
             msg += "\n"
 
@@ -183,7 +239,7 @@ IMPORTANT : Si la copie est vide ou illisible, score = 0 et dis-le clairement.""
             msg += "\n"
 
         if notions:
-            msg += f"*📚 Notions à revoir :* {', '.join(notions[:3])}\n\n"
+            msg += f"*📚 À revoir :* {', '.join(notions[:3])}\n\n"
 
         msg += encouragement
 

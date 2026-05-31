@@ -404,6 +404,65 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession, msg_t
             )
             return
 
+        # Traitement copie simulation (priorité sur copie exercice)
+        if msg_type == "image" and image_data:
+            conv_state = user.conversation_state or {}
+            if conv_state.get("awaiting_simulation_copy"):
+                from app.services.simulation_service import simulation_service
+                from app.services.copy_analyzer_service import copy_analyzer_service
+                import uuid as uuid_module
+
+                sim_id = conv_state.get("simulation_id")
+                heure_fin_str = conv_state.get("heure_fin", "")
+                simulation_titre = conv_state.get("simulation_titre", "")
+
+                await whatsapp_sender.send_text(phone, "📸 Copie reçue ! Analyse en cours... ⏳")
+
+                # Décrypte l'image
+                image_url = await copy_analyzer_service.decrypt_media(image_data)
+                if not image_url:
+                    await whatsapp_sender.send_text(phone, "❌ Impossible de lire l'image. Réessaie.")
+                    return
+
+                image_bytes = await copy_analyzer_service.download_image(image_url)
+                if not image_bytes:
+                    await whatsapp_sender.send_text(phone, "❌ Erreur téléchargement. Réessaie.")
+                    return
+
+                # Soumet la copie
+                result = await simulation_service.soumettre_copie(
+                    db=db,
+                    simulation_id=uuid_module.UUID(sim_id),
+                    user_id=user.id,
+                    image_bytes=image_bytes,
+                )
+
+                if result.get("success"):
+                    await whatsapp_sender.send_text(
+                        phone,
+                        f"✅ Ta copie pour *{simulation_titre}* a été soumise !\n\n"
+                        f"Les résultats seront envoyés après la correction de toutes les copies. 📊\n\n"
+                        f"_Tu seras notifié(e) dès que ton score est prêt._"
+                    )
+                    # Réinitialise l'état
+                    user.conversation_state = {}
+                    await db.flush()
+                else:
+                    error = result.get("error", "Erreur inconnue")
+                    if "Délai dépassé" in error:
+                        await whatsapp_sender.send_text(
+                            phone,
+                            f"⏰ Désolé, le délai de soumission est dépassé.\n\n"
+                            f"La correction sera quand même envoyée à tous les participants. 📄"
+                        )
+                        user.conversation_state = {}
+                        await db.flush()
+                    else:
+                        await whatsapp_sender.send_text(phone, f"❌ {error}")
+
+                print(f"Simulation copie soumise -> {phone}: sim={sim_id}")
+                return
+
         # Traitement copie manuscrite
         if msg_type == "image" and image_data:
             conv_state = user.conversation_state or {}

@@ -389,7 +389,7 @@ async def process_message(message: dict, db: AsyncSession):
             )
             return
 
-    await handle_onboarding(phone, text, user, db, msg_type=msg_type, image_data=image_data)
+    await handle_onboarding(phone, text, user, db, msg_type=msg_type, image_data=image_data, message=message)
     await user_service.increment_message_count(db, user)
 
 
@@ -437,7 +437,7 @@ async def _ask_exam(phone: str, user, db: AsyncSession):
         )
 
 
-async def handle_onboarding(phone: str, text: str, user, db: AsyncSession, msg_type: str = "text", image_data: dict = None):
+async def handle_onboarding(phone: str, text: str, user, db: AsyncSession, msg_type: str = "text", image_data: dict = None, message: dict = None):
     step = user.onboarding_step
 
     if step == "start":

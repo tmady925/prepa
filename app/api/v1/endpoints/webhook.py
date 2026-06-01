@@ -953,28 +953,83 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession, msg_t
                     return
 
                 else:
-                    # Ambiguïté — demande clarification
-                    if msg_type == "image":
-                        image_url = await copy_analyzer_service.decrypt_media(image_data)
-                        if image_url:
-                            image_bytes = await copy_analyzer_service.download_image(image_url)
-                            if image_bytes:
-                                import base64
-                                user.conversation_state = {
-                                    "awaiting_clarification": True,
-                                    "pending_image_b64": base64.b64encode(image_bytes).decode(),
-                                    "pending_type": "image",
-                                }
-                                await db.flush()
+                    # Analyse l'image pour déterminer si c'est un exercice ou une copie
+                    await whatsapp_sender.send_text(phone, "⏳ J'analyse ton image...")
 
-                    await whatsapp_sender.send_buttons(
-                        phone,
-                        "📸 J'ai reçu ton image !\n\nC'est quoi ?",
-                        [
-                            {"id": "clarif_copie", "title": "📝 Ma copie"},
-                            {"id": "clarif_exercice", "title": "📄 L'exercice"},
-                        ],
-                    )
+                    image_url = await copy_analyzer_service.decrypt_media(image_data)
+                    if not image_url:
+                        await whatsapp_sender.send_text(phone, "❌ Impossible de lire l'image.")
+                        return
+                    image_bytes = await copy_analyzer_service.download_image(image_url)
+                    if not image_bytes:
+                        await whatsapp_sender.send_text(phone, "❌ Erreur téléchargement.")
+                        return
+
+                    import base64, httpx
+                    image_b64 = base64.b64encode(image_bytes).decode()
+
+                    # Mistral Vision détecte le type d'image
+                    image_type = "copie"  # défaut
+                    try:
+                        async with httpx.AsyncClient(timeout=20.0) as client:
+                            resp = await client.post(
+                                "https://api.mistral.ai/v1/chat/completions",
+                                headers={"Authorization": f"Bearer {settings.mistral_api_key}"},
+                                json={
+                                    "model": "pixtral-12b-2409",
+                                    "messages": [{
+                                        "role": "user",
+                                        "content": [
+                                            {"type": "image_url", "image_url": f"data:image/jpeg;base64,{image_b64}"},
+                                            {"type": "text", "text": "Cette image est-elle : (A) un énoncé d'exercice/sujet scolaire avec des questions, ou (B) une copie d'élève avec des réponses manuscrites ? Réponds uniquement par A ou B."}
+                                        ]
+                                    }],
+                                    "temperature": 0.1,
+                                    "max_tokens": 5,
+                                }
+                            )
+                            data = resp.json()
+                            if "choices" in data:
+                                answer = data["choices"][0]["message"]["content"].strip().upper()
+                                if "A" in answer:
+                                    image_type = "exercice"
+                    except Exception as e:
+                        print(f"Erreur détection type image: {e}")
+
+                    if image_type == "exercice":
+                        # C'est un exercice → transcrit et attend la copie
+                        exercise_text = await _transcribe_image_b64(image_b64)
+                        if not exercise_text:
+                            await whatsapp_sender.send_text(
+                                phone,
+                                "❌ Je n'ai pas pu lire l'exercice. Envoie une photo plus nette."
+                            )
+                            return
+                        user.conversation_state = {
+                            "awaiting_copy_for_free_correction": True,
+                            "exercise_text": exercise_text,
+                        }
+                        await db.flush()
+                        await whatsapp_sender.send_text(
+                            phone,
+                            "📄 Exercice reçu ✅\n\n"
+                            "Maintenant envoie-moi *ta copie* 📸\n"
+                            "_Photo claire de ta feuille de réponse_"
+                        )
+                    else:
+                        # C'est une copie → stocke et attend l'exercice
+                        user.conversation_state = {
+                            "awaiting_exercise_for_correction": True,
+                            "copie_b64": image_b64,
+                        }
+                        await db.flush()
+                        await whatsapp_sender.send_text(
+                            phone,
+                            "📸 Copie reçue ✅\n\n"
+                            "Maintenant envoie-moi *l'exercice* 📄\n\n"
+                            "- Une photo de l'énoncé 📸\n"
+                            "- Ou un PDF 📎"
+                        )
                     return
 
         # Élève a un exercice en cours (awaiting_copy)
@@ -1012,59 +1067,6 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession, msg_t
 
         # ── Correction libre ─────────────────────────────────────────
         conv_state = user.conversation_state or {}
-
-        # Bloc 1 — Clarification en attente (texte reçu)
-        if conv_state.get("awaiting_clarification") and msg_type == "text":
-            from app.services.choice_detector import detect_choice
-            import base64
-
-            choices = [
-                {"id": "clarif_copie", "title": "Ma copie", "value": "copie"},
-                {"id": "clarif_exercice", "title": "L'exercice", "value": "exercice"},
-            ]
-            choice = detect_choice(text, choices)
-
-            if choice and choice["value"] == "copie":
-                pending_b64 = conv_state.get("pending_image_b64", "")
-                user.conversation_state = {
-                    "awaiting_exercise_for_correction": True,
-                    "copie_b64": pending_b64,
-                }
-                await db.flush()
-                await whatsapp_sender.send_text(
-                    phone,
-                    "📸 Copie enregistrée !\n\n"
-                    "Envoie maintenant *l'exercice* (photo ou PDF) 📄"
-                )
-                return
-
-            elif choice and choice["value"] == "exercice":
-                pending_b64 = conv_state.get("pending_image_b64", "")
-                if pending_b64:
-                    exercise_text = await _transcribe_image_b64(pending_b64)
-                    if exercise_text:
-                        user.conversation_state = {
-                            "awaiting_copy_for_free_correction": True,
-                            "exercise_text": exercise_text,
-                        }
-                        await db.flush()
-                        await whatsapp_sender.send_text(
-                            phone,
-                            "📄 Exercice enregistré !\n\n"
-                            "Envoie maintenant *ta copie* 📸"
-                        )
-                        return
-
-            else:
-                await whatsapp_sender.send_buttons(
-                    phone,
-                    "C'est quoi cette image ?",
-                    [
-                        {"id": "clarif_copie", "title": "📝 Ma copie"},
-                        {"id": "clarif_exercice", "title": "📄 L'exercice"},
-                    ],
-                )
-                return
 
         # Bloc 2 — Bot a la copie, attend l'exercice
         if conv_state.get("awaiting_exercise_for_correction"):

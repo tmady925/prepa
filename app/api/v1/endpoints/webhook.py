@@ -14,6 +14,7 @@ from app.services.media_processor import media_processor
 from app.services.storage_service import storage_service
 from app.services.rag.detector import subject_detector
 from app.services.rag.mastery_service import mastery_service
+from app.services.copy_analyzer_service import copy_analyzer_service
 from app.db.redis import get_redis
 from app.models.user import User as UserModel
 
@@ -140,7 +141,6 @@ def detect_command(text: str) -> str | None:
 
 async def _extract_exercise_text(msg_type: str, image_data: dict, message: dict) -> str:
     """Extrait le texte d'un exercice depuis une image ou un PDF."""
-    from app.services.copy_analyzer_service import copy_analyzer_service
     import base64
     text = ""
 
@@ -214,7 +214,6 @@ async def _do_free_correction(
     phone: str, user, db, copie_bytes: bytes, exercise_text: str
 ):
     """Lance la correction libre et envoie le feedback."""
-    from app.services.copy_analyzer_service import copy_analyzer_service
     from app.services.whatsapp.sender import whatsapp_sender
 
     analysis = await copy_analyzer_service.analyze_copy(
@@ -710,7 +709,6 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession, msg_t
             conv_state = user.conversation_state or {}
             if conv_state.get("awaiting_simulation_copy"):
                 from app.services.simulation_service import simulation_service
-                from app.services.copy_analyzer_service import copy_analyzer_service
                 import uuid as uuid_module
 
                 sim_id = conv_state.get("simulation_id")
@@ -768,7 +766,6 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession, msg_t
         if msg_type == "image" and image_data:
             conv_state = user.conversation_state or {}
             if conv_state.get("awaiting_copy"):
-                from app.services.copy_analyzer_service import copy_analyzer_service
                 from app.models.exercise import Exercise
                 from sqlalchemy import select
                 import uuid as uuid_module

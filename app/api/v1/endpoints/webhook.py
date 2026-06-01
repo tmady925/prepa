@@ -971,10 +971,12 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession, msg_t
                     # Mistral Vision détecte le type d'image
                     image_type = "copie"  # défaut
                     try:
+                        from app.core.settings import get_settings as _get_settings
+                        _settings = _get_settings()
                         async with httpx.AsyncClient(timeout=20.0) as client:
                             resp = await client.post(
                                 "https://api.mistral.ai/v1/chat/completions",
-                                headers={"Authorization": f"Bearer {settings.mistral_api_key}"},
+                                headers={"Authorization": f"Bearer {_settings.mistral_api_key}"},
                                 json={
                                     "model": "pixtral-12b-2409",
                                     "messages": [{

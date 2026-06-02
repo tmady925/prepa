@@ -126,6 +126,7 @@ class Exercise(Base):
     title: Mapped[str | None] = mapped_column(Text)
     exam_type: Mapped[str | None] = mapped_column(String(50), index=True)
     serie: Mapped[str | None] = mapped_column(String(20), index=True)
+    series: Mapped[list | None] = mapped_column(JSONB, default=list)
     matiere: Mapped[str | None] = mapped_column(String(50), index=True)
     chapitre: Mapped[str | None] = mapped_column(String(100), index=True)
     niveau: Mapped[int] = mapped_column(Integer, default=2)

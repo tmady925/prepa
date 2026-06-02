@@ -1240,17 +1240,10 @@ tr:hover td { background: rgba(255,255,255,0.02); }
         </select>
       </div>
       <div class="form-group">
-        <label class="form-label">Série</label>
-        <select class="form-select" id="ex-serie">
-          <option value="">— Série —</option>
-          <option value="S1">S1</option>
-          <option value="S2">S2</option>
-          <option value="S3">S3</option>
-          <option value="L1">L1</option>
-          <option value="L2">L2</option>
-          <option value="T">T</option>
-          <option value="STEG">STEG</option>
-        </select>
+        <label class="form-label">Séries</label>
+        <div id="ex-series-checks" style="display:flex;flex-wrap:wrap;gap:8px;padding:10px;background:var(--surface2);border-radius:var(--radius-sm)">
+          Sélectionne d'abord un examen
+        </div>
       </div>
     </div>
 
@@ -2126,7 +2119,9 @@ async function uploadExercise() {
         filename_corr: corrFile?.name || 'correction.pdf',
         title: document.getElementById('ex-title').value || '',
         exam_type: document.getElementById('ex-exam').value,
-        serie: document.getElementById('ex-serie').value || null,
+        series: Array.from(
+          document.querySelectorAll('#ex-series-checks input:checked')
+        ).map(el => el.value),
         matiere,
         chapitre: document.getElementById('ex-chapitre').value || null,
         annee: document.getElementById('ex-annee').value || null,
@@ -2723,17 +2718,21 @@ async function deleteConcours(id, name) {
   } catch(e) { showToast('Erreur', 'error'); }
 }
 
-// Série dynamique selon l'examen choisi dans le modal upload exercice
+// Séries dynamiques selon l'examen choisi dans le modal upload exercice
 document.getElementById('ex-exam')?.addEventListener('change', async function() {
   const examCode = this.value;
   const exam = allExams.find(e => e.code === examCode);
   if (!exam) return;
   try {
     const series = await api('/admin/series?exam_id=' + exam.id);
-    const el = document.getElementById('ex-serie');
-    if (!el) return;
-    el.innerHTML = '<option value="">— Série —</option>' +
-      series.map(s => `<option value="${s.code}">${s.code} — ${s.name}</option>`).join('');
+    const container = document.getElementById('ex-series-checks');
+    container.innerHTML = series.map(s => `
+      <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer;
+        background:var(--surface3);padding:5px 10px;border-radius:20px">
+        <input type="checkbox" value="${s.code}" style="cursor:pointer"/> ${s.code}
+        <span style="color:var(--text3);font-size:10px">${s.description || ''}</span>
+      </label>
+    `).join('');
   } catch(e) {}
 });
 

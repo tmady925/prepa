@@ -454,7 +454,8 @@ async def upload_exercise(
     filename_corr = data.get("filename_corr", "correction.pdf")
     matiere = data.get("matiere")
     exam_type = data.get("exam_type", "bac_senegal")
-    serie = data.get("serie")
+    series_list = data.get("series", [])
+    serie = series_list[0] if series_list else data.get("serie")  # garde compatibilité
     chapitre = data.get("chapitre")
     annee = data.get("annee")
     tags = data.get("tags", [])
@@ -578,6 +579,7 @@ niveau 3 = difficile (demande réflexion avancée, type concours)"""
         title=title or base_name,
         exam_type=exam_type,
         serie=serie,
+        series=series_list,
         matiere=matiere,
         chapitre=chapitre,
         niveau=niveau,

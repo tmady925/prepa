@@ -15,6 +15,7 @@ from app.services.storage_service import storage_service
 from app.services.rag.detector import subject_detector
 from app.services.rag.mastery_service import mastery_service
 from app.services.copy_analyzer_service import copy_analyzer_service
+from app.services.config_service import config_service
 from app.db.redis import get_redis
 from app.models.user import User as UserModel
 
@@ -1461,6 +1462,20 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession, msg_t
                 f"😔 Je n'ai pas encore d'exercice disponible pour *{detected_matiere}*"
                 + (f" — *{detected_chapitre}*" if detected_chapitre else "")
                 + ".\n\nPose-moi une question de cours en attendant ! 📚"
+            )
+            return
+
+        # ── Mode fascicule (temporaire) ───────────────────────────
+        fascicule_mode = await config_service.get_bool("fascicule_mode", default=True)
+        if fascicule_mode:
+            await whatsapp_sender.send_text(
+                phone,
+                f"📚 Je suis ton coach de révision par exercices !\n\n"
+                f"Pour l'instant, je peux :\n"
+                f"→ Te donner un exercice à résoudre 📝\n"
+                f"→ Corriger ta copie 📸\n"
+                f"→ Te préparer pour une simulation d'examen 🎓\n\n"
+                f"Dis-moi quelle matière tu veux travailler !"
             )
             return
 

@@ -1133,6 +1133,28 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession, msg_t
             await user_service.increment_message_count(db, user)
             return
 
+        # ── Mode fascicule (temporaire) — AVANT tout traitement ──────
+        fascicule_mode = await config_service.get_bool("fascicule_mode", default=True)
+
+        # Vérifie d'abord si c'est une demande d'exercice (détection rapide par keywords)
+        exercise_keywords = [
+            "exercice", "exercices", "exo", "entraîner", "entrainer",
+            "donne moi", "je veux", "donne un", "série", "annale",
+        ]
+        is_exercise_request = any(kw in text.lower() for kw in exercise_keywords)
+
+        if fascicule_mode and not is_exercise_request:
+            await whatsapp_sender.send_text(
+                phone,
+                f"📚 Je suis ton coach de révision par exercices !\n\n"
+                f"Pour l'instant, je peux :\n"
+                f"→ Te donner un exercice à résoudre 📝\n"
+                f"→ Corriger ta copie 📸\n"
+                f"→ Te préparer pour une simulation d'examen 🎓\n\n"
+                f"Dis-moi quelle matière tu veux travailler !"
+            )
+            return
+
         # Sauvegarde le message entrant
         await message_repo.save(
             db=db,
@@ -1439,20 +1461,6 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession, msg_t
                 f"😔 Je n'ai pas encore d'exercice disponible pour *{detected_matiere}*"
                 + (f" — *{detected_chapitre}*" if detected_chapitre else "")
                 + ".\n\nPose-moi une question de cours en attendant ! 📚"
-            )
-            return
-
-        # ── Mode fascicule (temporaire) ───────────────────────────
-        fascicule_mode = await config_service.get_bool("fascicule_mode", default=True)
-        if fascicule_mode:
-            await whatsapp_sender.send_text(
-                phone,
-                f"📚 Je suis ton coach de révision par exercices !\n\n"
-                f"Pour l'instant, je peux :\n"
-                f"→ Te donner un exercice à résoudre 📝\n"
-                f"→ Corriger ta copie 📸\n"
-                f"→ Te préparer pour une simulation d'examen 🎓\n\n"
-                f"Dis-moi quelle matière tu veux travailler !"
             )
             return
 

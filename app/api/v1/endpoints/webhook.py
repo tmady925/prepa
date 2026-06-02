@@ -576,6 +576,8 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession, msg_t
                 for s in series_list
             ]
             series_list_config = messages.build_series_list(series_data, exam.name)
+            user.onboarding_step = "series"
+            await db.flush()
             await whatsapp_sender.send_list(
                 phone,
                 messages.ask_series_bac(user.name),

@@ -1135,7 +1135,7 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession, msg_t
             return
 
         # ── Mode fascicule (temporaire) — AVANT tout traitement ──────
-        fascicule_mode = await config_service.get_bool("fascicule_mode", default=True)
+        fascicule_mode = await config_service.get_bool("fascicule_mode")
 
         # Vérifie d'abord si c'est une demande d'exercice (détection rapide par keywords)
         exercise_keywords = [
@@ -1466,7 +1466,7 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession, msg_t
             return
 
         # ── Mode fascicule (temporaire) ───────────────────────────
-        fascicule_mode = await config_service.get_bool("fascicule_mode", default=True)
+        fascicule_mode = await config_service.get_bool("fascicule_mode")
         if fascicule_mode:
             await whatsapp_sender.send_text(
                 phone,

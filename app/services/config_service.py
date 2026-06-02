@@ -37,6 +37,9 @@ DEFAULTS = {
     # Engagement
     "streak_reset_hours": 36,
     "daily_reset_hour": 0,
+
+    # Mode
+    "fascicule_mode": True,
 }
 
 

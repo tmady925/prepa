@@ -554,6 +554,7 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession, msg_t
         ]
 
         choice = detect_choice(text, choices)
+        print(f"DEBUG exam choice: text='{text}' choice={choice['value'] if choice else None}")
 
         if not choice:
             await _ask_exam(phone, user, db)

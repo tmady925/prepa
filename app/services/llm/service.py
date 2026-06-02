@@ -130,6 +130,8 @@ def build_system_prompt(user) -> str:
         level=level,
         engagement_score=score,
         streak_days=getattr(user, 'streak_days', 0) or 0,
+        rag_context="",   # sera rempli dans build_messages
+        question="",      # sera rempli dans build_messages
     )
 
 

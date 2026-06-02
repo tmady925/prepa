@@ -32,7 +32,10 @@ class MistralProvider:
         async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.post(
                 self.BASE_URL,
-                headers={"Authorization": f"Bearer {settings.mistral_api_key}"},
+                headers={
+                    "Authorization": f"Bearer {settings.mistral_api_key}",
+                    "Content-Type": "application/json",
+                },
                 json={
                     "model": self.MODEL,
                     "messages": messages,
@@ -40,10 +43,16 @@ class MistralProvider:
                     "temperature": 0.7,
                 },
             )
+
+            # 🚨 AJOUT IMPORTANT
+            if response.status_code != 200:
+                raise Exception(
+                    f"Mistral API error {response.status_code}: {response.text}"
+                )
+
             data = response.json()
+
             return data["choices"][0]["message"]["content"]
-
-
 class OpenAIProvider:
     BASE_URL = "https://api.openai.com/v1/chat/completions"
     MODEL = "gpt-4o-mini"

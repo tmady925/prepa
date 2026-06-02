@@ -1442,6 +1442,19 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession, msg_t
             )
             return
 
+        # ── Mode fascicule (temporaire) ───────────────────────────
+        fascicule_mode = await config_service.get_bool("fascicule_mode", default=True)
+        if fascicule_mode:
+            await whatsapp_sender.send_text(
+                phone,
+                "📚 Pour le moment je fonctionne en mode *fascicule de révision*.\n\n"
+                "Tu peux :\n"
+                "- Demander un exercice 📝\n"
+                "- Envoyer ta copie pour correction 📸\n\n"
+                "_Exemple : \"Donne moi un exercice de maths\"_"
+            )
+            return
+
         # ── Mode normal — appel LLM ───────────────────────────────────
         response = await call_llm(
             user_message=text,

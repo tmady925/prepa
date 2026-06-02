@@ -72,7 +72,7 @@ class WhatsAppSender:
         }
         result = await self._send(payload)
 
-        if not result.get("success", True) or result.get("error"):
+        if not result.get("success") or result.get("error"):
             lines = [cleaned, ""]
             idx = 1
             for section in sections:

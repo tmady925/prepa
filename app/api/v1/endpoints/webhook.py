@@ -1447,11 +1447,12 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession, msg_t
         if fascicule_mode:
             await whatsapp_sender.send_text(
                 phone,
-                "📚 Pour le moment je fonctionne en mode *fascicule de révision*.\n\n"
-                "Tu peux :\n"
-                "- Demander un exercice 📝\n"
-                "- Envoyer ta copie pour correction 📸\n\n"
-                "_Exemple : \"Donne moi un exercice de maths\"_"
+                f"📚 Je suis ton coach de révision par exercices !\n\n"
+                f"Pour l'instant, je peux :\n"
+                f"→ Te donner un exercice à résoudre 📝\n"
+                f"→ Corriger ta copie 📸\n"
+                f"→ Te préparer pour une simulation d'examen 🎓\n\n"
+                f"Dis-moi quelle matière tu veux travailler !"
             )
             return
 

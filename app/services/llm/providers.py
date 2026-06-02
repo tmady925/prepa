@@ -26,7 +26,7 @@ class GroqProvider:
 
 class MistralProvider:
     BASE_URL = "https://api.mistral.ai/v1/chat/completions"
-    MODEL = "mistral-small-latest"
+    MODEL = "mistral-large-latest"
 
     async def complete(self, messages: list, max_tokens: int = 300) -> str:
         async with httpx.AsyncClient(timeout=30.0) as client:

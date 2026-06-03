@@ -1,7 +1,7 @@
 import json
 from datetime import datetime
 from fastapi import APIRouter, Request, Depends
-from sqlalchemy import select as sa_select
+from sqlalchemy import select as sa_select, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.settings import get_settings
 from app.db.database import get_db
@@ -1350,7 +1350,12 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession, msg_t
                 if user.exam_type:
                     q = q.where(Exercise.exam_type == user.exam_type)
                 if user.series:
-                    q = q.where(Exercise.serie == user.series)
+                    q = q.where(
+                        or_(
+                            Exercise.serie == user.series,
+                            Exercise.series.contains([user.series]),
+                        )
+                    )
                 if detected_chapitre:
                     q = q.where(Exercise.chapitre == detected_chapitre)
                 return q.order_by(func.random()).limit(1)

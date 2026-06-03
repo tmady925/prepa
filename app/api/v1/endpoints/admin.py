@@ -324,7 +324,8 @@ async def upload_exercise_document(
     file_b64 = data.get("file_b64")
     filename = data.get("filename", "document.pdf")
     exam_type = data.get("exam_type")
-    serie = data.get("serie")
+    series_list = data.get("series", [])
+    serie = series_list[0] if series_list else data.get("serie")
     matiere = data.get("matiere")
 
     if not file_b64:
@@ -379,11 +380,14 @@ async def upload_exercise_document(
         )
 
         # Sauvegarde en DB
+        effective_serie = analysis.get("serie") or serie
+        effective_series = series_list if series_list else ([effective_serie] if effective_serie else [])
         exercise = Exercise(
             source_filename=filename,
             title=ex_data.get("title"),
             exam_type=analysis.get("exam_type") or exam_type,
-            serie=analysis.get("serie") or serie,
+            serie=effective_serie,
+            series=effective_series,
             matiere=analysis.get("matiere") or matiere,
             chapitre=ex_data.get("chapitre"),
             niveau=ex_data.get("niveau", 2),

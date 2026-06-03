@@ -612,6 +612,17 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession, msg_t
             )
             all_series = series_result.scalars().all()
 
+        def _sort_series(s):
+            if s.code in ("S1", "S2", "S3", "C", "D"):
+                return (0, s.code)
+            elif s.code in ("L1", "L2", "A"):
+                return (1, s.code)
+            elif s.code in ("T", "STEG", "G"):
+                return (2, s.code)
+            return (3, s.code)
+
+        all_series_sorted = sorted(all_series, key=_sort_series)
+
         choices = [
             {
                 "id": f"serie_{s.code.lower()}",
@@ -619,7 +630,7 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession, msg_t
                 "value": s.code,
                 "obj": s,
             }
-            for s in all_series
+            for s in all_series_sorted
         ]
 
         choice = detect_choice(text, choices)

@@ -370,7 +370,10 @@ async def upload_exercise_document(
     from app.models.exercise import Exercise
     import base64
 
-    data = await request.json()
+    try:
+        data = await request.json()
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Corps de requête invalide: {e}")
     file_b64 = data.get("file_b64")
     filename = data.get("filename", "document.pdf")
     exam_type = data.get("exam_type")
@@ -420,19 +423,24 @@ async def upload_exercise_document(
     results = []
     saved_exercises = []
 
+    from pathlib import Path as _P
     for ex_data in exercises_detected:
         print(f"\n  Traitement exercice {ex_data.get('number')}...")
 
         # Extrait et génère les PDFs
-        result = await exercise_extractor_service.process_exercise(
-            file_bytes=file_bytes,
-            exercise_data=ex_data,
-            source_filename=filename,
-            matiere=analysis.get("matiere") or matiere or "autre",
-            exam_type=analysis.get("exam_type") or exam_type or "bac_senegal",
-            serie=analysis.get("serie") or serie,
-            annee=analysis.get("annee"),
-        )
+        try:
+            result = await exercise_extractor_service.process_exercise(
+                file_bytes=file_bytes,
+                exercise_data=ex_data,
+                source_filename=filename,
+                matiere=analysis.get("matiere") or matiere or "autre",
+                exam_type=analysis.get("exam_type") or exam_type or "bac_senegal",
+                serie=analysis.get("serie") or serie,
+                annee=analysis.get("annee"),
+            )
+        except Exception as e:
+            print(f"  ⚠️ process_exercise échoué pour exercice {ex_data.get('number')}: {e}")
+            result = {"exercise_path": None, "correction_path": None, "correction_generated": False, "error": str(e)}
 
         # Sauvegarde en DB
         effective_serie = analysis.get("serie") or serie
@@ -442,7 +450,6 @@ async def upload_exercise_document(
             effective_matiere = matiere or "autre"
 
         ex_path_str = result.get("exercise_path")
-        from pathlib import Path as _P
         ex_exists = bool(ex_path_str and _P(ex_path_str).exists())
 
         exercise = Exercise(
@@ -470,7 +477,11 @@ async def upload_exercise_document(
         saved_exercises.append(exercise)
         results.append(result)
 
-    await db.commit()
+    try:
+        await db.commit()
+    except Exception as e:
+        await db.rollback()
+        raise HTTPException(status_code=500, detail=f"Erreur base de données: {e}")
 
     print(f"\n✅ {len(saved_exercises)} exercices traités et sauvegardés")
 
@@ -484,11 +495,11 @@ async def upload_exercise_document(
         "annee": analysis.get("annee"),
         "exercises": [
             {
-                "number": r["exercise_number"],
-                "title": r["title"],
-                "exercise_path": r["exercise_path"],
-                "correction_path": r["correction_path"],
-                "correction_generated": r["correction_generated"],
+                "number": r.get("exercise_number"),
+                "title": r.get("title"),
+                "exercise_path": r.get("exercise_path"),
+                "correction_path": r.get("correction_path"),
+                "correction_generated": r.get("correction_generated", False),
                 "error": r.get("error"),
             }
             for r in results
@@ -514,7 +525,11 @@ async def upload_exercise(
     from pathlib import Path
     from app.models.exercise import Exercise
 
-    data = await request.json()
+    try:
+        data = await request.json()
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Corps de requête invalide: {e}")
+
     exercise_b64 = data.get("exercise_b64")
     correction_b64 = data.get("correction_b64")
     # filename_ex / filename_corr acceptés pour compatibilité mais non utilisés (noms UUID générés)
@@ -628,8 +643,11 @@ niveau 3 = difficile (demande réflexion avancée, type concours)"""
     EXERCISES_DIR = Path("/home/prepa/app/exercises")
     CORRECTIONS_DIR = Path("/home/prepa/app/corrections")
 
-    ex_folder = EXERCISES_DIR / matiere
-    ex_folder.mkdir(parents=True, exist_ok=True)
+    try:
+        ex_folder = EXERCISES_DIR / matiere
+        ex_folder.mkdir(parents=True, exist_ok=True)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Impossible de créer le dossier {matiere}: {e}")
 
     serie_clean = re.sub(r'[^A-Z0-9]', '', (serie or 'gen').upper())
     base_name = f"{exam_type}_{serie_clean}_{matiere}_{chapitre or 'general'}"
@@ -639,8 +657,11 @@ niveau 3 = difficile (demande réflexion avancée, type concours)"""
 
     # Sauvegarde exercice
     ex_path = ex_folder / f"{base_name}.pdf"
-    ex_path.write_bytes(exercise_bytes)
-    ex_path.chmod(0o644)
+    try:
+        ex_path.write_bytes(exercise_bytes)
+        ex_path.chmod(0o644)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Impossible d'écrire le fichier exercice: {e}")
     print(f"  → Exercice sauvegardé : {ex_path}")
 
     # Sauvegarde correction si présente
@@ -674,7 +695,11 @@ niveau 3 = difficile (demande réflexion avancée, type concours)"""
         content_hash=exercise_content_hash,
     )
     db.add(exercise)
-    await db.commit()
+    try:
+        await db.commit()
+    except Exception as e:
+        await db.rollback()
+        raise HTTPException(status_code=500, detail=f"Erreur base de données: {e}")
 
     return {
         "success": True,

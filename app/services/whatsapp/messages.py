@@ -167,61 +167,26 @@ class Messages:
         {"id": "action_profil", "title": "Voir ma progression 📊"},
     ]
 
-    def feedback_after_correction(
+    def feedback_suffix(
         self,
-        name: str,
         score: int,
         retry_count: int,
-        points_faibles: list,
         matiere: str,
         chapitre: str,
     ) -> str:
+        """1-2 lignes d'orientation après le détail de correction."""
         chapitre_label = (chapitre or "").replace("_", " ").title() if chapitre else ""
-        matiere_label = (matiere or "").replace("_", " ").title() if matiere else ""
 
         if score >= 70:
-            emoji = "🎉" if score >= 85 else "✅"
-            msg = (
-                f"{emoji} *Bravo {name} !* Tu as obtenu *{score}/100*\n\n"
-            )
             if chapitre_label:
-                msg += f"Tu maîtrises bien *{chapitre_label}*. "
-            msg += "Continue comme ça ! 💪\n\n"
-            msg += "_Prêt pour un exercice plus difficile ?_"
+                return f"_Prêt pour un exercice plus difficile en *{chapitre_label}* ?_ 💪"
+            return "_Prêt pour un exercice plus difficile ?_ 💪"
         elif score >= 40:
-            msg = (
-                f"📝 *Pas mal {name} !* Tu as obtenu *{score}/100*\n\n"
-                "Il y a encore des points à consolider"
-            )
-            if chapitre_label:
-                msg += f" en *{chapitre_label}*"
-            msg += ".\n\n"
-            if points_faibles:
-                msg += f"*Points à retravailler :*\n"
-                for p in points_faibles[:3]:
-                    msg += f"• {p}\n"
-                msg += "\n"
-            msg += "_Un nouvel exercice du même niveau t'attend !_"
+            return "_Un nouvel exercice du même niveau t'attend !_"
         else:
             if retry_count < 2:
-                msg = (
-                    f"😔 *Score : {score}/100*, {name}.\n\n"
-                    "Ne te décourage pas ! On reprend cet exercice depuis le début.\n\n"
-                )
-            else:
-                msg = (
-                    f"💪 *Score : {score}/100*, {name}.\n\n"
-                    "On va travailler les bases avec un exercice plus simple.\n\n"
-                )
-            if points_faibles:
-                msg += f"*Ce qu'il faut revoir :*\n"
-                for p in points_faibles[:3]:
-                    msg += f"• {p}\n"
-                msg += "\n"
-            if chapitre_label and matiere_label:
-                msg += f"_Matière : {matiere_label} — {chapitre_label}_"
-
-        return msg
+                return "_Ne te décourage pas — on reprend cet exercice depuis le début._ 💪"
+            return "_On va travailler les bases avec un exercice plus simple._"
 
     def all_exercises_done(self, name: str, matiere: str, chapitre: str) -> str:
         chapitre_label = (chapitre or "").replace("_", " ").title() if chapitre else ""

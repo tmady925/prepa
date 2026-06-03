@@ -926,16 +926,19 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession, msg_t
                 # Récupère les points faibles depuis l'analyse
                 points_faibles = analysis.get("points_faibles") or analysis.get("weak_points") or []
 
-                # Feedback adaptatif
-                feedback = messages.feedback_after_correction(
-                    name=user.name or "élève",
+                # Détail de correction (score, points forts/faibles)
+                feedback_detail = copy_analyzer_service.format_feedback(analysis, user.name or "élève")
+                await whatsapp_sender.send_text(phone, feedback_detail)
+
+                # Suffix adaptatif (orientation : retry, montée de niveau, etc.)
+                suffix = messages.feedback_suffix(
                     score=score_copie,
                     retry_count=retry_count,
-                    points_faibles=points_faibles,
                     matiere=matiere_copie,
                     chapitre=chapitre_copie,
                 )
-                await whatsapp_sender.send_text(phone, feedback)
+                if suffix:
+                    await whatsapp_sender.send_text(phone, suffix)
 
                 # Envoie la correction PDF si disponible
                 if exercise_db and exercise_db.correction_path:

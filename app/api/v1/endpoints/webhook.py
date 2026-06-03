@@ -136,6 +136,10 @@ def detect_command(text: str) -> str | None:
         "plan": "plan",
         "action_invite": "inviter",
         "action_pro": "plan",
+        "action_profil": "progression",
+        "next_exercise": "next_exercise",
+        "exercice suivant": "next_exercise",
+        "\next": "next_exercise",
     }
     return commands.get(text.lower().strip())
 
@@ -298,6 +302,62 @@ async def handle_command(command: str, phone: str, user, db: AsyncSession):
             phone,
             messages.invite_message(user)
         )
+
+    elif command == "next_exercise":
+        conv_state = user.conversation_state or {}
+        next_id = conv_state.get("next_exercise_id")
+        next_url = conv_state.get("next_exercise_url")
+        next_filename = conv_state.get("next_exercise_filename")
+        matiere = conv_state.get("matiere", "")
+        chapitre = conv_state.get("chapitre", "")
+        niveau_exo = conv_state.get("niveau_exo", 2)
+        retry_count = conv_state.get("retry_count", 0)
+        last_exercise_id = conv_state.get("next_exercise_id")
+        correction_path = conv_state.get("next_correction_path")
+
+        if not next_url:
+            await whatsapp_sender.send_text(
+                phone,
+                "😔 Aucun exercice suivant n'est disponible pour l'instant.\n\n"
+                "Demande-moi directement : *donne-moi un exercice de [matière]*"
+            )
+            user.conversation_state = {}
+            await db.flush()
+            return
+
+        from pathlib import Path as _PNext
+        next_path = _PNext(conv_state.get("next_exercise_path", ""))
+        chapitre_str = f" — {chapitre.replace('_', ' ').title()}" if chapitre else ""
+
+        intro = (
+            f"📝 *Exercice {(matiere or '').upper()}{chapitre_str}*\n\n"
+            f"Voici ton prochain exercice.\n\n"
+            f"- Fais l'exercice sur papier ✏️\n"
+            f"- Prends une photo de ta copie 📸\n"
+            f"- Envoie-moi la photo pour que je te corrige\n\n"
+            f"_Bon courage ! 💪_"
+        )
+        await whatsapp_sender.send_text(phone, intro)
+        await whatsapp_sender._send({
+            "to": phone,
+            "documentUrl": next_url,
+            "fileName": next_filename or "exercice.pdf",
+            "text": f"Exercice {matiere}",
+        })
+
+        user.conversation_state = {
+            "awaiting_copy": True,
+            "exercise_id": next_id,
+            "exercise_path": str(next_path),
+            "correction_path": correction_path,
+            "matiere": matiere,
+            "chapitre": chapitre,
+            "niveau_exo": niveau_exo,
+            "retry_count": retry_count,
+            "last_exercise_id": last_exercise_id,
+            "started_at": datetime.now().isoformat(),
+        }
+        await db.flush()
 
     elif command == "plan":
         if user.plan == "pro":
@@ -857,42 +917,176 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession, msg_t
                     )
                     return
 
-                # Envoie le feedback
-                feedback = copy_analyzer_service.format_feedback(analysis, user.name or "élève")
+                score_copie = analysis.get("score", 0)
+                retry_count = conv_state.get("retry_count", 0)
+                matiere_copie = conv_state.get("matiere", "")
+                chapitre_copie = conv_state.get("chapitre", "")
+                niveau_exo = conv_state.get("niveau_exo", 2)
+
+                # Récupère les points faibles depuis l'analyse
+                points_faibles = analysis.get("points_faibles") or analysis.get("weak_points") or []
+
+                # Feedback adaptatif
+                feedback = messages.feedback_after_correction(
+                    name=user.name or "élève",
+                    score=score_copie,
+                    retry_count=retry_count,
+                    points_faibles=points_faibles,
+                    matiere=matiere_copie,
+                    chapitre=chapitre_copie,
+                )
                 await whatsapp_sender.send_text(phone, feedback)
 
                 # Envoie la correction PDF si disponible
                 if exercise_db and exercise_db.correction_path:
-                    from pathlib import Path
-                    corr_path = Path(exercise_db.correction_path)
+                    from pathlib import Path as _Path
+                    corr_path = _Path(exercise_db.correction_path)
                     if corr_path.exists():
                         corr_url = f"http://72.62.4.97/corrections/{exercise_db.matiere}/{corr_path.name}"
-                        payload = {
+                        await whatsapp_sender._send({
                             "to": phone,
                             "documentUrl": corr_url,
                             "fileName": corr_path.name,
                             "text": "📄 Voici la correction complète",
-                        }
-                        await whatsapp_sender._send(payload)
+                        })
 
-                # Met à jour la maîtrise du chapitre selon le score de la copie
-                score_copie = analysis.get("score", 0)
-                if conv_state.get("chapitre"):
+                # Met à jour la maîtrise avec le score numérique
+                if chapitre_copie:
                     try:
                         await mastery_service.update_after_interaction(
                             db=db,
                             user_id=user.id,
-                            matiere=conv_state.get("matiere", ""),
-                            chapitre=conv_state.get("chapitre", ""),
+                            matiere=matiere_copie,
+                            chapitre=chapitre_copie,
                             detection={"confiance": 0.9},
-                            response_text=f"Score copie: {score_copie}/100",
+                            response_text="",
+                            score=score_copie,
                         )
                     except Exception as e:
                         print(f"  → Mastery update error: {e}")
 
-                # Réinitialise l'état
-                user.conversation_state = {}
-                await db.flush()
+                # ── Logique adaptative : prépare le prochain exercice ────
+                from sqlalchemy import select as _sel, func as _func
+                from app.models.exercise import Exercise as _Exercise
+
+                current_exercise_id = conv_state.get("exercise_id")
+
+                if score_copie >= 70:
+                    # Bon score → monte la difficulté ou change de chapitre
+                    next_niveau = min(3, niveau_exo + 1)
+                    same_chapitre = (niveau_exo < 3)  # si déjà niveau 3, change chapitre
+                elif score_copie >= 40:
+                    # Score moyen → même niveau, même chapitre
+                    next_niveau = niveau_exo
+                    same_chapitre = True
+                else:
+                    # Mauvais score
+                    if retry_count < 2:
+                        # Retry : même exercice
+                        from pathlib import Path as _Path2
+                        retry_path = _Path2(exercise_db.exercise_path) if exercise_db else None
+                        if exercise_db and retry_path and retry_path.exists():
+                            retry_url = f"http://72.62.4.97/exercises/{exercise_db.matiere}/{retry_path.name}"
+                            await whatsapp_sender._send({
+                                "to": phone,
+                                "documentUrl": retry_url,
+                                "fileName": retry_path.name,
+                                "text": f"Exercice {exercise_db.matiere}",
+                            })
+                            user.conversation_state = {
+                                "awaiting_copy": True,
+                                "exercise_id": str(exercise_db.id),
+                                "exercise_path": str(exercise_db.exercise_path),
+                                "correction_path": str(exercise_db.correction_path) if exercise_db.correction_path else None,
+                                "matiere": matiere_copie,
+                                "chapitre": chapitre_copie,
+                                "niveau_exo": niveau_exo,
+                                "retry_count": retry_count + 1,
+                                "last_exercise_id": current_exercise_id,
+                                "started_at": datetime.now().isoformat(),
+                            }
+                            await db.flush()
+                            print(f"Copie analysée -> {phone}: score={score_copie} retry={retry_count + 1}")
+                            return
+                        # Fichier absent → cherche exercice plus simple
+                    next_niveau = max(1, niveau_exo - 1)
+                    same_chapitre = True
+
+                # Cherche le prochain exercice
+                def _next_query(niv, with_ch):
+                    q = _sel(_Exercise).where(
+                        _Exercise.status == "ready",
+                        _Exercise.exercise_path.isnot(None),
+                        _Exercise.matiere == matiere_copie,
+                        _Exercise.niveau == niv,
+                    )
+                    if current_exercise_id:
+                        import uuid as _uuid
+                        try:
+                            q = q.where(_Exercise.id != _uuid.UUID(current_exercise_id))
+                        except Exception:
+                            pass
+                    if user.exam_type:
+                        q = q.where(_Exercise.exam_type == user.exam_type)
+                    if user.series:
+                        q = q.where(
+                            or_(
+                                _Exercise.serie == user.series,
+                                _Exercise.series.contains([user.series]),
+                            )
+                        )
+                    if with_ch and chapitre_copie:
+                        q = q.where(_Exercise.chapitre == chapitre_copie)
+                    return q.order_by(_func.random()).limit(1)
+
+                next_ex = None
+                for niv, with_ch in [
+                    (next_niveau, same_chapitre),
+                    (next_niveau, False),
+                    (None, False),
+                ]:
+                    if niv is None:
+                        break
+                    r = await db.execute(_next_query(niv, with_ch))
+                    next_ex = r.scalar_one_or_none()
+                    if next_ex:
+                        break
+
+                if next_ex:
+                    from pathlib import Path as _Path3
+                    next_path = _Path3(next_ex.exercise_path)
+                    if next_path.exists():
+                        next_url = f"http://72.62.4.97/exercises/{next_ex.matiere}/{next_path.name}"
+                        user.conversation_state = {
+                            "next_exercise_id": str(next_ex.id),
+                            "next_exercise_path": str(next_ex.exercise_path),
+                            "next_correction_path": str(next_ex.correction_path) if next_ex.correction_path else None,
+                            "next_exercise_url": next_url,
+                            "next_exercise_filename": next_path.name,
+                            "matiere": matiere_copie,
+                            "chapitre": next_ex.chapitre,
+                            "niveau_exo": next_ex.niveau,
+                            "retry_count": 0,
+                            "last_exercise_id": current_exercise_id,
+                        }
+                        await db.flush()
+                        await whatsapp_sender.send_buttons(
+                            phone,
+                            messages.NEXT_EXERCISE_BUTTONS[0]["title"] + " est prêt !",
+                            messages.NEXT_EXERCISE_BUTTONS,
+                        )
+                    else:
+                        user.conversation_state = {}
+                        await db.flush()
+                        await whatsapp_sender.send_text(phone, messages.all_exercises_done(
+                            user.name or "élève", matiere_copie, chapitre_copie
+                        ))
+                else:
+                    user.conversation_state = {}
+                    await db.flush()
+                    await whatsapp_sender.send_text(phone, messages.all_exercises_done(
+                        user.name or "élève", matiere_copie, chapitre_copie
+                    ))
 
                 print(f"Copie analysée -> {phone}: score={score_copie}")
                 return
@@ -1489,6 +1683,9 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession, msg_t
                             "correction_path": str(exercise_db.correction_path) if exercise_db.correction_path else None,
                             "matiere": detected_matiere,
                             "chapitre": detected_chapitre,
+                            "niveau_exo": exercise_db.niveau,
+                            "retry_count": 0,
+                            "last_exercise_id": None,
                             "started_at": datetime.now().isoformat(),
                         }
                         await db.flush()

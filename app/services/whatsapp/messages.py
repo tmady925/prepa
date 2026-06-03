@@ -142,7 +142,6 @@ class Messages:
             f"✅ Tout est prêt *{name}* !\n\n"
             f"Il te reste *{days_left} jours* avant ton examen.\n\n"
             "Tu peux maintenant :\n"
-            "• Poser des questions sur tes cours\n"
             "• Demander des exercices\n"
             "• Soumettre tes réponses pour correction\n\n"
             "Par quoi on commence ? 🚀"
@@ -162,6 +161,79 @@ class Messages:
         {"id": "action_invite", "title": "Inviter des amis"},
         {"id": "action_pro", "title": "Passer Pro ⭐"},
     ]
+
+    NEXT_EXERCISE_BUTTONS = [
+        {"id": "next_exercise", "title": "Exercice suivant ➡️"},
+        {"id": "action_profil", "title": "Voir ma progression 📊"},
+    ]
+
+    def feedback_after_correction(
+        self,
+        name: str,
+        score: int,
+        retry_count: int,
+        points_faibles: list,
+        matiere: str,
+        chapitre: str,
+    ) -> str:
+        chapitre_label = (chapitre or "").replace("_", " ").title() if chapitre else ""
+        matiere_label = (matiere or "").replace("_", " ").title() if matiere else ""
+
+        if score >= 70:
+            emoji = "🎉" if score >= 85 else "✅"
+            msg = (
+                f"{emoji} *Bravo {name} !* Tu as obtenu *{score}/100*\n\n"
+            )
+            if chapitre_label:
+                msg += f"Tu maîtrises bien *{chapitre_label}*. "
+            msg += "Continue comme ça ! 💪\n\n"
+            msg += "_Prêt pour un exercice plus difficile ?_"
+        elif score >= 40:
+            msg = (
+                f"📝 *Pas mal {name} !* Tu as obtenu *{score}/100*\n\n"
+                "Il y a encore des points à consolider"
+            )
+            if chapitre_label:
+                msg += f" en *{chapitre_label}*"
+            msg += ".\n\n"
+            if points_faibles:
+                msg += f"*Points à retravailler :*\n"
+                for p in points_faibles[:3]:
+                    msg += f"• {p}\n"
+                msg += "\n"
+            msg += "_Un nouvel exercice du même niveau t'attend !_"
+        else:
+            if retry_count < 2:
+                msg = (
+                    f"😔 *Score : {score}/100*, {name}.\n\n"
+                    "Ne te décourage pas ! On reprend cet exercice depuis le début.\n\n"
+                )
+            else:
+                msg = (
+                    f"💪 *Score : {score}/100*, {name}.\n\n"
+                    "On va travailler les bases avec un exercice plus simple.\n\n"
+                )
+            if points_faibles:
+                msg += f"*Ce qu'il faut revoir :*\n"
+                for p in points_faibles[:3]:
+                    msg += f"• {p}\n"
+                msg += "\n"
+            if chapitre_label and matiere_label:
+                msg += f"_Matière : {matiere_label} — {chapitre_label}_"
+
+        return msg
+
+    def all_exercises_done(self, name: str, matiere: str, chapitre: str) -> str:
+        chapitre_label = (chapitre or "").replace("_", " ").title() if chapitre else ""
+        matiere_label = (matiere or "").replace("_", " ").title() if matiere else ""
+        return (
+            f"🏆 *Félicitations {name} !*\n\n"
+            f"Tu as fait tous les exercices disponibles"
+            + (f" en *{chapitre_label}*" if chapitre_label else "")
+            + (f" ({matiere_label})" if matiere_label else "")
+            + ".\n\n"
+            "Pose-moi une question de cours ou demande un exercice d'une autre matière ! 📚"
+        )
 
     # ── Commandes spéciales ────────────────────────────────────────
 

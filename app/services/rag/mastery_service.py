@@ -55,6 +55,7 @@ class MasteryService:
         chapitre: str,
         detection: dict,
         response_text: str,
+        score: int = None,
     ) -> StudentChapterMastery:
         """Met à jour le profil après un échange."""
         if not matiere or not chapitre:
@@ -75,16 +76,30 @@ class MasteryService:
         elif type_demande == "methode":
             mastery.learning_style = "formula_based"
 
-        if type_demande == "cours":
-            mastery.mastery_level = max(0.1, mastery.mastery_level)
-        elif type_demande == "exercice":
-            mastery.mastery_level = min(0.8, mastery.mastery_level + 0.05)
-        elif type_demande == "correction":
-            mastery.mastery_level = min(0.9, mastery.mastery_level + 0.1)
-            mastery.success_count += 1
+        if score is not None:
+            # Logique score numérique (après correction de copie)
+            if score >= 70:
+                delta = 0.10 + (score - 70) / 300  # 0.10 → 0.20 selon score
+                mastery.mastery_level = min(1.0, mastery.mastery_level + delta)
+                mastery.success_count += 1
+            elif score >= 40:
+                delta = 0.03 + (score - 40) / 1000  # 0.03 → 0.06
+                mastery.mastery_level = min(1.0, mastery.mastery_level + delta)
+            else:
+                delta = max(-0.05, (score - 40) / 800)  # -0.05 → 0
+                mastery.mastery_level = max(0.0, mastery.mastery_level + delta)
+        else:
+            # Ancienne logique — rétrocompatibilité
+            if type_demande == "cours":
+                mastery.mastery_level = max(0.1, mastery.mastery_level)
+            elif type_demande == "exercice":
+                mastery.mastery_level = min(0.8, mastery.mastery_level + 0.05)
+            elif type_demande == "correction":
+                mastery.mastery_level = min(0.9, mastery.mastery_level + 0.1)
+                mastery.success_count += 1
 
-        if niveau == "debutant" and mastery.mastery_level > 0.3:
-            mastery.mastery_level = max(0.2, mastery.mastery_level - 0.05)
+            if niveau == "debutant" and mastery.mastery_level > 0.3:
+                mastery.mastery_level = max(0.2, mastery.mastery_level - 0.05)
 
         if mots_cles and type_demande in ["cours", "methode"]:
             current_weak = mastery.weak_points or []

@@ -1344,7 +1344,7 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession, msg_t
                     Exercise.matiere == detected_matiere,
                 )
 
-            def _add_filters(q, niveau=None):
+            def _add_filters(q, niveau=None, with_chapitre=True):
                 if niveau is not None:
                     q = q.where(Exercise.niveau == niveau)
                 if user.exam_type:
@@ -1356,19 +1356,28 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession, msg_t
                             Exercise.series.contains([user.series]),
                         )
                     )
-                if detected_chapitre:
+                if with_chapitre and detected_chapitre:
                     q = q.where(Exercise.chapitre == detected_chapitre)
                 return q.order_by(func.random()).limit(1)
 
             result = await db.execute(_add_filters(_base_query(), niveau_cible))
             exercise_db = result.scalar_one_or_none()
 
-            # Fallback niveau ±1 puis sans filtre niveau/chapitre
+            # Fallback 1 — niveau ±1, même chapitre
             if not exercise_db:
                 for niveau_fallback in [niveau_cible - 1, niveau_cible + 1, None]:
                     if niveau_fallback is not None and niveau_fallback not in (1, 2, 3):
                         continue
                     r = await db.execute(_add_filters(_base_query(), niveau_fallback))
+                    exercise_db = r.scalar_one_or_none()
+                    if exercise_db:
+                        break
+
+            # Fallback 2 — sans filtre chapitre (chapitre uploadé peut différer du label détecté)
+            if not exercise_db and detected_chapitre:
+                print(f"  → Fallback sans chapitre (détecté: {detected_chapitre})")
+                for niveau_fallback in [niveau_cible, None]:
+                    r = await db.execute(_add_filters(_base_query(), niveau_fallback, with_chapitre=False))
                     exercise_db = r.scalar_one_or_none()
                     if exercise_db:
                         break
@@ -1380,7 +1389,20 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession, msg_t
 
                 pdf_path = Path(exercise_db.exercise_path)
                 print(f"  → PDF path: {pdf_path} | exists: {pdf_path.exists()}")
-                if pdf_path.exists():
+                if not pdf_path.exists():
+                    print(f"  ⚠️ PDF introuvable sur disque: {pdf_path} — exercice ignoré")
+                    exercise_db.status = "error"
+                    exercise_db.error_message = f"Fichier PDF introuvable: {pdf_path}"
+                    await db.flush()
+                    # Cherche un autre exercice en excluant celui-ci
+                    r2 = await db.execute(
+                        _add_filters(_base_query().where(Exercise.id != exercise_db.id), None, with_chapitre=False)
+                    )
+                    exercise_db = r2.scalar_one_or_none()
+                    if not exercise_db:
+                        pass  # → tombe sur le message "aucun exercice" ci-dessous
+                if exercise_db and Path(exercise_db.exercise_path).exists():
+                    pdf_path = Path(exercise_db.exercise_path)
                     # Vérifie que le contenu correspond à la sous-demande (physique vs chimie)
                     pdf_text = ""
                     try:

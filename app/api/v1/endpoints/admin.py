@@ -4,6 +4,33 @@ from fastapi import APIRouter, Request, Depends, HTTPException, Header
 from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, cast, Date
+
+# Matières acceptées en base — normalise les variantes courantes
+_MATIERE_ALIASES = {
+    "chimie": "physique_chimie",
+    "physique": "physique_chimie",
+    "pc": "physique_chimie",
+    "physique chimie": "physique_chimie",
+    "physique-chimie": "physique_chimie",
+    "svt": "svt",
+    "bio": "svt",
+    "biologie": "svt",
+    "maths": "maths",
+    "mathematiques": "maths",
+    "mathématiques": "maths",
+    "francais": "francais",
+    "français": "francais",
+    "philo": "philosophie",
+    "hist": "histoire_geo",
+    "histoire": "histoire_geo",
+    "geo": "histoire_geo",
+    "anglais": "anglais",
+}
+
+def _normalize_matiere(m: str | None) -> str | None:
+    if not m:
+        return m
+    return _MATIERE_ALIASES.get(m.strip().lower(), m.strip().lower())
 sa_select = select
 from app.db.database import get_db
 from app.core.settings import get_settings
@@ -382,13 +409,14 @@ async def upload_exercise_document(
         # Sauvegarde en DB
         effective_serie = analysis.get("serie") or serie
         effective_series = series_list if series_list else ([effective_serie] if effective_serie else [])
+        effective_matiere = _normalize_matiere(analysis.get("matiere") or matiere)
         exercise = Exercise(
             source_filename=filename,
             title=ex_data.get("title"),
             exam_type=analysis.get("exam_type") or exam_type,
             serie=effective_serie,
             series=effective_series,
-            matiere=analysis.get("matiere") or matiere,
+            matiere=effective_matiere,
             chapitre=ex_data.get("chapitre"),
             niveau=ex_data.get("niveau", 2),
             annee=analysis.get("annee"),
@@ -456,7 +484,7 @@ async def upload_exercise(
     correction_b64 = data.get("correction_b64")
     filename_ex = data.get("filename_ex", "exercice.pdf")
     filename_corr = data.get("filename_corr", "correction.pdf")
-    matiere = data.get("matiere")
+    matiere = _normalize_matiere(data.get("matiere"))
     exam_type = data.get("exam_type", "bac_senegal")
     series_list = data.get("series", [])
     serie = series_list[0] if series_list else data.get("serie")  # garde compatibilité
@@ -659,6 +687,31 @@ async def get_exercises(
         }
         for e in exercises
     ]
+
+
+@router.post("/admin/exercises/fix-matieres")
+async def fix_exercise_matieres(
+    db: AsyncSession = Depends(get_db),
+    _: bool = Depends(verify_admin),
+):
+    """Normalise les matières mal stockées en base (ex: 'chimie' → 'physique_chimie')."""
+    from app.models.exercise import Exercise
+    from sqlalchemy import update
+
+    result = await db.execute(select(Exercise))
+    exercises = result.scalars().all()
+
+    fixed = []
+    for ex in exercises:
+        normalized = _normalize_matiere(ex.matiere)
+        if normalized != ex.matiere:
+            fixed.append({"id": str(ex.id), "avant": ex.matiere, "apres": normalized})
+            ex.matiere = normalized
+
+    if fixed:
+        await db.commit()
+
+    return {"fixed": len(fixed), "details": fixed}
 
 
 @router.delete("/admin/exercises/{exercise_id}")

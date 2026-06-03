@@ -100,7 +100,7 @@ class DocumentAnalyzerService:
                 lines.append(f"Page {page_num} — Titres: {', '.join(data['titles'][:3])}")
             if data.get("text"):
                 lines.append(f"Page {page_num} — Extrait: {data['text'][:200]}")
-        return "\n".join(lines[:80])
+        return "\n".join(lines[:150])
 
     async def _analyze_with_llm(
         self,
@@ -178,7 +178,25 @@ Règles :
 
                 text = data["choices"][0]["message"]["content"].strip()
                 text = re.sub(r"```json|```", "", text).strip()
-                return json.loads(text)
+                parsed = json.loads(text)
+
+                # Valide la structure minimale attendue
+                if not isinstance(parsed.get("exercises"), list):
+                    print(f"Structure LLM invalide: exercises absent ou non-liste")
+                    return None
+                # Filtre les exercices mal formés (page_debut > page_fin)
+                valid_exercises = []
+                for ex in parsed["exercises"]:
+                    p_debut = ex.get("page_debut") or 1
+                    p_fin = ex.get("page_fin") or p_debut
+                    if p_debut > p_fin:
+                        print(f"  ⚠️ Exercice {ex.get('number')} : page_debut ({p_debut}) > page_fin ({p_fin}) — corrigé")
+                        ex["page_fin"] = p_debut
+                    ex["page_debut"] = p_debut
+                    ex["page_fin"] = min(p_fin, total_pages)
+                    valid_exercises.append(ex)
+                parsed["exercises"] = valid_exercises
+                return parsed
 
         except json.JSONDecodeError as e:
             print(f"JSON invalide: {e}")

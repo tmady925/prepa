@@ -27,6 +27,29 @@ _MATIERE_ALIASES = {
     "anglais": "anglais",
 }
 
+_VALID_EXAM_TYPES = {"bac_senegal", "bfem", "concours", "bac_cote_ivoire", "bac_mali", "autre"}
+_VALID_MATIERES = {"maths", "physique_chimie", "svt", "francais", "philosophie", "histoire_geo", "anglais", "autre"}
+_MAX_UPLOAD_BYTES = 15 * 1024 * 1024  # 15 MB
+
+def _validate_annee(val) -> int | None:
+    """Retourne l'année en int si valide (4 chiffres entre 1990 et 2100), sinon None."""
+    if val is None:
+        return None
+    try:
+        year = int(str(val).strip())
+        if 1990 <= year <= 2100:
+            return year
+    except (ValueError, TypeError):
+        pass
+    return None
+
+def _sanitize_chapitre(c: str | None) -> str | None:
+    """Supprime les caractères dangereux pour les chemins de fichiers."""
+    if not c:
+        return c
+    import re as _re
+    return _re.sub(r'[^\w\-]', '_', c.strip().lower())[:80]
+
 def _normalize_matiere(m: str | None) -> str | None:
     if not m:
         return m
@@ -364,6 +387,11 @@ async def upload_exercise_document(
     except Exception:
         raise HTTPException(status_code=400, detail="file_b64 invalide")
 
+    if len(file_bytes) > _MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=400, detail=f"Fichier trop volumineux (max {_MAX_UPLOAD_BYTES // 1024 // 1024} MB)")
+    if len(file_bytes) == 0:
+        raise HTTPException(status_code=400, detail="Fichier vide")
+
     print(f"Analyse document: {filename} ({len(file_bytes)} bytes)")
 
     # 1. Analyse du document
@@ -410,26 +438,33 @@ async def upload_exercise_document(
         effective_serie = analysis.get("serie") or serie
         effective_series = series_list if series_list else ([effective_serie] if effective_serie else [])
         effective_matiere = _normalize_matiere(analysis.get("matiere") or matiere)
+        if not effective_matiere or effective_matiere not in _VALID_MATIERES:
+            effective_matiere = matiere or "autre"
+
+        ex_path_str = result.get("exercise_path")
+        from pathlib import Path as _P
+        ex_exists = bool(ex_path_str and _P(ex_path_str).exists())
+
         exercise = Exercise(
             source_filename=filename,
-            title=ex_data.get("title"),
+            title=ex_data.get("title") or f"Exercice {ex_data.get('number', '')}",
             exam_type=analysis.get("exam_type") or exam_type,
             serie=effective_serie,
             series=effective_series,
             matiere=effective_matiere,
-            chapitre=ex_data.get("chapitre"),
-            niveau=ex_data.get("niveau", 2),
-            annee=analysis.get("annee"),
+            chapitre=_sanitize_chapitre(ex_data.get("chapitre")),
+            niveau=ex_data.get("niveau") if ex_data.get("niveau") in (1, 2, 3) else 2,
+            annee=_validate_annee(analysis.get("annee")),
             tags=ex_data.get("tags"),
             bareme=ex_data.get("bareme"),
             exercise_number=ex_data.get("number"),
             page_debut=ex_data.get("page_debut"),
             page_fin=ex_data.get("page_fin"),
-            exercise_path=result.get("exercise_path"),
+            exercise_path=ex_path_str,
             correction_path=result.get("correction_path"),
             correction_generated=result.get("correction_generated", False),
-            status="ready" if result.get("exercise_path") else "error",
-            error_message=result.get("error"),
+            status="ready" if ex_exists else "error",
+            error_message=result.get("error") or (None if ex_exists else f"Fichier PDF absent: {ex_path_str}"),
         )
         db.add(exercise)
         saved_exercises.append(exercise)
@@ -482,14 +517,13 @@ async def upload_exercise(
     data = await request.json()
     exercise_b64 = data.get("exercise_b64")
     correction_b64 = data.get("correction_b64")
-    filename_ex = data.get("filename_ex", "exercice.pdf")
-    filename_corr = data.get("filename_corr", "correction.pdf")
+    # filename_ex / filename_corr acceptés pour compatibilité mais non utilisés (noms UUID générés)
     matiere = _normalize_matiere(data.get("matiere"))
     exam_type = data.get("exam_type", "bac_senegal")
     series_list = data.get("series", [])
     serie = series_list[0] if series_list else data.get("serie")  # garde compatibilité
-    chapitre = data.get("chapitre")
-    annee = data.get("annee")
+    chapitre = _sanitize_chapitre(data.get("chapitre"))
+    annee = _validate_annee(data.get("annee"))
     tags = data.get("tags", [])
     title = data.get("title", "")
 
@@ -497,6 +531,10 @@ async def upload_exercise(
         raise HTTPException(status_code=400, detail="exercise_b64 requis")
     if not matiere:
         raise HTTPException(status_code=400, detail="matiere requise")
+    if matiere not in _VALID_MATIERES:
+        raise HTTPException(status_code=400, detail=f"matiere invalide. Valeurs acceptées : {', '.join(sorted(_VALID_MATIERES))}")
+    if exam_type and exam_type not in _VALID_EXAM_TYPES:
+        raise HTTPException(status_code=400, detail=f"exam_type invalide. Valeurs acceptées : {', '.join(sorted(_VALID_EXAM_TYPES))}")
 
     # Décode les fichiers
     try:
@@ -504,10 +542,19 @@ async def upload_exercise(
     except Exception:
         raise HTTPException(status_code=400, detail="exercise_b64 invalide")
 
+    if len(exercise_bytes) > _MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=400, detail=f"Fichier trop volumineux (max {_MAX_UPLOAD_BYTES // 1024 // 1024} MB)")
+    if len(exercise_bytes) == 0:
+        raise HTTPException(status_code=400, detail="Fichier vide")
+
     correction_bytes = None
     if correction_b64:
         try:
             correction_bytes = base64.b64decode(correction_b64)
+            if correction_bytes == exercise_bytes:
+                raise HTTPException(status_code=400, detail="La correction et l'exercice sont identiques")
+        except HTTPException:
+            raise
         except Exception:
             pass
 
@@ -607,6 +654,7 @@ niveau 3 = difficile (demande réflexion avancée, type concours)"""
         print(f"  → Correction sauvegardée : {corr_path}")
 
     # Sauvegarde en DB
+    ex_exists = ex_path.exists()
     exercise = Exercise(
         title=title or base_name,
         exam_type=exam_type,
@@ -615,12 +663,13 @@ niveau 3 = difficile (demande réflexion avancée, type concours)"""
         matiere=matiere,
         chapitre=chapitre,
         niveau=niveau,
-        annee=int(annee) if annee else None,
+        annee=annee,  # déjà int via _validate_annee
         tags=tags if tags else None,
         exercise_path=str(ex_path),
         correction_path=str(corr_path) if corr_path else None,
         correction_generated=False,
-        status="ready",
+        status="ready" if ex_exists else "error",
+        error_message=None if ex_exists else f"Fichier PDF absent après écriture: {ex_path}",
         file_hash=exercise_hash,
         content_hash=exercise_content_hash,
     )
@@ -696,22 +745,44 @@ async def fix_exercise_matieres(
 ):
     """Normalise les matières mal stockées en base (ex: 'chimie' → 'physique_chimie')."""
     from app.models.exercise import Exercise
-    from sqlalchemy import update
-
-    result = await db.execute(select(Exercise))
-    exercises = result.scalars().all()
 
     fixed = []
-    for ex in exercises:
-        normalized = _normalize_matiere(ex.matiere)
-        if normalized != ex.matiere:
-            fixed.append({"id": str(ex.id), "avant": ex.matiere, "apres": normalized})
-            ex.matiere = normalized
+    skipped = []
+    offset = 0
+    batch_size = 200
 
-    if fixed:
-        await db.commit()
+    try:
+        while True:
+            result = await db.execute(
+                select(Exercise).limit(batch_size).offset(offset)
+            )
+            exercises = result.scalars().all()
+            if not exercises:
+                break
 
-    return {"fixed": len(fixed), "details": fixed}
+            for ex in exercises:
+                if not ex.matiere:
+                    skipped.append({"id": str(ex.id), "raison": "matiere vide"})
+                    continue
+                normalized = _normalize_matiere(ex.matiere)
+                if not normalized:
+                    skipped.append({"id": str(ex.id), "raison": f"normalisation impossible: {ex.matiere}"})
+                    continue
+                if normalized != ex.matiere:
+                    fixed.append({"id": str(ex.id), "avant": ex.matiere, "apres": normalized})
+                    ex.matiere = normalized
+
+            if fixed:
+                await db.flush()
+            offset += batch_size
+
+        if fixed:
+            await db.commit()
+    except Exception as e:
+        await db.rollback()
+        raise HTTPException(status_code=500, detail=f"Erreur lors de la migration: {e}")
+
+    return {"fixed": len(fixed), "skipped": len(skipped), "details": fixed, "skipped_details": skipped}
 
 
 @router.delete("/admin/exercises/{exercise_id}")

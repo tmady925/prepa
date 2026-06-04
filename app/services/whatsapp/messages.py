@@ -33,6 +33,173 @@ class Messages:
         {"id": "pays_non", "title": "❌ Non, autre pays"},
     ]
 
+    # ── Usage ──────────────────────────────────────────────────────
+
+    def ask_usage(self, name: str) -> str:
+        return (
+            f"Parfait *{name}* ! 🎯\n\n"
+            f"Tu utilises Prepa pour :"
+        )
+
+    USAGE_BUTTONS = [
+        {"id": "usage_etudes", "title": "🎓 Préparer mon examen"},
+        {"id": "usage_concours", "title": "🏆 Préparer un concours"},
+        {"id": "usage_emploi", "title": "💼 Trouver un emploi"},
+    ]
+
+    USAGE_TOUT_BUTTON = {"id": "usage_tout", "title": "🎯 Tout à la fois"}
+
+    # ── Concours ───────────────────────────────────────────────────
+
+    def ask_type_concours(self, name: str) -> str:
+        return f"Quel type de concours prépares-tu *{name}* ?"
+
+    TYPE_CONCOURS_BUTTONS = [
+        {"id": "concours_grandes_ecoles", "title": "🏫 Grandes écoles"},
+        {"id": "concours_fonction_publique", "title": "🏛️ Fonction publique"},
+        {"id": "concours_prive", "title": "🏢 Entreprises privées"},
+    ]
+
+    def ask_concours_cible(self, name: str) -> str:
+        return (
+            f"Quel concours tu cibles exactement *{name}* ?\n\n"
+            f"Exemple : *ESP*, *Douanes*, *Police*, *BNDE*...\n"
+            f"Écris le nom du concours."
+        )
+
+    def ask_date_concours(self) -> str:
+        return (
+            "📅 *Quand passe-tu ce concours ?*\n\n"
+            "Format : *JJ/MM/AAAA*\n"
+            "Exemple : 15/09/2026\n\n"
+            "_Tape *passer* si tu ne connais pas encore la date._"
+        )
+
+    # ── Emploi ─────────────────────────────────────────────────────
+
+    def ask_secteur_emploi(self, name: str) -> str:
+        return (
+            f"Dans quel domaine tu travailles ou veux travailler *{name}* ?\n\n"
+            "Réponds avec les numéros séparés par des virgules :\n\n"
+            "1 - Informatique / Tech\n"
+            "2 - Finance / Comptabilité\n"
+            "3 - Marketing / Communication\n"
+            "4 - Santé\n"
+            "5 - Éducation\n"
+            "6 - BTP / Ingénierie\n"
+            "7 - Droit / Juridique\n"
+            "8 - Autre (précise)"
+        )
+
+    def ask_niveau_etudes(self, name: str) -> str:
+        return f"Quel est ton niveau d'études *{name}* ?"
+
+    NIVEAU_ETUDES_BUTTONS = [
+        {"id": "niveau_bac", "title": "Bac ou moins"},
+        {"id": "niveau_bac2", "title": "Bac+2 / BTS"},
+        {"id": "niveau_bac3", "title": "Licence / Bac+3"},
+    ]
+
+    NIVEAU_ETUDES_BUTTONS_2 = [
+        {"id": "niveau_bac5", "title": "Master / Bac+5"},
+        {"id": "niveau_doctorat", "title": "Doctorat"},
+    ]
+
+    def ask_type_contrat(self, name: str) -> str:
+        return f"Quel type de contrat recherches-tu *{name}* ?"
+
+    TYPE_CONTRAT_BUTTONS = [
+        {"id": "contrat_cdi", "title": "CDI"},
+        {"id": "contrat_cdd", "title": "CDD"},
+        {"id": "contrat_stage", "title": "Stage"},
+    ]
+
+    TYPE_CONTRAT_BUTTONS_2 = [
+        {"id": "contrat_freelance", "title": "Freelance"},
+        {"id": "contrat_indifferent", "title": "Peu importe"},
+    ]
+
+    def ask_localisation_emploi(self, name: str) -> str:
+        return (
+            f"Tu cherches un emploi où *{name}* ? 📍\n\n"
+            f"Exemple : *Dakar*, *Thiès*, *Télétravail*, *Partout*"
+        )
+
+    def ask_cv_upload(self, name: str) -> str:
+        return (
+            f"Envoie ton *CV* en PDF ou photo *{name}* 📄\n\n"
+            f"Je vais analyser ton profil pour te trouver "
+            f"les meilleures opportunités.\n\n"
+            f"_Tape *passer* si tu n'as pas de CV pour l'instant._"
+        )
+
+    # ── Profil complet ──────────────────────────────────────────────
+
+    def profil_complet(self, user) -> str:
+        usage = user.usage or []
+        if isinstance(usage, str):
+            usage = [usage]
+
+        msg = f"📊 *Ton profil, {user.name}*\n\n"
+
+        if "etudes" in usage or "tout" in usage:
+            msg += "🎓 *ÉTUDES*\n"
+            msg += f"Examen : {user.exam_type or 'Non défini'}"
+            if user.series:
+                msg += f" — {user.series}"
+            msg += "\n"
+            if user.subjects:
+                msg += f"Matières : {', '.join(user.subjects)}\n"
+            if user.exam_date:
+                msg += f"Date : {user.exam_date.strftime('%d/%m/%Y')}\n"
+            msg += "\n"
+
+        if "concours" in usage or "tout" in usage:
+            conv = user.conversation_state or {}
+            msg += "🏆 *CONCOURS*\n"
+            concours = conv.get("concours_cible") or "Non défini"
+            msg += f"Concours : {concours}\n\n"
+
+        if "emploi" in usage or "tout" in usage:
+            msg += "💼 *EMPLOI*\n"
+            if user.secteur_emploi:
+                msg += f"Secteur : {', '.join(user.secteur_emploi)}\n"
+            if user.niveau_etudes:
+                msg += f"Niveau : {user.niveau_etudes}\n"
+            if user.type_contrat_souhaite:
+                msg += f"Contrat : {user.type_contrat_souhaite}\n"
+            if user.localisation_emploi:
+                msg += f"Localisation : {user.localisation_emploi}\n"
+            msg += "\n"
+
+        msg += "*Que veux-tu modifier ?*\n"
+        return msg
+
+    PROFIL_EDIT_BUTTONS = [
+        {"id": "edit_etudes", "title": "✏️ Mes infos études"},
+        {"id": "edit_emploi", "title": "💼 Mon profil emploi"},
+    ]
+
+    # ── Détection nouveau besoin ────────────────────────────────────
+
+    def suggest_new_service(self, service: str) -> str:
+        if service == "concours":
+            return (
+                "🏆 Tu parles de concours !\n\n"
+                "Veux-tu que j'active la préparation concours pour toi ?"
+            )
+        elif service == "emploi":
+            return (
+                "💼 Tu cherches un emploi !\n\n"
+                "Veux-tu que j'active la recherche d'emploi pour toi ?"
+            )
+        return ""
+
+    SUGGEST_SERVICE_BUTTONS = [
+        {"id": "confirm_new_service", "title": "✅ Oui, activer"},
+        {"id": "ignore_service", "title": "❌ Non merci"},
+    ]
+
     def ask_pays_manuel(self) -> str:
         return (
             "Dans quel pays es-tu ? 🌍\n\n"

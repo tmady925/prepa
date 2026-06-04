@@ -140,6 +140,13 @@ def detect_command(text: str) -> str | None:
         "next_exercise": "next_exercise",
         "exercice suivant": "next_exercise",
         "\next": "next_exercise",
+        "/profil": "profil",
+        "edit_etudes": "edit_etudes",
+        "edit_emploi": "edit_emploi",
+        "add_concours": "add_concours",
+        "add_emploi": "add_emploi",
+        "confirm_new_service": "confirm_new_service",
+        "ignore_service": "ignore_service",
     }
     return commands.get(text.lower().strip())
 
@@ -263,36 +270,94 @@ async def handle_command(command: str, phone: str, user, db: AsyncSession):
         )
 
     elif command == "profil":
-        profile = await mastery_service.get_student_profile(db, user.id)
-        if not profile:
-            await whatsapp_sender.send_text(
-                phone,
-                f"📊 *Ton profil, {user.name}*\n\n"
-                "Tu n'as pas encore travaillé de chapitres.\n\n"
-                "Pose une question de cours pour commencer ! 🚀"
-            )
+        usage = user.usage or []
+        if isinstance(usage, str):
+            usage = [usage]
+
+        # Profil complet si usage défini, sinon profil académique
+        if usage:
+            msg = messages.profil_complet(user)
+            buttons = list(messages.PROFIL_EDIT_BUTTONS)
+            if "concours" not in usage and "tout" not in usage:
+                buttons.append({"id": "add_concours", "title": "🏆 Ajouter concours"})
+            if "emploi" not in usage and "tout" not in usage:
+                buttons.append({"id": "add_emploi", "title": "💼 Ajouter emploi"})
+            await whatsapp_sender.send_buttons(phone, msg, buttons[:3])
         else:
-            msg = f"📊 *Carte du savoir, {user.name}*\n\n"
-            for matiere, chapitres in profile.items():
-                msg += f"*{matiere.upper()}*\n"
-                for chapitre, data in chapitres.items():
-                    level = data["level"]
-                    if level < 0.3:
-                        emoji = "🔴"
-                        label = "À renforcer"
-                    elif level < 0.6:
-                        emoji = "🟡"
-                        label = "En cours"
-                    else:
-                        emoji = "🟢"
-                        label = "Maîtrisé"
-                    chapitre_label = chapitre.replace("_", " ").title()
-                    msg += f"  {emoji} {chapitre_label} — {label} ({int(level*100)}%)\n"
-                    if data.get("weak_points"):
-                        msg += f"     ⚠️ {', '.join(data['weak_points'][:2])}\n"
-                msg += "\n"
-            msg += "Tape */aide* pour voir les commandes disponibles."
-            await whatsapp_sender.send_text(phone, msg)
+            profile = await mastery_service.get_student_profile(db, user.id)
+            if not profile:
+                await whatsapp_sender.send_text(
+                    phone,
+                    f"📊 *Ton profil, {user.name}*\n\n"
+                    "Tu n'as pas encore travaillé de chapitres.\n\n"
+                    "Pose une question de cours pour commencer ! 🚀"
+                )
+            else:
+                msg = f"📊 *Carte du savoir, {user.name}*\n\n"
+                for matiere, chapitres in profile.items():
+                    msg += f"*{matiere.upper()}*\n"
+                    for chapitre, data in chapitres.items():
+                        level = data["level"]
+                        if level < 0.3:
+                            emoji, label = "🔴", "À renforcer"
+                        elif level < 0.6:
+                            emoji, label = "🟡", "En cours"
+                        else:
+                            emoji, label = "🟢", "Maîtrisé"
+                        chapitre_label = chapitre.replace("_", " ").title()
+                        msg += f"  {emoji} {chapitre_label} — {label} ({int(level*100)}%)\n"
+                        if data.get("weak_points"):
+                            msg += f"     ⚠️ {', '.join(data['weak_points'][:2])}\n"
+                    msg += "\n"
+                msg += "Tape */aide* pour voir les commandes disponibles."
+                await whatsapp_sender.send_text(phone, msg)
+
+    elif command == "edit_etudes":
+        user.onboarding_step = "exam"
+        await db.flush()
+        await _ask_exam(phone, user, db)
+
+    elif command in ("edit_emploi", "add_emploi"):
+        user.onboarding_step = "update_emploi_secteur"
+        await db.flush()
+        await whatsapp_sender.send_text(phone, messages.ask_secteur_emploi(user.name or "toi"))
+
+    elif command == "add_concours":
+        user.onboarding_step = "update_concours_type"
+        await db.flush()
+        await whatsapp_sender.send_buttons(
+            phone,
+            messages.ask_type_concours(user.name or "toi"),
+            messages.TYPE_CONCOURS_BUTTONS,
+        )
+
+    elif command == "confirm_new_service":
+        conv = user.conversation_state or {}
+        service = conv.get("pending_service")
+        conv.pop("pending_service", None)
+        conv.pop("service_suggestion_pending", None)
+        user.conversation_state = conv
+        if service == "concours":
+            user.onboarding_step = "update_concours_type"
+            await db.flush()
+            await whatsapp_sender.send_buttons(
+                phone,
+                messages.ask_type_concours(user.name or "toi"),
+                messages.TYPE_CONCOURS_BUTTONS,
+            )
+        elif service == "emploi":
+            user.onboarding_step = "update_emploi_secteur"
+            await db.flush()
+            await whatsapp_sender.send_text(phone, messages.ask_secteur_emploi(user.name or "toi"))
+        else:
+            await db.flush()
+
+    elif command == "ignore_service":
+        conv = user.conversation_state or {}
+        conv.pop("pending_service", None)
+        conv.pop("service_suggestion_pending", None)
+        user.conversation_state = conv
+        await db.flush()
 
     elif command == "inviter":
         if not user.referral_code:
@@ -453,6 +518,17 @@ async def process_message(message: dict, db: AsyncSession):
     await user_service.increment_message_count(db, user)
 
 
+async def _ask_usage(phone: str, user, db: AsyncSession):
+    """Demande l'usage après confirmation du pays."""
+    user.onboarding_step = "usage"
+    await db.flush()
+    await whatsapp_sender.send_buttons(
+        phone,
+        messages.ask_usage(user.name) + "\n\n_Tape *4* pour 🎯 Tout à la fois_",
+        messages.USAGE_BUTTONS,
+    )
+
+
 async def _ask_exam(phone: str, user, db: AsyncSession):
     """Charge les examens depuis DB et les envoie à l'élève."""
     from app.models.exam import Exam
@@ -546,7 +622,7 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession, msg_t
             user.pays = conv_state.get("detected_pays")
             user.conversation_state = {}
             await db.flush()
-            await _ask_exam(phone, user, db)
+            await _ask_usage(phone, user, db)
         elif choice and choice["value"] == "non":
             await whatsapp_sender.send_text(phone, messages.ask_pays_manuel())
             user.onboarding_step = "saisie_pays"
@@ -588,7 +664,303 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession, msg_t
             user.pays = "senegal"
             await db.flush()
 
-        await _ask_exam(phone, user, db)
+        await _ask_usage(phone, user, db)
+
+    elif step == "usage":
+        from app.services.choice_detector import detect_choice
+        choices = [
+            {"id": "usage_etudes",   "title": "Études",   "value": "etudes"},
+            {"id": "usage_concours", "title": "Concours", "value": "concours"},
+            {"id": "usage_emploi",   "title": "Emploi",   "value": "emploi"},
+            {"id": "usage_tout",     "title": "Tout",     "value": "tout"},
+            {"id": "4",              "title": "Tout",     "value": "tout"},
+        ]
+        choice = detect_choice(text, choices)
+        if not choice:
+            await _ask_usage(phone, user, db)
+            return
+
+        usage_value = choice["value"]
+        user.usage = ["etudes", "concours", "emploi"] if usage_value == "tout" else [usage_value]
+        await db.flush()
+
+        if usage_value in ("etudes", "tout"):
+            await _ask_exam(phone, user, db)
+        elif usage_value == "concours":
+            user.onboarding_step = "type_concours"
+            await db.flush()
+            await whatsapp_sender.send_buttons(
+                phone, messages.ask_type_concours(user.name), messages.TYPE_CONCOURS_BUTTONS
+            )
+        elif usage_value == "emploi":
+            user.onboarding_step = "emploi_secteur"
+            await db.flush()
+            await whatsapp_sender.send_text(phone, messages.ask_secteur_emploi(user.name))
+
+    elif step == "type_concours":
+        from app.services.choice_detector import detect_choice
+        choices = [
+            {"id": "concours_grandes_ecoles",    "title": "Grandes écoles",   "value": "grandes_ecoles"},
+            {"id": "concours_fonction_publique", "title": "Fonction publique","value": "fonction_publique"},
+            {"id": "concours_prive",             "title": "Privé",            "value": "prive"},
+        ]
+        choice = detect_choice(text, choices)
+        if not choice:
+            await whatsapp_sender.send_buttons(
+                phone, messages.ask_type_concours(user.name), messages.TYPE_CONCOURS_BUTTONS
+            )
+            return
+        conv = user.conversation_state or {}
+        conv["type_concours"] = choice["value"]
+        user.conversation_state = conv
+        user.onboarding_step = "concours_cible"
+        await db.flush()
+        await whatsapp_sender.send_text(phone, messages.ask_concours_cible(user.name))
+
+    elif step == "concours_cible":
+        conv = user.conversation_state or {}
+        conv["concours_cible"] = text.strip()
+        user.conversation_state = conv
+        user.onboarding_step = "date_concours"
+        await db.flush()
+        await whatsapp_sender.send_text(phone, messages.ask_date_concours())
+
+    elif step == "date_concours":
+        if text.lower().strip() not in ("passer", "skip", "je sais pas"):
+            try:
+                date_c = datetime.strptime(text.strip(), "%d/%m/%Y")
+                conv = user.conversation_state or {}
+                conv["date_concours"] = date_c.isoformat()
+                user.conversation_state = conv
+            except ValueError:
+                await whatsapp_sender.send_text(
+                    phone, "Format invalide. Utilise *JJ/MM/AAAA* ou tape *passer*."
+                )
+                return
+
+        usage = user.usage or []
+        if "emploi" in usage:
+            user.onboarding_step = "emploi_secteur"
+            await db.flush()
+            await whatsapp_sender.send_text(phone, messages.ask_secteur_emploi(user.name))
+        else:
+            user.onboarding_step = "plan"
+            await db.flush()
+            await whatsapp_sender.send_buttons(
+                phone, messages.ask_plan(user.name), messages.PLAN_ONBOARDING_BUTTONS
+            )
+
+    elif step == "emploi_secteur":
+        secteur_map = {
+            "1": "Informatique/Tech", "2": "Finance/Comptabilité",
+            "3": "Marketing/Communication", "4": "Santé",
+            "5": "Éducation", "6": "BTP/Ingénierie",
+            "7": "Droit/Juridique",
+        }
+        chosen = [secteur_map[s.strip()] for s in text.split(",") if s.strip() in secteur_map]
+        if not chosen:
+            chosen = [text.strip()] if text.strip() else []
+        if not chosen:
+            await whatsapp_sender.send_text(
+                phone, "Réponds avec les numéros ou écris ton secteur."
+            )
+            return
+        user.secteur_emploi = chosen
+        user.onboarding_step = "emploi_niveau"
+        await db.flush()
+        await whatsapp_sender.send_buttons(
+            phone, messages.ask_niveau_etudes(user.name), messages.NIVEAU_ETUDES_BUTTONS
+        )
+
+    elif step == "emploi_niveau":
+        from app.services.choice_detector import detect_choice
+        choices = [
+            {"id": "niveau_bac",     "title": "Bac",      "value": "bac"},
+            {"id": "niveau_bac2",    "title": "Bac+2",    "value": "bac+2"},
+            {"id": "niveau_bac3",    "title": "Bac+3",    "value": "bac+3"},
+            {"id": "niveau_bac5",    "title": "Bac+5",    "value": "bac+5"},
+            {"id": "niveau_doctorat","title": "Doctorat", "value": "doctorat"},
+        ]
+        choice = detect_choice(text, choices)
+        user.niveau_etudes = choice["value"] if choice else text.strip()
+        user.onboarding_step = "emploi_contrat"
+        await db.flush()
+        await whatsapp_sender.send_buttons(
+            phone, messages.ask_type_contrat(user.name), messages.TYPE_CONTRAT_BUTTONS
+        )
+
+    elif step == "emploi_contrat":
+        from app.services.choice_detector import detect_choice
+        choices = [
+            {"id": "contrat_cdi",         "title": "CDI",        "value": "CDI"},
+            {"id": "contrat_cdd",         "title": "CDD",        "value": "CDD"},
+            {"id": "contrat_stage",       "title": "Stage",      "value": "Stage"},
+            {"id": "contrat_freelance",   "title": "Freelance",  "value": "Freelance"},
+            {"id": "contrat_indifferent", "title": "Peu importe","value": "indifferent"},
+        ]
+        choice = detect_choice(text, choices)
+        user.type_contrat_souhaite = choice["value"] if choice else text.strip()
+        user.onboarding_step = "emploi_localisation"
+        await db.flush()
+        await whatsapp_sender.send_text(phone, messages.ask_localisation_emploi(user.name))
+
+    elif step == "emploi_localisation":
+        user.localisation_emploi = text.strip()
+        user.onboarding_step = "emploi_cv"
+        await db.flush()
+        await whatsapp_sender.send_text(phone, messages.ask_cv_upload(user.name))
+
+    elif step == "emploi_cv":
+        if text.lower().strip() in ("passer", "skip", "plus tard"):
+            user.onboarding_step = "plan"
+            await db.flush()
+            await whatsapp_sender.send_buttons(
+                phone, messages.ask_plan(user.name), messages.PLAN_ONBOARDING_BUTTONS
+            )
+            return
+
+        if msg_type in ("document", "image") and (image_data or message):
+            from app.services.cv_processor_service import cv_processor_service
+            await whatsapp_sender.send_text(phone, "⏳ J'analyse ton CV...")
+            file_bytes = None
+            filename = "cv.pdf"
+            if msg_type == "document":
+                raw_msg = message.get("message", {}) or {}
+                doc_data = {"key": message.get("key", {}), "message": raw_msg}
+                doc_url = await copy_analyzer_service.decrypt_media(doc_data)
+                if doc_url:
+                    file_bytes = await copy_analyzer_service.download_image(doc_url)
+                    filename = raw_msg.get("documentMessage", {}).get("fileName", "cv.pdf")
+            elif msg_type == "image":
+                image_url = await copy_analyzer_service.decrypt_media(image_data)
+                if image_url:
+                    file_bytes = await copy_analyzer_service.download_image(image_url)
+                    filename = "cv.jpg"
+            if file_bytes:
+                result_cv = await cv_processor_service.process_cv(db, user, file_bytes, filename)
+                if result_cv.get("success"):
+                    profil = result_cv.get("profil", {})
+                    await whatsapp_sender.send_text(
+                        phone,
+                        f"✅ CV analysé !\n\n"
+                        f"*Compétences détectées :* {', '.join((profil.get('competences') or [])[:5])}\n"
+                        f"*Secteurs :* {', '.join((profil.get('secteurs_interets') or [])[:3])}\n\n"
+                        "Je vais chercher les meilleures opportunités pour toi ! 🎯"
+                    )
+                else:
+                    await whatsapp_sender.send_text(
+                        phone, "⚠️ CV reçu mais difficile à lire. Je ferai de mon mieux !"
+                    )
+            user.onboarding_step = "plan"
+            await db.flush()
+            await whatsapp_sender.send_buttons(
+                phone, messages.ask_plan(user.name), messages.PLAN_ONBOARDING_BUTTONS
+            )
+            return
+
+        await whatsapp_sender.send_text(
+            phone,
+            "📄 Envoie ton CV en *PDF* ou *photo*.\n_Tape *passer* pour continuer sans CV._"
+        )
+
+    # ── Mini-onboarding mise à jour emploi ──────────────────────────
+    elif step == "update_emploi_secteur":
+        secteur_map = {
+            "1": "Informatique/Tech", "2": "Finance/Comptabilité",
+            "3": "Marketing/Communication", "4": "Santé",
+            "5": "Éducation", "6": "BTP/Ingénierie",
+            "7": "Droit/Juridique",
+        }
+        chosen = [secteur_map[s.strip()] for s in text.split(",") if s.strip() in secteur_map]
+        if not chosen:
+            chosen = [text.strip()] if text.strip() else []
+        if chosen:
+            user.secteur_emploi = chosen
+            # Ajoute emploi à l'usage si absent
+            usage = user.usage or []
+            if isinstance(usage, str):
+                usage = [usage]
+            if "emploi" not in usage:
+                usage.append("emploi")
+            user.usage = usage
+        user.onboarding_step = "update_emploi_cv"
+        await db.flush()
+        await whatsapp_sender.send_text(phone, messages.ask_cv_upload(user.name))
+
+    elif step == "update_emploi_cv":
+        if text.lower().strip() in ("passer", "skip"):
+            user.onboarding_step = "done"
+            await db.flush()
+            await whatsapp_sender.send_text(
+                phone, f"✅ Profil emploi mis à jour *{user.name}* !"
+            )
+            return
+
+        if msg_type in ("document", "image"):
+            from app.services.cv_processor_service import cv_processor_service
+            await whatsapp_sender.send_text(phone, "⏳ Mise à jour de ton CV...")
+            file_bytes = None
+            filename = "cv.pdf"
+            if msg_type == "document":
+                raw_msg = message.get("message", {}) or {}
+                doc_data = {"key": message.get("key", {}), "message": raw_msg}
+                doc_url = await copy_analyzer_service.decrypt_media(doc_data)
+                if doc_url:
+                    file_bytes = await copy_analyzer_service.download_image(doc_url)
+            elif msg_type == "image":
+                image_url = await copy_analyzer_service.decrypt_media(image_data)
+                if image_url:
+                    file_bytes = await copy_analyzer_service.download_image(image_url)
+                    filename = "cv.jpg"
+            if file_bytes:
+                result_cv = await cv_processor_service.process_cv(db, user, file_bytes, filename)
+                await whatsapp_sender.send_text(
+                    phone,
+                    "✅ CV mis à jour !" if result_cv.get("success") else "⚠️ CV reçu mais difficile à lire."
+                )
+            user.onboarding_step = "done"
+            await db.flush()
+            return
+
+        await whatsapp_sender.send_text(phone, "📄 Envoie ton CV ou tape *passer*.")
+
+    elif step == "update_concours_type":
+        from app.services.choice_detector import detect_choice
+        choices = [
+            {"id": "concours_grandes_ecoles",    "value": "grandes_ecoles",   "title": "Grandes écoles"},
+            {"id": "concours_fonction_publique", "value": "fonction_publique","title": "Fonction publique"},
+            {"id": "concours_prive",             "value": "prive",            "title": "Privé"},
+        ]
+        choice = detect_choice(text, choices)
+        if not choice:
+            await whatsapp_sender.send_buttons(
+                phone, messages.ask_type_concours(user.name), messages.TYPE_CONCOURS_BUTTONS
+            )
+            return
+        conv = user.conversation_state or {}
+        conv["type_concours"] = choice["value"]
+        user.conversation_state = conv
+        usage = user.usage or []
+        if isinstance(usage, str):
+            usage = [usage]
+        if "concours" not in usage:
+            usage.append("concours")
+        user.usage = usage
+        user.onboarding_step = "update_concours_cible"
+        await db.flush()
+        await whatsapp_sender.send_text(phone, messages.ask_concours_cible(user.name))
+
+    elif step == "update_concours_cible":
+        conv = user.conversation_state or {}
+        conv["concours_cible"] = text.strip()
+        user.conversation_state = conv
+        user.onboarding_step = "done"
+        await db.flush()
+        await whatsapp_sender.send_text(
+            phone,
+            f"✅ Super *{user.name}* ! Préparation concours *{text.strip()}* activée 🏆\n\n"
+            "Demande-moi des exercices ou des infos sur ce concours !"
+        )
 
     elif step == "exam":
         from app.models.exam import Exam, Series
@@ -768,6 +1140,32 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession, msg_t
                     f"💳 Voici ton lien de paiement :\n\n{invoice['payment_url']}\n\n"
                     "Paiement sécurisé via Wave, Orange Money ou Free Money 🔒"
                 )
+
+        # ── Matching emploi après onboarding ─────────────────────────
+        usage_ob = user.usage or []
+        if isinstance(usage_ob, str):
+            usage_ob = [usage_ob]
+        if "emploi" in usage_ob or "tout" in usage_ob:
+            try:
+                from app.services.matching_service import matching_service
+                matches = await matching_service.match_candidate(db, user.id)
+                for match in matches[:3]:
+                    job = match["job"]
+                    score = match["score"]
+                    conseils = match.get("conseils_lettre", [])
+                    msg_job = (
+                        f"✅ *Opportunité pour toi !*\n\n"
+                        f"*{job.get('titre')}*\n"
+                        f"🏢 {job.get('entreprise')} • 📍 {job.get('localisation', 'N/A')}\n"
+                        f"🎯 Compatibilité : *{int(score)}%*\n\n"
+                    )
+                    if conseils:
+                        msg_job += "*💡 Conseils pour ta lettre :*\n"
+                        for c in conseils[:4]:
+                            msg_job += f"• {c}\n"
+                    await whatsapp_sender.send_text(phone, msg_job)
+            except Exception as e:
+                print(f"Matching emploi onboarding error: {e}")
 
     elif step == "done":
         quota = await user_service.check_quota(user)
@@ -1342,6 +1740,58 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession, msg_t
             await handle_command(command, phone, user, db)
             await user_service.increment_message_count(db, user)
             return
+
+        # ── Détection intelligente nouveau besoin (LLM) ───────────────
+        if text and len(text) > 5:
+            usage_actuel = user.usage or []
+            if isinstance(usage_actuel, str):
+                usage_actuel = [usage_actuel]
+            services_manquants = [
+                s for s in ("concours", "emploi")
+                if s not in usage_actuel and "tout" not in usage_actuel
+            ]
+            conv_s_check = user.conversation_state or {}
+            if services_manquants and not conv_s_check.get("service_suggestion_pending"):
+                try:
+                    import httpx as _httpx, json as _json, re as _re
+                    async with _httpx.AsyncClient(timeout=5.0) as _client:
+                        _resp = await _client.post(
+                            "https://api.mistral.ai/v1/chat/completions",
+                            headers={"Authorization": f"Bearer {settings.mistral_api_key}"},
+                            json={
+                                "model": "mistral-small-latest",
+                                "messages": [{"role": "user", "content": (
+                                    f"Services non activés : {services_manquants}\n"
+                                    f"Message utilisateur : \"{text}\"\n\n"
+                                    f"L'utilisateur exprime-t-il un besoin pour l'un de ces services ?\n"
+                                    f"Réponds UNIQUEMENT avec ce JSON :\n"
+                                    f'{{\"nouveau_besoin\": \"concours\" | \"emploi\" | null, \"confiance\": 0.0}}'
+                                )}],
+                                "temperature": 0.1,
+                                "max_tokens": 50,
+                            },
+                        )
+                        _data = _resp.json()
+                        if "choices" in _data:
+                            _txt = _re.sub(r"```json|```", "", _data["choices"][0]["message"]["content"].strip()).strip()
+                            _parsed = _json.loads(_txt)
+                            _besoin = _parsed.get("nouveau_besoin")
+                            _confiance = float(_parsed.get("confiance", 0))
+                            if _besoin and _confiance >= 0.75:
+                                conv_s = user.conversation_state or {}
+                                conv_s["pending_service"] = _besoin
+                                conv_s["service_suggestion_pending"] = True
+                                user.conversation_state = conv_s
+                                await db.flush()
+                                await whatsapp_sender.send_buttons(
+                                    phone,
+                                    messages.suggest_new_service(_besoin),
+                                    messages.SUGGEST_SERVICE_BUTTONS,
+                                )
+                                await user_service.increment_message_count(db, user)
+                                return
+                except Exception as _e:
+                    print(f"Détection service LLM: {_e}")
 
         # ── Mode fascicule (temporaire) — AVANT tout traitement ──────
         fascicule_mode = await config_service.get_bool("fascicule_mode")

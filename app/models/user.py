@@ -56,3 +56,12 @@ class User(Base, TimestampMixin):
     # Meta
     language: Mapped[str] = mapped_column(String(5), default="fr")
     is_admin: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+
+    # Usage plateforme
+    usage: Mapped[str | None] = mapped_column(String(20), nullable=True)  # etudes/concours/emploi/tout
+
+    # Profil emploi
+    secteur_emploi: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    type_contrat_souhaite: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    localisation_emploi: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    niveau_etudes: Mapped[str | None] = mapped_column(String(20), nullable=True)

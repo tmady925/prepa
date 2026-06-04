@@ -47,6 +47,16 @@ class Concours(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
+    # Enrichissement concours
+    type_concours: Mapped[str | None] = mapped_column(String(50), nullable=True)  # grandes_ecoles/fonction_publique/prive/autre
+    organisme: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    conditions_inscription: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    date_concours: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    date_inscription_limite: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    lien_officiel: Mapped[str | None] = mapped_column(Text, nullable=True)
+    programme_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    statut_concours: Mapped[str] = mapped_column(String(20), default="upcoming")  # upcoming/ongoing/passed
+
 
 class ConcoursSeriesLink(Base):
     __tablename__ = "concours_series"

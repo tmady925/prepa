@@ -146,11 +146,14 @@ async def _fetch_emploidakar_detail(url: str, zyte_api_key: str) -> dict:
             if meta:
                 result["description"] = meta.get("content", "")[:500]
 
-            # Affine titre et entreprise via LLM si description disponible
+            # Affine titre et entreprise via LLM (h1 emploidakar toujours pollué)
             if result.get("description"):
+                result["titre_brut"] = result.get("titre", "")  # backup h1
                 llm = await _extract_titre_entreprise_llm(result["description"], url)
                 if llm.get("titre"):
-                    result["titre"] = llm["titre"]
+                    result["titre"] = llm["titre"][:100]  # LLM remplace toujours
+                elif not result.get("titre"):
+                    result["titre"] = result["titre_brut"]  # fallback si LLM échoue
                 if llm.get("entreprise"):
                     result["entreprise"] = llm["entreprise"]
 

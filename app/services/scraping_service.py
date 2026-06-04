@@ -206,6 +206,7 @@ class ScrapingService:
         all_scraped += await _fetch_senjob_jobs()
 
         scraped_urls: set[str] = set()
+        batch_urls: set[str] = set()  # URLs déjà traitées dans ce batch
 
         for job_data in all_scraped:
             source_url = job_data.get("source_url", "")
@@ -219,7 +220,13 @@ class ScrapingService:
 
             scraped_urls.add(source_url)
 
-            # Niveau 1 — URL déjà connue
+            # Niveau 0 — Doublon dans ce même batch (même URL vue deux fois)
+            if source_url in batch_urls:
+                duplicate_count += 1
+                continue
+            batch_urls.add(source_url)
+
+            # Niveau 1 — URL déjà en DB
             if source_url in existing_urls:
                 for j in existing_jobs:
                     if j.source_url == source_url:
@@ -228,7 +235,7 @@ class ScrapingService:
                 duplicate_count += 1
                 continue
 
-            # Niveau 2 — Hash contenu + année
+            # Niveau 2 — Hash contenu + année déjà en DB
             c_hash = _content_hash(titre, entreprise, localisation, annee)
             if c_hash in existing_hashes:
                 existing_hashes[c_hash].last_seen_at = now

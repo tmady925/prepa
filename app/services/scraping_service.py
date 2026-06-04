@@ -404,8 +404,10 @@ class ScrapingService:
                 duplicate_count += 1
                 continue
 
-            # Nouvelle offre
-            new_job = JobOpportunity(
+            # Nouvelle offre — INSERT ON CONFLICT DO NOTHING sur source_url
+            from sqlalchemy.dialects.postgresql import insert as pg_insert
+            stmt = pg_insert(JobOpportunity).values(
+                id=__import__('uuid').uuid4(),
                 titre=titre,
                 entreprise=entreprise or "Non précisé",
                 secteur=job_data.get("secteur"),
@@ -420,8 +422,8 @@ class ScrapingService:
                 annee_publication=annee,
                 last_seen_at=now,
                 expires_at=now + timedelta(days=30),
-            )
-            db.add(new_job)
+            ).on_conflict_do_nothing(index_elements=["source_url"])
+            await db.execute(stmt)
             new_count += 1
 
         # Expire les offres non revues depuis 3 jours

@@ -1796,6 +1796,70 @@ async def delete_job(
     return {"success": True}
 
 
+# ── CANDIDATS ─────────────────────────────────────────────────────────
+
+@router.get("/admin/candidates")
+async def list_candidates(
+    db: AsyncSession = Depends(get_db),
+    _: bool = Depends(verify_admin),
+    limit: int = 100,
+    offset: int = 0,
+):
+    """Liste les CandidateProfile avec infos User et nb matchs."""
+    from app.models.candidate_profile import CandidateProfile, JobMatch
+    from app.models.user import User
+
+    result = await db.execute(
+        select(CandidateProfile, User)
+        .join(User, User.id == CandidateProfile.user_id)
+        .order_by(CandidateProfile.created_at.desc())
+        .limit(limit).offset(offset)
+    )
+    rows = result.all()
+
+    out = []
+    for cp, u in rows:
+        nb_matchs = await db.scalar(
+            select(func.count(JobMatch.id)).where(JobMatch.user_id == cp.user_id)
+        ) or 0
+        out.append({
+            "user_id": str(cp.user_id),
+            "name": u.name,
+            "phone": u.phone_number,
+            "secteurs": cp.secteurs_interets or [],
+            "niveau_etudes": cp.niveau_etudes,
+            "localisation": cp.localisation,
+            "annees_experience": cp.annees_experience,
+            "has_cv": bool(cp.cv_url),
+            "has_embedding": bool(cp.embedding),
+            "nb_matchs": nb_matchs,
+            "created_at": cp.created_at.isoformat() if cp.created_at else None,
+        })
+    return out
+
+
+@router.post("/admin/candidates/{user_id}/rematch")
+async def rematch_candidate(
+    user_id: str,
+    db: AsyncSession = Depends(get_db),
+    _: bool = Depends(verify_admin),
+):
+    """Relance le matching pour un candidat spécifique."""
+    from app.services.matching_service import matching_service
+
+    try:
+        uid = uuid.UUID(user_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="user_id invalide")
+
+    try:
+        matches = await matching_service.match_candidate(db, uid)
+        await db.commit()
+        return {"success": True, "matches": len(matches)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Erreur matching: {e}")
+
+
 # ── SCRAPING ──────────────────────────────────────────────────────────
 
 @router.post("/admin/scraping/run")

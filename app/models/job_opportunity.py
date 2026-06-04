@@ -38,5 +38,10 @@ class JobOpportunity(Base, TimestampMixin):
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     vues: Mapped[int] = mapped_column(Integer, default=0)
 
+    # Scraping — déduplication et suivi
+    content_hash: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    annee_publication: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
     # Embedding pour matching sémantique (pgvector JSONB fallback)
     embedding: Mapped[list | None] = mapped_column(JSONB, nullable=True)

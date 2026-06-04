@@ -16,12 +16,22 @@ async def lifespan(app: FastAPI):
     from app.services.simulation_scheduler import run_scheduler
     scheduler_task = asyncio.create_task(run_scheduler())
 
+    # Lance le scheduler de scraping emploi (toutes les 6h)
+    from app.services.scraping_scheduler import run_scraping_scheduler
+    scraping_task = asyncio.create_task(run_scraping_scheduler())
+
     yield
 
-    # Arrêt propre du scheduler
+    # Arrêt propre des schedulers
     scheduler_task.cancel()
     try:
         await scheduler_task
+    except asyncio.CancelledError:
+        pass
+
+    scraping_task.cancel()
+    try:
+        await scraping_task
     except asyncio.CancelledError:
         pass
 

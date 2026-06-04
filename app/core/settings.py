@@ -38,6 +38,7 @@ class Settings(BaseSettings):
     anthropic_api_key: str = ""
     mistral_api_key: str = ""
     groq_api_key: str = ""
+    zyte_api_key: str = ""
 
     # PayDunya
     paydunya_master_key: str = ""

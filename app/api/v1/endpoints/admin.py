@@ -1616,11 +1616,12 @@ async def create_job_admin(
 ):
     """
     Crée une annonce manuellement (statut=active directement).
-    Génère l'embedding + lance le matching en arrière-plan.
+    Vérifie les doublons, génère l'embedding + lance le matching en arrière-plan.
     """
     from app.models.job_opportunity import JobOpportunity
     from app.services.rag.embedding_service import embedding_service
     from app.services.matching_service import matching_service
+    from app.services.scraping_service import scraping_service
     import asyncio
 
     try:
@@ -1631,6 +1632,24 @@ async def create_job_admin(
     titre = (data.get("titre") or "").strip()
     if not titre:
         raise HTTPException(status_code=400, detail="titre requis")
+
+    # Vérifie doublon avant création
+    from datetime import datetime as _dt
+    duplicate = await scraping_service.check_duplicate_manual(
+        db=db,
+        titre=titre,
+        entreprise=data.get("entreprise", ""),
+        localisation=data.get("localisation", ""),
+        annee=data.get("annee_publication") or _dt.now().year,
+        source_url=data.get("source_url"),
+    )
+    if duplicate and not data.get("force_publish"):
+        return {
+            "success": False,
+            "duplicate": True,
+            "duplicate_info": duplicate,
+            "message": duplicate["message"],
+        }
 
     job = JobOpportunity(
         titre=titre,
@@ -1775,6 +1794,22 @@ async def delete_job(
     await db.delete(job)
     await db.commit()
     return {"success": True}
+
+
+# ── SCRAPING ──────────────────────────────────────────────────────────
+
+@router.post("/admin/scraping/run")
+async def run_scraping_now(
+    db: AsyncSession = Depends(get_db),
+    _: bool = Depends(verify_admin),
+):
+    """Lance le scraping immédiatement (hors scheduler)."""
+    from app.services.scraping_service import scraping_service
+    try:
+        result = await scraping_service.scrape_all(db)
+        return {"success": True, **result}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Erreur scraping: {e}")
 
 
 # ── DASHBOARD ─────────────────────────────────────────────────────────

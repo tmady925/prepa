@@ -55,19 +55,112 @@ def _detect_type_contrat(text: str) -> str | None:
     return None
 
 
-# ── Enrichissement LLM ────────────────────────────────────────────────
+# ── Scraping pages détail ─────────────────────────────────────────────
 
-async def _parse_job_with_llm(raw_text: str, source_url: str) -> dict:
-    """
-    Utilise Mistral pour extraire proprement les champs d'une offre
-    depuis le texte brut scrappé.
-    """
-    import json
-    import re as _re
-    if not settings.mistral_api_key:
-        return {}
+async def _fetch_senjob_detail(url: str) -> dict:
+    """Scrape la page détail d'une offre Senjob via httpx."""
     try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
+        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+        async with httpx.AsyncClient(timeout=20.0, headers=headers, follow_redirects=True) as client:
+            resp = await client.get(url)
+            if resp.status_code != 200:
+                return {}
+            soup = BeautifulSoup(resp.text, "html.parser")
+
+            meta = soup.find("meta", attrs={"name": "description"})
+            if not meta:
+                return {}
+            content = meta.get("content", "")
+
+            result = {}
+
+            secteur_match = re.search(r"Secteur\s*:\s*([^\n\r<]+)", content)
+            if secteur_match:
+                result["secteur"] = secteur_match.group(1).strip()
+
+            loc_match = re.search(r"Localisation\s*:\s*([^\n\r<]+)", content)
+            if loc_match:
+                result["localisation"] = loc_match.group(1).strip()
+
+            desc = re.sub(r"(Secteur|Localisation)\s*:[^\n]*\n?", "", content)
+            result["description"] = desc.strip()[:500]
+
+            h1 = soup.find("h1")
+            if h1:
+                result["titre"] = h1.get_text(strip=True)[:100]
+
+            og_title = soup.find("meta", property="og:title")
+            if og_title:
+                og = og_title.get("content", "")
+                parts = og.split(" - ")
+                if len(parts) >= 2:
+                    result["entreprise"] = parts[1].strip()
+
+            return result
+    except Exception as e:
+        print(f"  ⚠️ Senjob detail error {url}: {e}")
+        return {}
+
+
+async def _fetch_emploidakar_detail(url: str, zyte_api_key: str) -> dict:
+    """Scrape la page détail d'une offre EmploiDakar via Zyte."""
+    try:
+        async with httpx.AsyncClient(timeout=40.0) as client:
+            resp = await client.post(
+                "https://api.zyte.com/v1/extract",
+                auth=(zyte_api_key, ""),
+                json={"url": url, "browserHtml": True},
+            )
+            data = resp.json()
+            html = data.get("browserHtml", "")
+            if not html:
+                return {}
+
+            soup = BeautifulSoup(html, "html.parser")
+            result = {}
+
+            h1 = soup.find("h1")
+            if h1:
+                result["titre"] = h1.get_text(strip=True)[:100]
+
+            for tag in soup.find_all(["span", "div", "p", "li"]):
+                text = tag.get_text(strip=True)
+                if not text or len(text) > 150:
+                    continue
+                tl = text.lower()
+                if any(v in tl for v in ("dakar", "thiès", "thies", "saint-louis", "sénégal", "senegal")):
+                    if not result.get("localisation") and len(text) < 50:
+                        result["localisation"] = text
+                if text in ("CDI", "CDD", "Stage", "Freelance", "Prestation de Services"):
+                    result["type_contrat"] = "Freelance" if text == "Prestation de Services" else text
+
+            meta = soup.find("meta", attrs={"name": "description"})
+            if meta:
+                result["description"] = meta.get("content", "")[:500]
+
+            if result.get("description") and not result.get("secteur"):
+                secteur = await _detect_secteur_llm(result["description"])
+                if secteur:
+                    result["secteur"] = secteur
+
+            return result
+    except Exception as e:
+        print(f"  ⚠️ EmploiDakar detail error {url}: {e}")
+        return {}
+
+
+async def _detect_secteur_llm(description: str) -> str | None:
+    """Détecte le secteur d'activité via Mistral (appel léger)."""
+    if not settings.mistral_api_key:
+        return None
+    secteurs = [
+        "Informatique/Tech", "Finance/Comptabilité", "Marketing/Communication",
+        "Santé", "Éducation", "BTP/Ingénierie", "Commerce/Vente",
+        "RH/Recrutement", "Juridique", "Agriculture", "Transport/Logistique",
+        "Humanitaire/ONG", "Hôtellerie/Restauration", "Autre",
+    ]
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
             resp = await client.post(
                 "https://api.mistral.ai/v1/chat/completions",
                 headers={"Authorization": f"Bearer {settings.mistral_api_key}"},
@@ -76,27 +169,22 @@ async def _parse_job_with_llm(raw_text: str, source_url: str) -> dict:
                     "messages": [{
                         "role": "user",
                         "content": (
-                            f"Extrais les informations de cette offre d'emploi sénégalaise.\n"
-                            f"Texte brut : {raw_text[:300]}\n"
-                            f"URL : {source_url}\n\n"
-                            f"Retourne UNIQUEMENT ce JSON valide :\n"
-                            f'{{"titre": "...", "entreprise": "...", '
-                            f'"localisation": "...", "type_contrat": "CDI|CDD|Stage|Freelance|null", '
-                            f'"secteur": "...", "description_courte": "..."}}'
+                            f"Quel est le secteur d'activité de cette offre d'emploi ?\n"
+                            f"Description: {description[:200]}\n\n"
+                            f"Choisis UNIQUEMENT parmi: {', '.join(secteurs)}\n"
+                            f"Réponds avec juste le nom du secteur, rien d'autre."
                         ),
                     }],
                     "temperature": 0.1,
-                    "max_tokens": 200,
+                    "max_tokens": 20,
                 },
             )
             data = resp.json()
             if "choices" in data:
-                text = data["choices"][0]["message"]["content"].strip()
-                text = _re.sub(r"```json|```", "", text).strip()
-                return json.loads(text)
-    except Exception as e:
-        print(f"  ⚠️ LLM parse error: {e}")
-    return {}
+                return data["choices"][0]["message"]["content"].strip()
+    except Exception:
+        pass
+    return None
 
 
 # ── Scraper EmploiDakar (via Zyte API) ────────────────────────────────
@@ -249,33 +337,35 @@ class ScrapingService:
         all_scraped += await _fetch_emploidakar_jobs()
         all_scraped += await _fetch_senjob_jobs()
 
-        # Enrichit les offres via LLM (batch de 10, anti rate-limit)
+        # Enrichit les offres via scraping des pages détail
         if all_scraped:
-            print(f"  → Enrichissement LLM de {len(all_scraped)} offres...")
+            print(f"  → Scraping détail de {len(all_scraped)} offres...")
             import asyncio as _asyncio
 
-            async def _enrich_batch(jobs_batch: list[dict]) -> None:
-                tasks = [
-                    _parse_job_with_llm(j["titre"], j["source_url"])
-                    for j in jobs_batch
-                ]
-                results = await _asyncio.gather(*tasks, return_exceptions=True)
-                for job, result in zip(jobs_batch, results):
-                    if isinstance(result, dict) and result:
-                        job["titre"]       = result.get("titre")       or job["titre"]
-                        job["entreprise"]  = result.get("entreprise")  or job["entreprise"]
-                        job["localisation"]= result.get("localisation")or job["localisation"]
-                        job["type_contrat"]= result.get("type_contrat")or job["type_contrat"]
-                        job["secteur"]     = result.get("secteur")     or job["secteur"]
-                        job["description"] = result.get("description_courte") or job["description"]
+            async def _enrich_with_detail(job: dict) -> None:
+                """Enrichit une offre avec les données de sa page détail."""
+                url = job.get("source_url", "")
+                if not url:
+                    return
+                detail = {}
+                if "senjob.com" in url:
+                    detail = await _fetch_senjob_detail(url)
+                elif "emploidakar.com" in url:
+                    detail = await _fetch_emploidakar_detail(url, settings.zyte_api_key)
+                # Enrichit seulement les champs vides
+                for field in ["titre", "entreprise", "localisation", "type_contrat", "secteur", "description"]:
+                    if detail.get(field) and not job.get(field):
+                        job[field] = detail[field]
 
-            batch_size_llm = 10
-            for i in range(0, len(all_scraped), batch_size_llm):
-                await _enrich_batch(all_scraped[i:i + batch_size_llm])
-                if i + batch_size_llm < len(all_scraped):
-                    await _asyncio.sleep(1.0)  # anti rate-limit Mistral
+            # Batch de 5 (Zyte est plus lent que httpx direct)
+            batch_size_detail = 5
+            for i in range(0, len(all_scraped), batch_size_detail):
+                batch = all_scraped[i:i + batch_size_detail]
+                await _asyncio.gather(*[_enrich_with_detail(j) for j in batch])
+                if i + batch_size_detail < len(all_scraped):
+                    await _asyncio.sleep(2.0)
 
-            print("  → Enrichissement LLM terminé")
+            print("  → Enrichissement détail terminé")
 
         scraped_urls: set[str] = set()
         batch_urls: set[str] = set()  # URLs déjà traitées dans ce batch

@@ -96,6 +96,14 @@ async def _fetch_senjob_detail(url: str) -> dict:
                 if len(parts) >= 2:
                     result["entreprise"] = parts[1].strip()
 
+            # Affine titre et entreprise via LLM si description disponible
+            if result.get("description"):
+                llm = await _extract_titre_entreprise_llm(result["description"], url)
+                if llm.get("titre"):
+                    result["titre"] = llm["titre"]
+                if llm.get("entreprise"):
+                    result["entreprise"] = llm["entreprise"]
+
             return result
     except Exception as e:
         print(f"  ⚠️ Senjob detail error {url}: {e}")
@@ -138,6 +146,14 @@ async def _fetch_emploidakar_detail(url: str, zyte_api_key: str) -> dict:
             if meta:
                 result["description"] = meta.get("content", "")[:500]
 
+            # Affine titre et entreprise via LLM si description disponible
+            if result.get("description"):
+                llm = await _extract_titre_entreprise_llm(result["description"], url)
+                if llm.get("titre"):
+                    result["titre"] = llm["titre"]
+                if llm.get("entreprise"):
+                    result["entreprise"] = llm["entreprise"]
+
             if result.get("description") and not result.get("secteur"):
                 secteur = await _detect_secteur_llm(result["description"])
                 if secteur:
@@ -147,6 +163,44 @@ async def _fetch_emploidakar_detail(url: str, zyte_api_key: str) -> dict:
     except Exception as e:
         print(f"  ⚠️ EmploiDakar detail error {url}: {e}")
         return {}
+
+
+async def _extract_titre_entreprise_llm(description: str, url: str) -> dict:
+    """Extrait titre du poste et entreprise depuis le texte via Mistral."""
+    if not settings.mistral_api_key or not description:
+        return {}
+    import json
+    import re as _re
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as _c:
+            _r = await _c.post(
+                "https://api.mistral.ai/v1/chat/completions",
+                headers={"Authorization": f"Bearer {settings.mistral_api_key}"},
+                json={
+                    "model": "mistral-small-latest",
+                    "messages": [{"role": "user", "content":
+                        f"Extrait le titre du poste et l'entreprise depuis ce texte.\n"
+                        f"Texte: {description[:300]}\n"
+                        f"URL: {url}\n"
+                        f'Réponds UNIQUEMENT: {{"titre": "...", "entreprise": "..."}}'
+                    }],
+                    "temperature": 0.1,
+                    "max_tokens": 60,
+                },
+            )
+            _d = _r.json()
+            if "choices" in _d:
+                _txt = _re.sub(r"```json|```", "", _d["choices"][0]["message"]["content"]).strip()
+                _parsed = json.loads(_txt)
+                out = {}
+                if _parsed.get("titre"):
+                    out["titre"] = _parsed["titre"][:100]
+                if _parsed.get("entreprise") and _parsed["entreprise"] not in ("Non précisé", ""):
+                    out["entreprise"] = _parsed["entreprise"][:100]
+                return out
+    except Exception:
+        pass
+    return {}
 
 
 async def _detect_secteur_llm(description: str) -> str | None:

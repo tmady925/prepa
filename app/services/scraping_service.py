@@ -55,6 +55,50 @@ def _detect_type_contrat(text: str) -> str | None:
     return None
 
 
+# ── Enrichissement LLM ────────────────────────────────────────────────
+
+async def _parse_job_with_llm(raw_text: str, source_url: str) -> dict:
+    """
+    Utilise Mistral pour extraire proprement les champs d'une offre
+    depuis le texte brut scrappé.
+    """
+    import json
+    import re as _re
+    if not settings.mistral_api_key:
+        return {}
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.post(
+                "https://api.mistral.ai/v1/chat/completions",
+                headers={"Authorization": f"Bearer {settings.mistral_api_key}"},
+                json={
+                    "model": "mistral-small-latest",
+                    "messages": [{
+                        "role": "user",
+                        "content": (
+                            f"Extrais les informations de cette offre d'emploi sénégalaise.\n"
+                            f"Texte brut : {raw_text[:300]}\n"
+                            f"URL : {source_url}\n\n"
+                            f"Retourne UNIQUEMENT ce JSON valide :\n"
+                            f'{{"titre": "...", "entreprise": "...", '
+                            f'"localisation": "...", "type_contrat": "CDI|CDD|Stage|Freelance|null", '
+                            f'"secteur": "...", "description_courte": "..."}}'
+                        ),
+                    }],
+                    "temperature": 0.1,
+                    "max_tokens": 200,
+                },
+            )
+            data = resp.json()
+            if "choices" in data:
+                text = data["choices"][0]["message"]["content"].strip()
+                text = _re.sub(r"```json|```", "", text).strip()
+                return json.loads(text)
+    except Exception as e:
+        print(f"  ⚠️ LLM parse error: {e}")
+    return {}
+
+
 # ── Scraper EmploiDakar (via Zyte API) ────────────────────────────────
 
 async def _fetch_emploidakar_jobs() -> list[dict]:
@@ -205,6 +249,34 @@ class ScrapingService:
         all_scraped += await _fetch_emploidakar_jobs()
         all_scraped += await _fetch_senjob_jobs()
 
+        # Enrichit les offres via LLM (batch de 10, anti rate-limit)
+        if all_scraped:
+            print(f"  → Enrichissement LLM de {len(all_scraped)} offres...")
+            import asyncio as _asyncio
+
+            async def _enrich_batch(jobs_batch: list[dict]) -> None:
+                tasks = [
+                    _parse_job_with_llm(j["titre"], j["source_url"])
+                    for j in jobs_batch
+                ]
+                results = await _asyncio.gather(*tasks, return_exceptions=True)
+                for job, result in zip(jobs_batch, results):
+                    if isinstance(result, dict) and result:
+                        job["titre"]       = result.get("titre")       or job["titre"]
+                        job["entreprise"]  = result.get("entreprise")  or job["entreprise"]
+                        job["localisation"]= result.get("localisation")or job["localisation"]
+                        job["type_contrat"]= result.get("type_contrat")or job["type_contrat"]
+                        job["secteur"]     = result.get("secteur")     or job["secteur"]
+                        job["description"] = result.get("description_courte") or job["description"]
+
+            batch_size_llm = 10
+            for i in range(0, len(all_scraped), batch_size_llm):
+                await _enrich_batch(all_scraped[i:i + batch_size_llm])
+                if i + batch_size_llm < len(all_scraped):
+                    await _asyncio.sleep(1.0)  # anti rate-limit Mistral
+
+            print("  → Enrichissement LLM terminé")
+
         scraped_urls: set[str] = set()
         batch_urls: set[str] = set()  # URLs déjà traitées dans ce batch
 
@@ -276,6 +348,32 @@ class ScrapingService:
             await db.rollback()
             print(f"  ⚠️ scrape_all commit error: {e}")
             raise
+
+        # Génère les embeddings pour les nouvelles offres sans embedding
+        if new_count > 0:
+            try:
+                from app.services.rag.embedding_service import embedding_service
+                result2 = await db.execute(
+                    select(JobOpportunity).where(
+                        JobOpportunity.source == "scraping",
+                        JobOpportunity.statut == "active",
+                        JobOpportunity.embedding.is_(None),
+                    )
+                )
+                jobs_sans_embedding = result2.scalars().all()
+                for job in jobs_sans_embedding:
+                    embed_text = (
+                        f"{job.titre} {job.entreprise} "
+                        f"{job.secteur or ''} {job.localisation} "
+                        f"{job.type_contrat or ''}"
+                    )
+                    embedding = await embedding_service.embed_text(embed_text)
+                    if embedding:
+                        job.embedding = embedding
+                await db.commit()
+                print(f"  → {len(jobs_sans_embedding)} embeddings générés")
+            except Exception as e:
+                print(f"  ⚠️ Embedding error: {e}")
 
         print(f"Scraping terminé: {new_count} nouvelles, {duplicate_count} doublons, {expired_count} expirées")
         return {

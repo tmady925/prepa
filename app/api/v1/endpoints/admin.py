@@ -1458,6 +1458,325 @@ async def get_simulation_participants(
     ]
 
 
+# ── RECRUTEURS ────────────────────────────────────────────────────────
+
+@router.get("/admin/recruiters")
+async def list_recruiters(
+    db: AsyncSession = Depends(get_db),
+    _: bool = Depends(verify_admin),
+    statut: str | None = None,
+    limit: int = 100,
+    offset: int = 0,
+):
+    """Liste tous les recruteurs avec nb annonces chacun."""
+    from app.models.recruiter import Recruiter
+    from app.models.job_opportunity import JobOpportunity
+
+    q = select(Recruiter).order_by(Recruiter.created_at.desc())
+    if statut:
+        q = q.where(Recruiter.statut == statut)
+    q = q.limit(limit).offset(offset)
+    result = await db.execute(q)
+    recruiters = result.scalars().all()
+
+    out = []
+    for r in recruiters:
+        nb_jobs = await db.scalar(
+            select(func.count(JobOpportunity.id)).where(JobOpportunity.recruiter_id == r.id)
+        ) or 0
+        out.append({
+            "id": str(r.id),
+            "nom": r.nom,
+            "entreprise": r.entreprise,
+            "email": r.email,
+            "phone": r.phone,
+            "plan": r.plan,
+            "statut": r.statut,
+            "annonces_restantes": r.annonces_restantes,
+            "nb_annonces": nb_jobs,
+            "abonnement_expire_at": r.abonnement_expire_at.isoformat() if r.abonnement_expire_at else None,
+            "created_at": r.created_at.isoformat() if r.created_at else None,
+        })
+    return out
+
+
+@router.post("/admin/recruiters/{recruiter_id}/activate")
+async def activate_recruiter(
+    recruiter_id: str,
+    db: AsyncSession = Depends(get_db),
+    _: bool = Depends(verify_admin),
+):
+    """Active le compte recruteur + notifie par WhatsApp si phone disponible."""
+    from app.models.recruiter import Recruiter
+    from app.services.whatsapp.sender import whatsapp_sender
+
+    result = await db.execute(
+        select(Recruiter).where(Recruiter.id == uuid.UUID(recruiter_id))
+    )
+    r = result.scalar_one_or_none()
+    if not r:
+        raise HTTPException(status_code=404, detail="Recruteur introuvable")
+
+    r.statut = "active"
+    await db.commit()
+
+    if r.phone:
+        try:
+            await whatsapp_sender.send_text(
+                r.phone,
+                f"✅ *{r.nom}*, votre compte recruteur *Prepa* est validé !\n\n"
+                f"Connectez-vous sur le dashboard pour publier vos annonces.\n"
+                f"Votre clé API : `{r.api_key[:12]}...`"
+            )
+        except Exception as e:
+            print(f"Admin activate recruiter WhatsApp: {e}")
+
+    return {"success": True, "statut": "active"}
+
+
+@router.post("/admin/recruiters/{recruiter_id}/suspend")
+async def suspend_recruiter(
+    recruiter_id: str,
+    db: AsyncSession = Depends(get_db),
+    _: bool = Depends(verify_admin),
+):
+    """Suspend le compte recruteur."""
+    from app.models.recruiter import Recruiter
+
+    result = await db.execute(
+        select(Recruiter).where(Recruiter.id == uuid.UUID(recruiter_id))
+    )
+    r = result.scalar_one_or_none()
+    if not r:
+        raise HTTPException(status_code=404, detail="Recruteur introuvable")
+
+    r.statut = "suspended"
+    await db.commit()
+    return {"success": True, "statut": "suspended"}
+
+
+# ── ANNONCES EMPLOI ────────────────────────────────────────────────────
+
+@router.get("/admin/jobs")
+async def list_jobs(
+    db: AsyncSession = Depends(get_db),
+    _: bool = Depends(verify_admin),
+    statut: str | None = None,
+    secteur: str | None = None,
+    limit: int = 100,
+    offset: int = 0,
+):
+    """Liste toutes les annonces avec info recruteur."""
+    from app.models.job_opportunity import JobOpportunity
+    from app.models.recruiter import Recruiter
+
+    q = select(JobOpportunity).order_by(JobOpportunity.created_at.desc())
+    if statut:
+        q = q.where(JobOpportunity.statut == statut)
+    if secteur:
+        q = q.where(JobOpportunity.secteur == secteur)
+    q = q.limit(limit).offset(offset)
+
+    result = await db.execute(q)
+    jobs = result.scalars().all()
+
+    out = []
+    for j in jobs:
+        recruiter_info = None
+        if j.recruiter_id:
+            r_res = await db.execute(select(Recruiter).where(Recruiter.id == j.recruiter_id))
+            r = r_res.scalar_one_or_none()
+            if r:
+                recruiter_info = {"id": str(r.id), "nom": r.nom, "entreprise": r.entreprise}
+        out.append({
+            "id": str(j.id),
+            "titre": j.titre,
+            "entreprise": j.entreprise,
+            "secteur": j.secteur,
+            "localisation": j.localisation,
+            "type_contrat": j.type_contrat,
+            "niveau_etudes": j.niveau_etudes,
+            "statut": j.statut,
+            "source": j.source,
+            "is_featured": j.is_featured,
+            "vues": j.vues,
+            "has_embedding": j.embedding is not None,
+            "recruiter": recruiter_info,
+            "created_at": j.created_at.isoformat() if j.created_at else None,
+            "expires_at": j.expires_at.isoformat() if j.expires_at else None,
+        })
+    return out
+
+
+@router.post("/admin/jobs")
+async def create_job_admin(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    _: bool = Depends(verify_admin),
+):
+    """
+    Crée une annonce manuellement (statut=active directement).
+    Génère l'embedding + lance le matching en arrière-plan.
+    """
+    from app.models.job_opportunity import JobOpportunity
+    from app.services.rag.embedding_service import embedding_service
+    from app.services.matching_service import matching_service
+    import asyncio
+
+    try:
+        data = await request.json()
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Corps de requête invalide: {e}")
+
+    titre = (data.get("titre") or "").strip()
+    if not titre:
+        raise HTTPException(status_code=400, detail="titre requis")
+
+    job = JobOpportunity(
+        titre=titre,
+        entreprise=(data.get("entreprise") or "").strip(),
+        secteur=data.get("secteur"),
+        localisation=data.get("localisation"),
+        description=data.get("description"),
+        competences_requises=data.get("competences_requises"),
+        niveau_etudes=data.get("niveau_etudes"),
+        type_contrat=data.get("type_contrat"),
+        email_candidature=data.get("email_candidature"),
+        source="admin",
+        statut="active",
+        is_featured=bool(data.get("is_featured", False)),
+    )
+    db.add(job)
+
+    try:
+        await db.flush()  # obtenir l'id avant embedding
+    except Exception as e:
+        await db.rollback()
+        raise HTTPException(status_code=500, detail=f"Erreur base de données: {e}")
+
+    # Génère embedding
+    embedding_text = (
+        f"{job.titre}. {job.entreprise}. "
+        f"Secteur: {job.secteur or ''}. "
+        f"Contrat: {job.type_contrat or ''}. "
+        f"Niveau: {job.niveau_etudes or ''}. "
+        f"{(job.description or '')[:500]}"
+    )
+    embedding = await embedding_service.embed_text(embedding_text)
+    if embedding:
+        job.embedding = embedding
+
+    try:
+        await db.commit()
+    except Exception as e:
+        await db.rollback()
+        raise HTTPException(status_code=500, detail=f"Erreur base de données: {e}")
+
+    # Lance matching en arrière-plan
+    asyncio.create_task(matching_service.match_all_candidates(db, job))
+
+    return {"success": True, "job_id": str(job.id), "statut": "active", "embedding_generated": embedding is not None}
+
+
+@router.post("/admin/jobs/{job_id}/validate")
+async def validate_job(
+    job_id: str,
+    db: AsyncSession = Depends(get_db),
+    _: bool = Depends(verify_admin),
+):
+    """
+    Valide une annonce : pending → active.
+    Génère l'embedding + déclenche le matching en arrière-plan.
+    """
+    from app.models.job_opportunity import JobOpportunity
+    from app.services.rag.embedding_service import embedding_service
+    from app.services.matching_service import matching_service
+    import asyncio
+
+    try:
+        job_uuid = uuid.UUID(job_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="job_id invalide")
+
+    result = await db.execute(select(JobOpportunity).where(JobOpportunity.id == job_uuid))
+    job = result.scalar_one_or_none()
+    if not job:
+        raise HTTPException(status_code=404, detail="Annonce introuvable")
+
+    job.statut = "active"
+
+    embedding_text = (
+        f"{job.titre}. {job.entreprise}. "
+        f"Secteur: {job.secteur or ''}. "
+        f"Contrat: {job.type_contrat or ''}. "
+        f"Niveau: {job.niveau_etudes or ''}. "
+        f"{(job.description or '')[:500]}"
+    )
+    embedding = await embedding_service.embed_text(embedding_text)
+    if embedding:
+        job.embedding = embedding
+        print(f"  → Embedding annonce {job_id} ✅")
+
+    try:
+        await db.commit()
+    except Exception as e:
+        await db.rollback()
+        raise HTTPException(status_code=500, detail=f"Erreur base de données: {e}")
+
+    # Matching en arrière-plan
+    asyncio.create_task(matching_service.match_all_candidates(db, job))
+
+    return {"success": True, "embedding_generated": embedding is not None}
+
+
+@router.post("/admin/jobs/{job_id}/expire")
+async def expire_job(
+    job_id: str,
+    db: AsyncSession = Depends(get_db),
+    _: bool = Depends(verify_admin),
+):
+    """Expire manuellement une annonce."""
+    from app.models.job_opportunity import JobOpportunity
+
+    try:
+        job_uuid = uuid.UUID(job_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="job_id invalide")
+
+    result = await db.execute(select(JobOpportunity).where(JobOpportunity.id == job_uuid))
+    job = result.scalar_one_or_none()
+    if not job:
+        raise HTTPException(status_code=404, detail="Annonce introuvable")
+
+    job.statut = "expired"
+    await db.commit()
+    return {"success": True, "statut": "expired"}
+
+
+@router.delete("/admin/jobs/{job_id}")
+async def delete_job(
+    job_id: str,
+    db: AsyncSession = Depends(get_db),
+    _: bool = Depends(verify_admin),
+):
+    """Supprime une annonce définitivement."""
+    from app.models.job_opportunity import JobOpportunity
+
+    try:
+        job_uuid = uuid.UUID(job_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="job_id invalide")
+
+    result = await db.execute(select(JobOpportunity).where(JobOpportunity.id == job_uuid))
+    job = result.scalar_one_or_none()
+    if not job:
+        raise HTTPException(status_code=404, detail="Annonce introuvable")
+
+    await db.delete(job)
+    await db.commit()
+    return {"success": True}
+
+
 # ── DASHBOARD ─────────────────────────────────────────────────────────
 
 @router.get("/admin", response_class=FileResponse)

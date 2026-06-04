@@ -249,5 +249,115 @@ Retourne UNIQUEMENT un JSON :
             "Concluez avec une disponibilité claire et une invitation à un entretien.",
         ]
 
+    # ─────────────────────────────────────────────────────────────
+    # 4. Matching global — déclenché après validation d'une annonce
+    # ─────────────────────────────────────────────────────────────
+
+    async def match_all_candidates(self, db: AsyncSession, job) -> int:
+        """
+        Calcule le matching entre une nouvelle annonce et TOUS les candidats
+        qui ont un profil + embedding.
+
+        Pour chaque candidat avec score >= 65 :
+          - Crée/update JobMatch en DB
+          - Envoie notification WhatsApp avec le détail + conseils lettre
+
+        Retourne le nombre de candidats notifiés.
+        """
+        from app.models.candidate_profile import CandidateProfile, JobMatch
+        from app.models.user import User
+        from app.services.whatsapp.sender import whatsapp_sender
+
+        if not job.embedding:
+            print(f"  ⚠️ match_all_candidates: annonce {job.id} sans embedding — skip")
+            return 0
+
+        result = await db.execute(
+            select(CandidateProfile).where(CandidateProfile.embedding.isnot(None))
+        )
+        profiles = result.scalars().all()
+
+        if not profiles:
+            print(f"  → match_all_candidates: aucun profil candidat avec embedding")
+            return 0
+
+        now = datetime.now(timezone.utc)
+        notified = 0
+
+        for candidate in profiles:
+            score = self.compute_score(
+                candidate_embedding=candidate.embedding,
+                job_embedding=job.embedding,
+                candidate=candidate,
+                job=job,
+            )
+            if score < SCORE_SEUIL:
+                continue
+
+            # Upsert JobMatch
+            match_res = await db.execute(
+                select(JobMatch).where(
+                    and_(JobMatch.user_id == candidate.user_id, JobMatch.job_id == job.id)
+                )
+            )
+            existing = match_res.scalar_one_or_none()
+            if existing:
+                existing.score_match = score
+                existing.notifie_at = now
+                existing.statut = "notifie"
+            else:
+                db.add(JobMatch(
+                    user_id=candidate.user_id,
+                    job_id=job.id,
+                    score_match=score,
+                    notifie_at=now,
+                    statut="notifie",
+                ))
+
+            # Récupère le numéro WhatsApp du candidat
+            user_res = await db.execute(
+                select(User).where(User.id == candidate.user_id)
+            )
+            user = user_res.scalar_one_or_none()
+            if not user or not user.phone_number:
+                continue
+
+            # Génère conseils lettre
+            conseils = await self._generate_conseils(candidate, job)
+
+            # Notification WhatsApp
+            msg = (
+                f"✅ *Nouvelle opportunité pour toi !*\n\n"
+                f"*{job.titre}*\n"
+                f"🏢 {job.entreprise}"
+            )
+            if job.localisation:
+                msg += f" • 📍 {job.localisation}"
+            msg += f"\n🎯 Compatibilité : *{int(score)}%*\n\n"
+            if job.type_contrat:
+                msg += f"📋 Contrat : {job.type_contrat}\n"
+            if job.niveau_etudes:
+                msg += f"🎓 Niveau : {job.niveau_etudes}\n"
+            if job.email_candidature:
+                msg += f"\n📧 Postuler : {job.email_candidature}\n"
+            if conseils:
+                msg += "\n*💡 Conseils pour ta lettre :*\n"
+                for c in conseils[:4]:
+                    msg += f"• {c}\n"
+
+            try:
+                await whatsapp_sender.send_text(user.phone_number, msg)
+                notified += 1
+            except Exception as e:
+                print(f"  ⚠️ match_all_candidates WhatsApp {user.phone_number}: {e}")
+
+        try:
+            await db.flush()
+        except Exception as e:
+            print(f"  ⚠️ match_all_candidates flush: {e}")
+
+        print(f"  → match_all_candidates: {notified} candidats notifiés pour annonce {job.id}")
+        return notified
+
 
 matching_service = MatchingService()

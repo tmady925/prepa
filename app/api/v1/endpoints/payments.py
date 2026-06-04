@@ -81,6 +81,77 @@ async def paydunya_webhook(
     return {"status": "ok"}
 
 
+@router.post("/payments/recruiter-ipn")
+async def recruiter_paydunya_webhook(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Callback PayDunya après paiement d'un recruteur."""
+    try:
+        data = await request.json()
+    except Exception:
+        return {"status": "invalid_payload"}
+
+    print(f"Recruiter PayDunya IPN: {data.get('status')} token={data.get('token', '')[:12]}...")
+
+    status = data.get("status", "")
+    if status.lower() != "completed":
+        return {"status": "ignored"}
+
+    custom = data.get("custom_data", {}) or {}
+    if custom.get("type") != "recruiter":
+        return {"status": "not_recruiter"}
+
+    recruiter_id = custom.get("recruiter_id")
+    plan = custom.get("plan", "starter")
+    token = data.get("token", "")
+
+    if not recruiter_id or not token:
+        return {"status": "missing_data"}
+
+    from app.models.recruiter import Recruiter
+    import uuid as _uuid
+    from datetime import datetime, timezone, timedelta
+    try:
+        r_uuid = _uuid.UUID(recruiter_id)
+    except ValueError:
+        return {"status": "invalid_recruiter_id"}
+
+    result = await db.execute(select(Recruiter).where(Recruiter.id == r_uuid))
+    recruiter = result.scalar_one_or_none()
+    if not recruiter:
+        print(f"Recruiter IPN: recruteur {recruiter_id} introuvable")
+        return {"status": "recruiter_not_found"}
+
+    # starter / pro → annonces illimitées (None), abonnement 30j
+    try:
+        recruiter.plan = plan
+        recruiter.statut = "active"
+        recruiter.annonces_restantes = None  # illimité pour les plans payants
+        recruiter.abonnement_expire_at = datetime.now(timezone.utc) + timedelta(days=30)
+        recruiter.paydunya_token = token
+        await db.commit()
+        print(f"Recruiter plan activé: {recruiter.email} → {plan}")
+    except Exception as e:
+        await db.rollback()
+        print(f"Recruiter IPN: erreur activation {recruiter_id} — {e}")
+        return {"status": "activation_error"}
+
+    # Notification WhatsApp si phone disponible
+    if recruiter.phone:
+        try:
+            await whatsapp_sender.send_text(
+                recruiter.phone,
+                f"🎉 *{recruiter.nom}*, votre abonnement *Recruteur {plan.title()}* est activé !\n\n"
+                f"Vous pouvez maintenant publier vos annonces sur Prepa.\n"
+                f"Connectez-vous sur votre dashboard pour commencer. 💼"
+            )
+        except Exception as e:
+            print(f"Recruiter IPN WhatsApp: {e}")
+
+    return {"status": "ok"}
+
+
 @router.post("/payments/create")
 async def create_payment(
     request: Request,

@@ -1633,13 +1633,13 @@ async def create_job_admin(
     if not titre:
         raise HTTPException(status_code=400, detail="titre requis")
 
-    # Vérifie doublon avant création
+    # Vérifie doublon AVANT de créer l'objet (pas de flush encore)
     from datetime import datetime as _dt
     duplicate = await scraping_service.check_duplicate_manual(
         db=db,
         titre=titre,
-        entreprise=data.get("entreprise", ""),
-        localisation=data.get("localisation", ""),
+        entreprise=data.get("entreprise") or "",
+        localisation=data.get("localisation") or "",
         annee=data.get("annee_publication") or _dt.now().year,
         source_url=data.get("source_url"),
     )

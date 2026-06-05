@@ -68,13 +68,10 @@ class MatchingService:
             if job_niv in acceptes or cand_niv == job_niv:
                 boost += BOOST_NIVEAU
 
-        # Boost type_contrat
-        if hasattr(candidate, 'user') and candidate.user:
-            contrat_souhaite = getattr(candidate.user, 'type_contrat_souhaite', None)
-        else:
-            contrat_souhaite = None
+        # Boost type_contrat — depuis le champ dédié sur CandidateProfile ou via user_contrat
+        contrat_souhaite = getattr(candidate, 'type_contrat_souhaite', None)
         job_contrat = (job.type_contrat or "").lower().strip()
-        if contrat_souhaite and job_contrat:
+        if contrat_souhaite and contrat_souhaite.lower() != "indifferent" and job_contrat:
             if contrat_souhaite.lower() == job_contrat:
                 boost += BOOST_CONTRAT
 
@@ -91,14 +88,25 @@ class MatchingService:
         """
         from app.models.candidate_profile import CandidateProfile, JobMatch
         from app.models.job_opportunity import JobOpportunity
+        from app.models.user import User
 
-        # Récupère le profil candidat
+        # Récupère le profil candidat + infos User pour le boost contrat
         result = await db.execute(
-            select(CandidateProfile).where(CandidateProfile.user_id == user_id)
+            select(CandidateProfile, User)
+            .join(User, User.id == CandidateProfile.user_id)
+            .where(CandidateProfile.user_id == user_id)
         )
-        candidate = result.scalar_one_or_none()
+        row = result.first()
+        if not row:
+            print(f"  → matching: pas de profil pour {user_id}")
+            return []
+        candidate, user_obj = row
 
-        if not candidate or not candidate.embedding:
+        # Injecte type_contrat_souhaite depuis User sur l'objet candidate pour compute_score
+        if not hasattr(candidate, 'type_contrat_souhaite') or candidate.type_contrat_souhaite is None:
+            candidate.type_contrat_souhaite = user_obj.type_contrat_souhaite
+
+        if not candidate.embedding:
             print(f"  → matching: pas de profil ou embedding manquant pour {user_id}")
             return []
 
@@ -273,18 +281,22 @@ Retourne UNIQUEMENT un JSON :
             return 0
 
         result = await db.execute(
-            select(CandidateProfile).where(CandidateProfile.embedding.isnot(None))
+            select(CandidateProfile, User)
+            .join(User, User.id == CandidateProfile.user_id)
+            .where(CandidateProfile.embedding.isnot(None))
         )
-        profiles = result.scalars().all()
+        rows = result.all()
 
-        if not profiles:
+        if not rows:
             print(f"  → match_all_candidates: aucun profil candidat avec embedding")
             return 0
 
         now = datetime.now(timezone.utc)
         notified = 0
 
-        for candidate in profiles:
+        for candidate, user_obj in rows:
+            # Injecte type_contrat_souhaite depuis User
+            candidate.type_contrat_souhaite = getattr(candidate, 'type_contrat_souhaite', None) or user_obj.type_contrat_souhaite
             score = self.compute_score(
                 candidate_embedding=candidate.embedding,
                 job_embedding=job.embedding,
@@ -314,11 +326,8 @@ Retourne UNIQUEMENT un JSON :
                     statut="notifie",
                 ))
 
-            # Récupère le numéro WhatsApp du candidat
-            user_res = await db.execute(
-                select(User).where(User.id == candidate.user_id)
-            )
-            user = user_res.scalar_one_or_none()
+            # Utilise l'objet user_obj déjà chargé en join
+            user = user_obj
             if not user or not user.phone_number:
                 continue
 

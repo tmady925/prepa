@@ -213,8 +213,16 @@ async def create_job(
     if not titre:
         raise HTTPException(status_code=400, detail="titre requis")
 
-    # Vérifie quota
-    if recruiter.plan == "gratuit" and recruiter.annonces_restantes <= 0:
+    # Vérifie expiration abonnement payant → repassage en gratuit si expiré
+    if recruiter.plan in ("starter", "pro") and recruiter.abonnement_expire_at:
+        from datetime import datetime, timezone
+        if recruiter.abonnement_expire_at < datetime.now(timezone.utc):
+            recruiter.plan = "gratuit"
+            recruiter.annonces_restantes = 0
+            await db.flush()
+
+    # Vérifie quota (None = illimité pour les plans payants actifs)
+    if recruiter.plan == "gratuit" and (recruiter.annonces_restantes is None or recruiter.annonces_restantes <= 0):
         raise HTTPException(
             status_code=403,
             detail="Limite atteinte. Passez au plan Starter ou Pro pour publier plus d'annonces.",

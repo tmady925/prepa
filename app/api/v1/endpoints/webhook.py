@@ -782,7 +782,18 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession, msg_t
             {"id": "niveau_doctorat","title": "Doctorat", "value": "doctorat"},
         ]
         choice = detect_choice(text, choices)
-        user.niveau_etudes = choice["value"] if choice else text.strip()
+        if choice:
+            user.niveau_etudes = choice["value"]
+        else:
+            # Normalise la saisie libre vers les valeurs attendues par le matching
+            _niv_map = {
+                "bac": "bac", "bts": "bac+2", "dut": "bac+2", "bac+2": "bac+2",
+                "licence": "bac+3", "bac+3": "bac+3", "bachelor": "bac+3",
+                "master": "bac+5", "bac+5": "bac+5", "ingenieur": "bac+5",
+                "doctorat": "doctorat", "phd": "doctorat", "these": "doctorat",
+            }
+            raw = text.strip().lower().replace("é", "e").replace("è", "e")
+            user.niveau_etudes = next((v for k, v in _niv_map.items() if k in raw), text.strip())
         user.onboarding_step = "emploi_contrat"
         await db.flush()
         await whatsapp_sender.send_buttons(
@@ -799,7 +810,17 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession, msg_t
             {"id": "contrat_indifferent", "title": "Peu importe","value": "indifferent"},
         ]
         choice = detect_choice(text, choices)
-        user.type_contrat_souhaite = choice["value"] if choice else text.strip()
+        if choice:
+            user.type_contrat_souhaite = choice["value"]
+        else:
+            # Normalise vers les valeurs attendues
+            _ctr_map = {
+                "cdi": "CDI", "cdd": "CDD", "stage": "Stage",
+                "freelance": "Freelance", "prestation": "Freelance",
+                "peu importe": "indifferent", "indifferent": "indifferent",
+            }
+            raw_c = text.strip().lower()
+            user.type_contrat_souhaite = next((v for k, v in _ctr_map.items() if k in raw_c), "indifferent")
         user.onboarding_step = "emploi_localisation"
         await db.flush()
         await whatsapp_sender.send_text(phone, messages.ask_localisation_emploi(user.name))
@@ -812,6 +833,21 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession, msg_t
 
     elif step == "emploi_cv":
         if text.lower().strip() in ("passer", "skip", "plus tard"):
+            # Crée un profil minimal depuis les infos onboarding pour permettre le matching
+            from app.models.candidate_profile import CandidateProfile as _CP
+            from sqlalchemy import select as _sel
+            _existing = (await db.execute(
+                _sel(_CP).where(_CP.user_id == user.id)
+            )).scalar_one_or_none()
+            if not _existing:
+                _min_profile = _CP(
+                    user_id=user.id,
+                    secteurs_interets=user.secteur_emploi or [],
+                    niveau_etudes=user.niveau_etudes,
+                    localisation=user.localisation_emploi,
+                )
+                db.add(_min_profile)
+                await db.flush()
             user.onboarding_step = "plan"
             await db.flush()
             await whatsapp_sender.send_buttons(

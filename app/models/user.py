@@ -57,8 +57,8 @@ class User(Base, TimestampMixin):
     language: Mapped[str] = mapped_column(String(5), default="fr")
     is_admin: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
-    # Usage plateforme
-    usage: Mapped[str | None] = mapped_column(String(20), nullable=True)  # etudes/concours/emploi/tout
+    # Usage plateforme — liste: ["etudes"], ["concours"], ["emploi"], ["etudes","concours","emploi"]
+    usage: Mapped[list | None] = mapped_column(JSONB, nullable=True)
 
     # Profil emploi
     secteur_emploi: Mapped[list | None] = mapped_column(JSONB, nullable=True)

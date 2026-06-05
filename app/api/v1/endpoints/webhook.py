@@ -478,8 +478,10 @@ async def process_message(message: dict, db: AsyncSession):
             text = interactive["list_reply"].get("id", "")
     elif msg_type == "button":
         text = message.get("button", {}).get("payload", "") or message.get("body", "")
+    elif msg_type == "document":
+        pass  # message déjà disponible, traité dans handle_onboarding (upload CV)
 
-    if not text and not image_data:
+    if not text and not image_data and msg_type != "document":
         return
 
     user, created = await user_service.get_or_create(db, phone)

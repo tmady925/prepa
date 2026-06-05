@@ -134,27 +134,28 @@ class CVProcessorService:
 
     async def _analyze_cv_with_llm(self, cv_text: str) -> dict:
         """Analyse le texte du CV avec Mistral pour extraire le profil structuré."""
-        prompt = f"""Analyse ce CV sénégalais/africain et extrais le profil professionnel complet.
+        prompt = f"""Extrais le profil professionnel de ce CV sénégalais/africain.
 
 IMPORTANT :
+- "competences" = compétences TECHNIQUES et hard skills uniquement (ex: Comptabilité, Laravel, Excel, Python) — PAS les soft skills comme "leadership", "communication"
+- "competences_normalisees" = même compétences mais standardisées (ex: "SAARI SAGE" → "Comptabilité", "Laravel PHP" → "Développement web")
+- "secteurs_interets" = secteurs basés sur EXPÉRIENCE et FORMATION uniquement (pas les centres d'intérêt personnels)
 - "metiers_cibles" = postes que cette personne peut occuper maintenant
-- "metiers_proches" = postes connexes auxquels elle peut prétendre (ex: assistant comptable → contrôleur de gestion, chargé de clientèle → commercial)
-- "secteurs_interets" = secteurs basés sur EXPÉRIENCE et FORMATION uniquement
-- "competences_normalisees" = compétences standardisées (ex: "Laravel PHP" → "Développement web", "SAARI SAGE" → "Comptabilité")
-- "resume_profil" = résumé professionnel de 2-3 phrases pour le matching
+- "metiers_proches" = postes connexes auxquels elle peut prétendre
+- "annees_experience" = nombre total d'années d'expérience professionnelle
 
-Retourne UNIQUEMENT ce JSON valide :
+Retourne UNIQUEMENT ce JSON valide (sans markdown) :
 {{
-  "competences": ["compétence technique ou soft skill"],
-  "competences_normalisees": ["Comptabilité", "Développement web", "Gestion commerciale"],
+  "competences": ["Comptabilité", "Développement web", "Excel"],
+  "competences_normalisees": ["Comptabilité", "Développement web", "Bureautique"],
   "secteurs_interets": ["Finance/Comptabilité", "Informatique/Tech"],
-  "metiers_cibles": ["Assistant comptable", "Développeur web", "Commercial"],
-  "metiers_proches": ["Contrôleur de gestion", "Chargé de clientèle", "Dev fullstack"],
+  "metiers_cibles": ["Assistant comptable", "Développeur web"],
+  "metiers_proches": ["Contrôleur de gestion", "Chargé de clientèle"],
   "niveau_etudes": "bac|bac+2|bac+3|bac+5|doctorat",
   "annees_experience": 3,
-  "localisation": "Thiès, Sénégal",
+  "localisation": "ville ou pays",
   "disponibilite": "immediate|1_mois|3_mois|non_precise",
-  "resume_profil": "Professionnel polyvalent Bac+3 avec expérience en comptabilité et développement web..."
+  "resume_profil": "Résumé professionnel 2-3 phrases pour le matching"
 }}
 
 CV :

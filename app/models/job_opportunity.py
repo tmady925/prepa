@@ -43,5 +43,14 @@ class JobOpportunity(Base, TimestampMixin):
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     annee_publication: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
+    # Détails enrichis (scraping page détail + matching)
+    taches: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    conditions_requises: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    avantages: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    date_limite: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    description_complete: Mapped[str | None] = mapped_column(Text, nullable=True)
+    experience_min_annees: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    nb_notifications_sent: Mapped[int] = mapped_column(Integer, default=0)
+
     # Embedding pour matching sémantique (pgvector JSONB fallback)
     embedding: Mapped[list | None] = mapped_column(JSONB, nullable=True)

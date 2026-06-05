@@ -1221,6 +1221,7 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession, msg_t
                 )
 
         # ── Matching emploi après onboarding ─────────────────────────
+        # match_candidate envoie lui-même les notifications WhatsApp (3 couches + quota)
         usage_ob = user.usage or []
         if isinstance(usage_ob, str):
             usage_ob = [usage_ob]
@@ -1228,21 +1229,12 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession, msg_t
             try:
                 from app.services.matching_service import matching_service
                 matches = await matching_service.match_candidate(db, user.id)
-                for match in matches[:3]:
-                    job = match["job"]
-                    score = match["score"]
-                    conseils = match.get("conseils_lettre", [])
-                    msg_job = (
-                        f"✅ *Opportunité pour toi !*\n\n"
-                        f"*{job.get('titre')}*\n"
-                        f"🏢 {job.get('entreprise')} • 📍 {job.get('localisation', 'N/A')}\n"
-                        f"🎯 Compatibilité : *{int(score)}%*\n\n"
+                if not matches:
+                    await whatsapp_sender.send_text(
+                        phone,
+                        "🔍 Je cherche activement des offres correspondant à ton profil.\n"
+                        "Tu seras notifié dès qu'une opportunité compatible apparaît ! 💼"
                     )
-                    if conseils:
-                        msg_job += "*💡 Conseils pour ta lettre :*\n"
-                        for c in conseils[:4]:
-                            msg_job += f"• {c}\n"
-                    await whatsapp_sender.send_text(phone, msg_job)
             except Exception as e:
                 print(f"Matching emploi onboarding error: {e}")
 

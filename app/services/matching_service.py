@@ -1,17 +1,18 @@
 """
-Service de matching candidat ↔ offre d'emploi.
+Service de matching candidat ↔ offre d'emploi — architecture 3 couches.
 
-Algorithme :
-  1. Similarité cosinus embeddings (base 0-100)
-  2. Boosts contextuels : localisation, niveau_etudes, type_contrat
-  3. Seuil de notification : score >= 65
-  4. Top 3 matchs → upsert JobMatch en DB
-  5. Génération de conseils lettre de motivation via LLM
+  Couche 1 — filtre cosinus rapide (embeddings)        → écarte les non-pertinents
+  Couche 2 — LLM juge la compatibilité métier (0-100)  → décision fine
+  Couche 3 — vérification des conditions (informatif)  → niveau/expérience
+
+Score final = cosinus*40% + LLM*60%.
+Quota hebdo : gratuit = 1 notif/semaine, pro = illimité.
 """
 import re
 import json
+import uuid
 import httpx
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_
 from app.core.settings import get_settings
@@ -19,262 +20,76 @@ from app.services.rag.embedding_service import embedding_service
 
 settings = get_settings()
 
-SCORE_SEUIL = 65          # score minimum pour notifier
-BOOST_LOCALISATION = 10   # localisation identique ou télétravail
-BOOST_NIVEAU = 10         # niveau_etudes compatible
-BOOST_CONTRAT = 5         # type_contrat correspond
+COSINE_MIN = 0.35    # seuil couche 1
+LLM_MIN = 50         # seuil couche 2
+NIVEAUX = ["bac", "bac+2", "bac+3", "bac+5", "doctorat"]
 
 
 class MatchingService:
 
-    # ─────────────────────────────────────────────────────────────
-    # 1. Score candidat / offre
-    # ─────────────────────────────────────────────────────────────
+    # ═══════════════════════════════════════════════════════════════
+    # Entrée principale — un candidat contre toutes les offres
+    # ═══════════════════════════════════════════════════════════════
 
-    def compute_score(
-        self,
-        candidate_embedding: list[float],
-        job_embedding: list[float],
-        candidate,       # CandidateProfile
-        job,             # JobOpportunity
-    ) -> float:
-        """
-        Score 0-100 = similarité cosinus * 100 + boosts contextuels.
-        Plafonné à 100.
-        """
-        base = embedding_service.cosine_similarity(candidate_embedding, job_embedding) * 100
-
-        boost = 0.0
-
-        # Boost localisation
-        cand_loc = (candidate.localisation or "").lower().strip()
-        job_loc = (job.localisation or "").lower().strip()
-        if cand_loc and job_loc:
-            if cand_loc == job_loc or "télétravail" in job_loc or "remote" in job_loc:
-                boost += BOOST_LOCALISATION
-
-        # Boost niveau_etudes
-        niveau_compat = {
-            "bac": ["bac"],
-            "bac+2": ["bac", "bac+2"],
-            "bac+3": ["bac", "bac+2", "bac+3"],
-            "bac+5": ["bac", "bac+2", "bac+3", "bac+5"],
-            "doctorat": ["bac", "bac+2", "bac+3", "bac+5", "doctorat"],
-        }
-        cand_niv = (candidate.niveau_etudes or "").lower().strip()
-        job_niv = (job.niveau_etudes or "").lower().strip()
-        if cand_niv and job_niv:
-            acceptes = niveau_compat.get(cand_niv, [cand_niv])
-            if job_niv in acceptes or cand_niv == job_niv:
-                boost += BOOST_NIVEAU
-
-        # Boost type_contrat — depuis le champ dédié sur CandidateProfile ou via user_contrat
-        contrat_souhaite = getattr(candidate, 'type_contrat_souhaite', None)
-        job_contrat = (job.type_contrat or "").lower().strip()
-        if contrat_souhaite and contrat_souhaite.lower() != "indifferent" and job_contrat:
-            if contrat_souhaite.lower() == job_contrat:
-                boost += BOOST_CONTRAT
-
-        return min(100.0, round(base + boost, 1))
-
-    # ─────────────────────────────────────────────────────────────
-    # 2. Matching complet pour un candidat
-    # ─────────────────────────────────────────────────────────────
-
-    async def match_candidate(self, db: AsyncSession, user_id) -> list[dict]:
-        """
-        Calcule les matchs pour un candidat, upsert les top 3 en DB,
-        retourne la liste [{job, score, conseils_lettre}].
-        """
-        from app.models.candidate_profile import CandidateProfile, JobMatch
-        from app.models.job_opportunity import JobOpportunity
-        from app.models.user import User
-
-        # Récupère le profil candidat + infos User pour le boost contrat
-        result = await db.execute(
-            select(CandidateProfile, User)
-            .join(User, User.id == CandidateProfile.user_id)
-            .where(CandidateProfile.user_id == user_id)
-        )
-        row = result.first()
-        if not row:
-            print(f"  → matching: pas de profil pour {user_id}")
-            return []
-        candidate, user_obj = row
-
-        # Injecte type_contrat_souhaite depuis User sur l'objet candidate pour compute_score
-        if not hasattr(candidate, 'type_contrat_souhaite') or candidate.type_contrat_souhaite is None:
-            candidate.type_contrat_souhaite = user_obj.type_contrat_souhaite
-
-        if not candidate.embedding:
-            print(f"  → matching: pas de profil ou embedding manquant pour {user_id}")
+    async def match_candidate(self, db: AsyncSession, user_id: uuid.UUID) -> list[dict]:
+        """Matching 3 couches d'un candidat contre toutes les offres actives."""
+        candidate, user = await self._load_candidate_and_user(db, user_id)
+        if not candidate or not candidate.embedding:
+            print(f"  → matching: pas de profil/embedding pour {user_id}")
             return []
 
-        # Récupère toutes les offres actives avec embedding
-        result = await db.execute(
-            select(JobOpportunity).where(
-                and_(
-                    JobOpportunity.statut == "active",
-                    JobOpportunity.embedding.isnot(None),
-                )
-            )
-        )
-        jobs = result.scalars().all()
+        if not self._check_quota(candidate, user):
+            print(f"  → Quota notifs atteint pour {user_id}")
+            return []
 
+        jobs = await self._load_active_jobs(db)
         if not jobs:
-            print(f"  → matching: aucune offre active avec embedding")
             return []
 
-        # Calcule les scores
-        scored = []
+        results = []
         for job in jobs:
             if not job.embedding:
                 continue
-            score = self.compute_score(
-                candidate_embedding=candidate.embedding,
-                job_embedding=job.embedding,
-                candidate=candidate,
-                job=job,
-            )
-            if score >= SCORE_SEUIL:
-                scored.append((job, score))
-
-        # Tri décroissant par score
-        scored.sort(key=lambda x: x[1], reverse=True)
-        top3 = scored[:3]
-
-        if not top3:
-            print(f"  → matching: aucun match >= {SCORE_SEUIL} pour {user_id}")
-            return []
-
-        now = datetime.now(timezone.utc)
-        matches_out = []
-
-        for job, score in top3:
-            # Upsert JobMatch
-            result = await db.execute(
-                select(JobMatch).where(
-                    and_(JobMatch.user_id == user_id, JobMatch.job_id == job.id)
-                )
-            )
-            existing_match = result.scalar_one_or_none()
-
-            if existing_match:
-                existing_match.score_match = score
-                existing_match.notifie_at = now
-                existing_match.statut = "notifie"
-            else:
-                new_match = JobMatch(
-                    user_id=user_id,
-                    job_id=job.id,
-                    score_match=score,
-                    notifie_at=now,
-                    statut="notifie",
-                )
-                db.add(new_match)
-
-            # Génère conseils lettre de motivation
-            conseils = await self._generate_conseils(candidate, job)
-
-            matches_out.append({
-                "job": {
-                    "id": str(job.id),
-                    "titre": job.titre,
-                    "entreprise": job.entreprise,
-                    "secteur": job.secteur,
-                    "localisation": job.localisation,
-                    "type_contrat": job.type_contrat,
-                    "niveau_etudes": job.niveau_etudes,
-                },
-                "score": score,
-                "conseils_lettre": conseils,
+            # Couche 1 — cosinus
+            cosine = embedding_service.cosine_similarity(candidate.embedding, job.embedding)
+            if cosine < COSINE_MIN:
+                continue
+            # Couche 2 — LLM
+            llm_result = await self._llm_match(candidate, job)
+            if not llm_result or llm_result.get("score", 0) < LLM_MIN:
+                continue
+            # Couche 3 — conditions (informatif)
+            conditions_check = self._check_conditions(candidate, job)
+            final_score = (cosine * 100 * 0.4) + (llm_result["score"] * 0.6)
+            results.append({
+                "job": job,
+                "score": round(final_score),
+                "raison": llm_result.get("raison", ""),
+                "conditions_check": conditions_check,
+                "conseils_lettre": llm_result.get("conseils", []),
             })
 
-        await db.flush()
-        print(f"  → matching: {len(matches_out)} match(s) >= {SCORE_SEUIL} pour {user_id}")
-        return matches_out
+        results.sort(key=lambda x: x["score"], reverse=True)
+        top3 = results[:3]
 
-    # ─────────────────────────────────────────────────────────────
-    # 3. Conseils lettre de motivation
-    # ─────────────────────────────────────────────────────────────
+        for match in top3:
+            await self._notify_candidate(user, match)
+            await self._upsert_jobmatch(db, user_id, match["job"].id, match["score"])
 
-    async def _generate_conseils(self, candidate, job) -> list[str]:
-        """
-        Génère 4 bullets de conseils pour la lettre de motivation
-        basés sur le profil candidat et la description du poste.
-        """
-        competences = ", ".join((candidate.competences or [])[:8])
-        secteurs = ", ".join((candidate.secteurs_interets or [])[:4])
-        job_desc = (job.description or "")[:800]
+        if top3:
+            await self._update_quota(db, candidate, len(top3))
 
-        prompt = f"""Tu aides un candidat africain à rédiger sa lettre de motivation.
+        return top3
 
-Profil candidat :
-- Compétences : {competences or 'non précisées'}
-- Secteurs d'intérêt : {secteurs or 'non précisés'}
-- Niveau d'études : {candidate.niveau_etudes or 'non précisé'}
-- Expérience : {candidate.annees_experience} an(s)
-
-Poste visé : {job.titre} chez {job.entreprise}
-Description : {job_desc}
-
-Donne exactement 4 conseils courts (1 phrase chacun) pour personnaliser la lettre.
-Retourne UNIQUEMENT un JSON :
-{{"conseils": ["conseil 1", "conseil 2", "conseil 3", "conseil 4"]}}"""
-
-        try:
-            async with httpx.AsyncClient(timeout=20.0) as client:
-                response = await client.post(
-                    "https://api.mistral.ai/v1/chat/completions",
-                    headers={"Authorization": f"Bearer {settings.mistral_api_key}"},
-                    json={
-                        "model": "mistral-small-latest",
-                        "messages": [{"role": "user", "content": prompt}],
-                        "max_tokens": 300,
-                        "temperature": 0.3,
-                    },
-                )
-                data = response.json()
-                if "choices" not in data:
-                    return self._default_conseils(job)
-                raw = data["choices"][0]["message"]["content"].strip()
-                raw = re.sub(r"```json|```", "", raw).strip()
-                parsed = json.loads(raw)
-                conseils = parsed.get("conseils", [])
-                if isinstance(conseils, list) and len(conseils) >= 1:
-                    return conseils[:4]
-        except Exception as e:
-            print(f"  ⚠️ matching conseils LLM: {e}")
-
-        return self._default_conseils(job)
-
-    def _default_conseils(self, job) -> list[str]:
-        """Conseils génériques si LLM indisponible."""
-        return [
-            f"Mentionnez explicitement le poste '{job.titre}' dès l'introduction.",
-            f"Mettez en avant vos compétences les plus pertinentes pour {job.entreprise}.",
-            "Montrez votre motivation pour le secteur avec un exemple concret.",
-            "Concluez avec une disponibilité claire et une invitation à un entretien.",
-        ]
-
-    # ─────────────────────────────────────────────────────────────
-    # 4. Matching global — déclenché après validation d'une annonce
-    # ─────────────────────────────────────────────────────────────
+    # ═══════════════════════════════════════════════════════════════
+    # Entrée secondaire — une offre contre tous les candidats
+    # (déclenché après validation d'une annonce par l'admin)
+    # ═══════════════════════════════════════════════════════════════
 
     async def match_all_candidates(self, db: AsyncSession, job) -> int:
-        """
-        Calcule le matching entre une nouvelle annonce et TOUS les candidats
-        qui ont un profil + embedding.
-
-        Pour chaque candidat avec score >= 65 :
-          - Crée/update JobMatch en DB
-          - Envoie notification WhatsApp avec le détail + conseils lettre
-
-        Retourne le nombre de candidats notifiés.
-        """
-        from app.models.candidate_profile import CandidateProfile, JobMatch
+        """Matche une nouvelle annonce contre tous les candidats éligibles."""
+        from app.models.candidate_profile import CandidateProfile
         from app.models.user import User
-        from app.services.whatsapp.sender import whatsapp_sender
 
         if not job.embedding:
             print(f"  ⚠️ match_all_candidates: annonce {job.id} sans embedding — skip")
@@ -286,87 +101,286 @@ Retourne UNIQUEMENT un JSON :
             .where(CandidateProfile.embedding.isnot(None))
         )
         rows = result.all()
-
         if not rows:
-            print(f"  → match_all_candidates: aucun profil candidat avec embedding")
             return 0
 
-        now = datetime.now(timezone.utc)
         notified = 0
-
-        for candidate, user_obj in rows:
-            # Injecte type_contrat_souhaite depuis User
-            candidate.type_contrat_souhaite = getattr(candidate, 'type_contrat_souhaite', None) or user_obj.type_contrat_souhaite
-            score = self.compute_score(
-                candidate_embedding=candidate.embedding,
-                job_embedding=job.embedding,
-                candidate=candidate,
-                job=job,
-            )
-            if score < SCORE_SEUIL:
+        for candidate, user in rows:
+            if not self._check_quota(candidate, user):
                 continue
+            cosine = embedding_service.cosine_similarity(candidate.embedding, job.embedding)
+            if cosine < COSINE_MIN:
+                continue
+            llm_result = await self._llm_match(candidate, job)
+            if not llm_result or llm_result.get("score", 0) < LLM_MIN:
+                continue
+            conditions_check = self._check_conditions(candidate, job)
+            final_score = round((cosine * 100 * 0.4) + (llm_result["score"] * 0.6))
+            match = {
+                "job": job,
+                "score": final_score,
+                "raison": llm_result.get("raison", ""),
+                "conditions_check": conditions_check,
+                "conseils_lettre": llm_result.get("conseils", []),
+            }
+            await self._notify_candidate(user, match)
+            await self._upsert_jobmatch(db, user.id, job.id, final_score)
+            await self._update_quota(db, candidate, 1)
+            notified += 1
 
-            # Upsert JobMatch
-            match_res = await db.execute(
-                select(JobMatch).where(
-                    and_(JobMatch.user_id == candidate.user_id, JobMatch.job_id == job.id)
+        print(f"  → match_all_candidates: {notified} candidats notifiés pour {job.id}")
+        return notified
+
+    # ═══════════════════════════════════════════════════════════════
+    # Chargement
+    # ═══════════════════════════════════════════════════════════════
+
+    async def _load_candidate_and_user(self, db: AsyncSession, user_id: uuid.UUID):
+        from app.models.candidate_profile import CandidateProfile
+        from app.models.user import User
+        result = await db.execute(
+            select(CandidateProfile, User)
+            .join(User, User.id == CandidateProfile.user_id)
+            .where(CandidateProfile.user_id == user_id)
+        )
+        row = result.first()
+        if not row:
+            return None, None
+        return row[0], row[1]
+
+    async def _load_active_jobs(self, db: AsyncSession) -> list:
+        from app.models.job_opportunity import JobOpportunity
+        result = await db.execute(
+            select(JobOpportunity).where(
+                and_(
+                    JobOpportunity.statut == "active",
+                    JobOpportunity.embedding.isnot(None),
                 )
             )
-            existing = match_res.scalar_one_or_none()
-            if existing:
-                existing.score_match = score
-                existing.notifie_at = now
-                existing.statut = "notifie"
-            else:
-                db.add(JobMatch(
-                    user_id=candidate.user_id,
-                    job_id=job.id,
-                    score_match=score,
-                    notifie_at=now,
-                    statut="notifie",
-                ))
+        )
+        return list(result.scalars().all())
 
-            # Utilise l'objet user_obj déjà chargé en join
-            user = user_obj
-            if not user or not user.phone_number:
-                continue
+    # ═══════════════════════════════════════════════════════════════
+    # Couche 2 — LLM
+    # ═══════════════════════════════════════════════════════════════
 
-            # Génère conseils lettre
-            conseils = await self._generate_conseils(candidate, job)
+    async def _llm_match(self, candidate, job) -> dict:
+        """LLM juge la compatibilité entre candidat et offre."""
+        if not settings.mistral_api_key:
+            return {}
+        resume = candidate.resume_profil or ""
+        metiers = ", ".join((candidate.metiers_cibles or [])[:5])
+        competences = ", ".join((candidate.competences_normalisees or [])[:8])
 
-            # Notification WhatsApp
-            msg = (
-                f"✅ *Nouvelle opportunité pour toi !*\n\n"
-                f"*{job.titre}*\n"
-                f"🏢 {job.entreprise}"
-            )
-            if job.localisation:
-                msg += f" • 📍 {job.localisation}"
-            msg += f"\n🎯 Compatibilité : *{int(score)}%*\n\n"
-            if job.type_contrat:
-                msg += f"📋 Contrat : {job.type_contrat}\n"
-            if job.niveau_etudes:
-                msg += f"🎓 Niveau : {job.niveau_etudes}\n"
-            if job.email_candidature:
-                msg += f"\n📧 Postuler : {job.email_candidature}\n"
-            if conseils:
-                msg += "\n*💡 Conseils pour ta lettre :*\n"
-                for c in conseils[:4]:
-                    msg += f"• {c}\n"
-
-            try:
-                await whatsapp_sender.send_text(user.phone_number, msg)
-                notified += 1
-            except Exception as e:
-                print(f"  ⚠️ match_all_candidates WhatsApp {user.phone_number}: {e}")
+        job_desc = f"{job.titre} - {job.entreprise}\n"
+        job_desc += f"Secteur: {job.secteur or ''}\n"
+        job_desc += f"Description: {(job.description_complete or job.description or '')[:500]}\n"
+        if job.taches:
+            job_desc += f"Missions: {', '.join(job.taches[:3])}\n"
+        if job.conditions_requises:
+            job_desc += f"Conditions: {', '.join(job.conditions_requises[:3])}\n"
 
         try:
-            await db.flush()
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                resp = await client.post(
+                    "https://api.mistral.ai/v1/chat/completions",
+                    headers={"Authorization": f"Bearer {settings.mistral_api_key}"},
+                    json={
+                        "model": "mistral-small-latest",
+                        "messages": [{"role": "user", "content":
+                            f"Évalue la compatibilité entre ce candidat et cette offre d'emploi au Sénégal.\n\n"
+                            f"CANDIDAT:\n"
+                            f"Profil: {resume}\n"
+                            f"Métiers cibles: {metiers}\n"
+                            f"Compétences: {competences}\n"
+                            f"Niveau: {candidate.niveau_etudes or 'non précisé'}\n"
+                            f"Expérience: {candidate.annees_experience or 0} ans\n\n"
+                            f"OFFRE:\n{job_desc}\n\n"
+                            f"Réponds UNIQUEMENT avec ce JSON:\n"
+                            f'{{"score": 0-100, '
+                            f'"compatible": true|false, '
+                            f'"raison": "explication courte pourquoi compatible ou non", '
+                            f'"conseils": ["conseil lettre 1", "conseil lettre 2", "conseil lettre 3"]}}'
+                        }],
+                        "temperature": 0.1,
+                        "max_tokens": 200,
+                    },
+                )
+                data = resp.json()
+                if "choices" in data:
+                    txt = re.sub(r"```json|```", "", data["choices"][0]["message"]["content"]).strip()
+                    parsed = json.loads(txt)
+                    try:
+                        parsed["score"] = int(parsed.get("score", 0))
+                    except (TypeError, ValueError):
+                        parsed["score"] = 0
+                    return parsed
         except Exception as e:
-            print(f"  ⚠️ match_all_candidates flush: {e}")
+            print(f"  ⚠️ LLM match error: {e}")
+        return {}
 
-        print(f"  → match_all_candidates: {notified} candidats notifiés pour annonce {job.id}")
-        return notified
+    # ═══════════════════════════════════════════════════════════════
+    # Couche 3 — conditions (informatif)
+    # ═══════════════════════════════════════════════════════════════
+
+    def _check_conditions(self, candidate, job) -> list[dict]:
+        checks = []
+        # Niveau études
+        if job.niveau_etudes and candidate.niveau_etudes:
+            req_idx = next((i for i, n in enumerate(NIVEAUX) if n in (job.niveau_etudes or "").lower()), -1)
+            cand_idx = next((i for i, n in enumerate(NIVEAUX) if n in (candidate.niveau_etudes or "").lower()), -1)
+            if req_idx >= 0 and cand_idx >= 0:
+                checks.append({
+                    "label": f"Niveau requis: {job.niveau_etudes}",
+                    "ok": cand_idx >= req_idx,
+                    "candidat": candidate.niveau_etudes,
+                })
+        # Expérience
+        if job.experience_min_annees and job.experience_min_annees > 0:
+            exp_cand = candidate.annees_experience or 0
+            checks.append({
+                "label": f"{job.experience_min_annees} ans d'expérience requis",
+                "ok": exp_cand >= job.experience_min_annees,
+                "candidat": f"{exp_cand} ans",
+            })
+        return checks
+
+    # ═══════════════════════════════════════════════════════════════
+    # Quota
+    # ═══════════════════════════════════════════════════════════════
+
+    def _check_quota(self, candidate, user) -> bool:
+        plan = getattr(user, "plan", "free")
+        if plan == "pro":
+            return True
+        max_notifs = 1  # gratuit : 1 notif/semaine
+        now = datetime.now(timezone.utc)
+        last_notif = candidate.last_notif_at
+        if last_notif:
+            week_ago = now - timedelta(days=7)
+            if last_notif > week_ago and (candidate.nb_notifs_semaine or 0) >= max_notifs:
+                return False
+        return True
+
+    async def _update_quota(self, db: AsyncSession, candidate, nb_sent: int):
+        now = datetime.now(timezone.utc)
+        # Réinitialise le compteur si la dernière notif date de plus d'une semaine
+        if candidate.last_notif_at and candidate.last_notif_at < (now - timedelta(days=7)):
+            candidate.nb_notifs_semaine = 0
+        candidate.nb_notifs_semaine = (candidate.nb_notifs_semaine or 0) + nb_sent
+        candidate.last_notif_at = now
+        await db.flush()
+
+    # ═══════════════════════════════════════════════════════════════
+    # Persistance JobMatch
+    # ═══════════════════════════════════════════════════════════════
+
+    async def _upsert_jobmatch(self, db: AsyncSession, user_id, job_id, score: float):
+        from app.models.candidate_profile import JobMatch
+        now = datetime.now(timezone.utc)
+        result = await db.execute(
+            select(JobMatch).where(
+                and_(JobMatch.user_id == user_id, JobMatch.job_id == job_id)
+            )
+        )
+        existing = result.scalar_one_or_none()
+        if existing:
+            existing.score_match = score
+            existing.notifie_at = now
+            existing.statut = "notifie"
+        else:
+            db.add(JobMatch(
+                user_id=user_id, job_id=job_id,
+                score_match=score, notifie_at=now, statut="notifie",
+            ))
+        await db.flush()
+
+    # ═══════════════════════════════════════════════════════════════
+    # Notification WhatsApp
+    # ═══════════════════════════════════════════════════════════════
+
+    async def _notify_candidate(self, user, match: dict):
+        job = match["job"]
+        score = match["score"]
+        raison = match.get("raison", "")
+        conditions = match.get("conditions_check", [])
+        conseils = match.get("conseils_lettre", [])
+
+        if not getattr(user, "phone_number", None):
+            return
+
+        msg = f"✅ *Opportunité compatible à {score}%*\n\n"
+        msg += f"📌 *{job.titre}* — {job.entreprise}\n"
+        if job.localisation:
+            msg += f"📍 {job.localisation}"
+        if job.type_contrat:
+            msg += f" · {job.type_contrat}"
+        msg += "\n\n"
+
+        if job.taches:
+            msg += "*📋 Missions :*\n"
+            for t in job.taches[:3]:
+                msg += f"• {t}\n"
+            msg += "\n"
+
+        if raison:
+            msg += f"*💡 Pourquoi tu corresponds :*\n{raison}\n\n"
+
+        if conditions:
+            msg += "*✅ Conditions :*\n"
+            for c in conditions:
+                icon = "✅" if c["ok"] else "⚠️"
+                msg += f"{icon} {c['label']} → tu as {c['candidat']}\n"
+            msg += "\n"
+
+        if job.email_candidature:
+            msg += f"*📧 Pour postuler :* {job.email_candidature}\n"
+        elif job.source_url:
+            msg += f"*🔗 Voir l'offre :* {job.source_url}\n"
+        msg += "\n"
+
+        if conseils:
+            msg += "*💡 Conseils pour ta lettre :*\n"
+            for c in conseils[:3]:
+                msg += f"• {c}\n"
+
+        from app.services.whatsapp.sender import whatsapp_sender
+        try:
+            await whatsapp_sender.send_text(user.phone_number, msg)
+            print(f"  → Notif emploi → {user.phone_number}: {job.titre} ({score}%)")
+        except Exception as e:
+            print(f"  ⚠️ Notif WhatsApp échouée {user.phone_number}: {e}")
 
 
 matching_service = MatchingService()
+
+
+async def run_match_all_candidates_bg(job_id: uuid.UUID | str):
+    """
+    Wrapper pour exécution en arrière-plan (asyncio.create_task).
+    Ouvre sa PROPRE session DB — ne réutilise pas celle de la requête HTTP
+    (qui serait fermée avant la fin du matching).
+    """
+    from app.db.database import AsyncSessionLocal
+    from app.models.job_opportunity import JobOpportunity
+
+    try:
+        job_uuid = uuid.UUID(str(job_id))
+    except (ValueError, TypeError):
+        print(f"  ⚠️ run_match_all_candidates_bg: job_id invalide {job_id}")
+        return
+
+    async with AsyncSessionLocal() as db:
+        try:
+            result = await db.execute(
+                select(JobOpportunity).where(JobOpportunity.id == job_uuid)
+            )
+            job = result.scalar_one_or_none()
+            if not job:
+                print(f"  ⚠️ run_match_all_candidates_bg: annonce {job_id} introuvable")
+                return
+            await matching_service.match_all_candidates(db, job)
+            await db.commit()
+        except Exception as e:
+            await db.rollback()
+            print(f"  ⚠️ run_match_all_candidates_bg error: {e}")

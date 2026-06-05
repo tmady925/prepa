@@ -134,20 +134,27 @@ class CVProcessorService:
 
     async def _analyze_cv_with_llm(self, cv_text: str) -> dict:
         """Analyse le texte du CV avec Mistral pour extraire le profil structuré."""
-        prompt = f"""Extrais le profil professionnel de ce CV sénégalais/africain.
-IMPORTANT :
-- "secteurs_interets" = secteurs basés sur l'EXPÉRIENCE et la FORMATION uniquement (pas les centres d'intérêt personnels)
-- "competences" = compétences techniques et soft skills listées ou déduites de l'expérience
-- "annees_experience" = nombre total d'années d'expérience professionnelle
+        prompt = f"""Analyse ce CV sénégalais/africain et extrais le profil professionnel complet.
 
-Retourne UNIQUEMENT ce JSON valide (sans markdown) :
+IMPORTANT :
+- "metiers_cibles" = postes que cette personne peut occuper maintenant
+- "metiers_proches" = postes connexes auxquels elle peut prétendre (ex: assistant comptable → contrôleur de gestion, chargé de clientèle → commercial)
+- "secteurs_interets" = secteurs basés sur EXPÉRIENCE et FORMATION uniquement
+- "competences_normalisees" = compétences standardisées (ex: "Laravel PHP" → "Développement web", "SAARI SAGE" → "Comptabilité")
+- "resume_profil" = résumé professionnel de 2-3 phrases pour le matching
+
+Retourne UNIQUEMENT ce JSON valide :
 {{
-  "competences": ["compétence1", "compétence2"],
+  "competences": ["compétence technique ou soft skill"],
+  "competences_normalisees": ["Comptabilité", "Développement web", "Gestion commerciale"],
   "secteurs_interets": ["Finance/Comptabilité", "Informatique/Tech"],
+  "metiers_cibles": ["Assistant comptable", "Développeur web", "Commercial"],
+  "metiers_proches": ["Contrôleur de gestion", "Chargé de clientèle", "Dev fullstack"],
   "niveau_etudes": "bac|bac+2|bac+3|bac+5|doctorat",
-  "annees_experience": 0,
-  "localisation": "ville ou pays",
-  "disponibilite": "immediate|1_mois|3_mois|non_precise"
+  "annees_experience": 3,
+  "localisation": "Thiès, Sénégal",
+  "disponibilite": "immediate|1_mois|3_mois|non_precise",
+  "resume_profil": "Professionnel polyvalent Bac+3 avec expérience en comptabilité et développement web..."
 }}
 
 CV :
@@ -180,6 +187,10 @@ CV :
                 profil.setdefault("annees_experience", 0)
                 profil.setdefault("localisation", None)
                 profil.setdefault("disponibilite", "non_precise")
+                profil.setdefault("metiers_cibles", [])
+                profil.setdefault("metiers_proches", [])
+                profil.setdefault("competences_normalisees", [])
+                profil.setdefault("resume_profil", "")
                 if not isinstance(profil["competences"], list):
                     profil["competences"] = []
                 if not isinstance(profil["secteurs_interets"], list):
@@ -199,11 +210,15 @@ CV :
     def _empty_profile(self) -> dict:
         return {
             "competences": [],
+            "competences_normalisees": [],
             "secteurs_interets": [],
+            "metiers_cibles": [],
+            "metiers_proches": [],
             "niveau_etudes": None,
             "annees_experience": 0,
             "localisation": None,
             "disponibilite": "non_precise",
+            "resume_profil": "",
             "cv_text": "",
         }
 
@@ -235,18 +250,20 @@ CV :
         # 2. Extraction profil
         profil = await self.extract_profile(file_bytes, filename)
 
-        # 3. Embedding du texte CV
+        # 3. Embedding basé sur resume_profil + compétences normalisées + métiers
         cv_text = profil.get("cv_text", "")
         embedding = None
-        if cv_text.strip():
-            embedding_input = (
-                f"Compétences: {', '.join(profil.get('competences', [])[:10])}. "
-                f"Secteurs: {', '.join(profil.get('secteurs_interets', [])[:5])}. "
-                f"Niveau: {profil.get('niveau_etudes', '')}. "
-                f"Expérience: {profil.get('annees_experience', 0)} ans. "
-                f"{cv_text[:500]}"
-            )
-            embedding = await embedding_service.embed_text(embedding_input)
+        embed_text = (
+            f"{profil.get('resume_profil', '')} "
+            f"{' '.join(profil.get('competences_normalisees', []))} "
+            f"{' '.join(profil.get('metiers_cibles', []))}"
+        ).strip()
+        if not embed_text and cv_text.strip():
+            embed_text = cv_text[:500]  # fallback si LLM n'a pas produit de résumé
+        if embed_text:
+            embedding = await embedding_service.embed_text(embed_text)
+
+        secteur_prioritaire = (profil.get("secteurs_interets") or [None])[0]
 
         # 4. Upsert CandidateProfile
         result = await db.execute(
@@ -263,6 +280,12 @@ CV :
             candidate.disponibilite = profil.get("disponibilite")
             candidate.cv_text = cv_text[:8000] if cv_text else None
             candidate.cv_url = cv_url
+            candidate.metiers_cibles = profil.get("metiers_cibles", [])
+            candidate.metiers_proches = profil.get("metiers_proches", [])
+            candidate.competences_normalisees = profil.get("competences_normalisees", [])
+            candidate.resume_profil = profil.get("resume_profil", "")
+            candidate.type_contrat_souhaite = user.type_contrat_souhaite
+            candidate.secteur_prioritaire = secteur_prioritaire
             if embedding:
                 candidate.embedding = embedding
         else:
@@ -277,6 +300,12 @@ CV :
                 cv_text=cv_text[:8000] if cv_text else None,
                 cv_url=cv_url,
                 embedding=embedding,
+                metiers_cibles=profil.get("metiers_cibles", []),
+                metiers_proches=profil.get("metiers_proches", []),
+                competences_normalisees=profil.get("competences_normalisees", []),
+                resume_profil=profil.get("resume_profil", ""),
+                type_contrat_souhaite=user.type_contrat_souhaite,
+                secteur_prioritaire=secteur_prioritaire,
             )
             db.add(candidate)
 

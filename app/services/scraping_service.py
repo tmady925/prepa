@@ -96,13 +96,21 @@ async def _fetch_senjob_detail(url: str) -> dict:
                 if len(parts) >= 2:
                     result["entreprise"] = parts[1].strip()
 
-            # Affine titre et entreprise via LLM si description disponible
+            # Extraction structurée complète via LLM (titre, entreprise, tâches, conditions...)
             if result.get("description"):
-                llm = await _extract_titre_entreprise_llm(result["description"], url)
-                if llm.get("titre"):
-                    result["titre"] = llm["titre"]
-                if llm.get("entreprise"):
-                    result["entreprise"] = llm["entreprise"]
+                details = await _extract_job_details_llm(result["description"], url)
+                if details.get("titre"):
+                    result["titre"] = details["titre"][:100]
+                if details.get("entreprise") and details["entreprise"] not in ("Non précisé", "", None):
+                    result["entreprise"] = details["entreprise"][:100]
+                for f in ("localisation", "type_contrat", "secteur", "email_candidature"):
+                    if details.get(f) and not result.get(f):
+                        result[f] = details[f]
+                result["taches"] = details.get("taches") or []
+                result["conditions_requises"] = details.get("conditions_requises") or []
+                result["avantages"] = details.get("avantages") or []
+                result["experience_min_annees"] = details.get("experience_min_annees")
+                result["description_complete"] = result["description"]
 
             return result
     except Exception as e:
@@ -146,16 +154,24 @@ async def _fetch_emploidakar_detail(url: str, zyte_api_key: str) -> dict:
             if meta:
                 result["description"] = meta.get("content", "")[:500]
 
-            # Affine titre et entreprise via LLM (h1 emploidakar toujours pollué)
+            # Extraction structurée complète via LLM (h1 emploidakar toujours pollué)
             if result.get("description"):
-                result["titre_brut"] = result.get("titre", "")  # backup h1
-                llm = await _extract_titre_entreprise_llm(result["description"], url)
-                if llm.get("titre"):
-                    result["titre"] = llm["titre"][:100]  # LLM remplace toujours
+                _h1_brut = result.get("titre", "")
+                details = await _extract_job_details_llm(result["description"], url)
+                if details.get("titre"):
+                    result["titre"] = details["titre"][:100]  # LLM remplace toujours
                 elif not result.get("titre"):
-                    result["titre"] = result["titre_brut"]  # fallback si LLM échoue
-                if llm.get("entreprise"):
-                    result["entreprise"] = llm["entreprise"]
+                    result["titre"] = _h1_brut
+                if details.get("entreprise") and details["entreprise"] not in ("Non précisé", "", None):
+                    result["entreprise"] = details["entreprise"][:100]
+                for f in ("localisation", "type_contrat", "secteur", "email_candidature"):
+                    if details.get(f) and not result.get(f):
+                        result[f] = details[f]
+                result["taches"] = details.get("taches") or []
+                result["conditions_requises"] = details.get("conditions_requises") or []
+                result["avantages"] = details.get("avantages") or []
+                result["experience_min_annees"] = details.get("experience_min_annees")
+                result["description_complete"] = result["description"]
 
             if result.get("description") and not result.get("secteur"):
                 secteur = await _detect_secteur_llm(result["description"])
@@ -242,6 +258,45 @@ async def _detect_secteur_llm(description: str) -> str | None:
     except Exception:
         pass
     return None
+
+
+async def _extract_job_details_llm(description_text: str, url: str) -> dict:
+    """Extrait tâches, conditions, avantages depuis la description complète."""
+    if not settings.mistral_api_key or not description_text:
+        return {}
+    import json as _json
+    import re as _re
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.post(
+                "https://api.mistral.ai/v1/chat/completions",
+                headers={"Authorization": f"Bearer {settings.mistral_api_key}"},
+                json={
+                    "model": "mistral-small-latest",
+                    "messages": [{"role": "user", "content":
+                        f"Extrais les informations structurées de cette offre d'emploi sénégalaise.\n"
+                        f"Description : {description_text[:2000]}\n\n"
+                        f'Retourne UNIQUEMENT ce JSON :\n'
+                        f'{{"titre": "...", "entreprise": "...", "localisation": "...", '
+                        f'"type_contrat": "CDI|CDD|Stage|Freelance|null", '
+                        f'"secteur": "...", '
+                        f'"taches": ["mission 1", "mission 2"], '
+                        f'"conditions_requises": ["Bac+3 requis", "2 ans expérience"], '
+                        f'"avantages": ["salaire compétitif"], '
+                        f'"experience_min_annees": 0, '
+                        f'"email_candidature": "email@entreprise.com ou null"}}'
+                    }],
+                    "temperature": 0.1,
+                    "max_tokens": 500,
+                },
+            )
+            data = resp.json()
+            if "choices" in data:
+                txt = _re.sub(r"```json|```", "", data["choices"][0]["message"]["content"]).strip()
+                return _json.loads(txt)
+    except Exception as e:
+        print(f"  ⚠️ job details LLM error: {e}")
+    return {}
 
 
 # ── Scraper EmploiDakar (via Zyte API) ────────────────────────────────
@@ -410,8 +465,13 @@ class ScrapingService:
                 elif "emploidakar.com" in url:
                     detail = await _fetch_emploidakar_detail(url, settings.zyte_api_key)
                 # Enrichit seulement les champs vides
-                for field in ["titre", "entreprise", "localisation", "type_contrat", "secteur", "description"]:
+                for field in ["titre", "entreprise", "localisation", "type_contrat", "secteur", "description", "email_candidature"]:
                     if detail.get(field) and not job.get(field):
+                        job[field] = detail[field]
+                # Champs détail toujours copiés (n'existent pas dans la liste de base)
+                for field in ["taches", "conditions_requises", "avantages",
+                              "experience_min_annees", "description_complete"]:
+                    if detail.get(field) is not None:
                         job[field] = detail[field]
 
             # Batch de 5 (Zyte est plus lent que httpx direct)
@@ -470,6 +530,11 @@ class ScrapingService:
                 secteur=job_data.get("secteur"),
                 localisation=localisation,
                 description=job_data.get("description"),
+                description_complete=job_data.get("description_complete"),
+                taches=job_data.get("taches"),
+                conditions_requises=job_data.get("conditions_requises"),
+                avantages=job_data.get("avantages"),
+                experience_min_annees=job_data.get("experience_min_annees"),
                 type_contrat=job_data.get("type_contrat"),
                 email_candidature=job_data.get("email_candidature"),
                 source="scraping",
@@ -511,10 +576,12 @@ class ScrapingService:
                 )
                 jobs_sans_embedding = result2.scalars().all()
                 for job in jobs_sans_embedding:
+                    taches_str = " ".join(job.taches or [])
                     embed_text = (
                         f"{job.titre} {job.entreprise} "
                         f"{job.secteur or ''} {job.localisation} "
-                        f"{job.type_contrat or ''}"
+                        f"{job.type_contrat or ''} {taches_str} "
+                        f"{(job.description_complete or job.description or '')[:300]}"
                     )
                     embedding = await embedding_service.embed_text(embed_text)
                     if embedding:

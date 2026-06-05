@@ -32,6 +32,16 @@ class CandidateProfile(Base, TimestampMixin):
     # Embedding pour matching sémantique (JSONB fallback pgvector)
     embedding: Mapped[list | None] = mapped_column(JSONB, nullable=True)
 
+    # Matching enrichi
+    metiers_cibles: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    metiers_proches: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    competences_normalisees: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    resume_profil: Mapped[str | None] = mapped_column(Text, nullable=True)
+    type_contrat_souhaite: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    secteur_prioritaire: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    nb_notifs_semaine: Mapped[int] = mapped_column(Integer, default=0)
+    last_notif_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
 
 class JobMatch(Base):
     __tablename__ = "job_matches"

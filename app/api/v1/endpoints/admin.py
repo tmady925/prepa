@@ -1691,8 +1691,9 @@ async def create_job_admin(
         await db.rollback()
         raise HTTPException(status_code=500, detail=f"Erreur base de données: {e}")
 
-    # Lance matching en arrière-plan
-    asyncio.create_task(matching_service.match_all_candidates(db, job))
+    # Lance matching en arrière-plan (session DB dédiée)
+    from app.services.matching_service import run_match_all_candidates_bg
+    asyncio.create_task(run_match_all_candidates_bg(job.id))
 
     return {"success": True, "job_id": str(job.id), "statut": "active", "embedding_generated": embedding is not None}
 
@@ -1742,8 +1743,9 @@ async def validate_job(
         await db.rollback()
         raise HTTPException(status_code=500, detail=f"Erreur base de données: {e}")
 
-    # Matching en arrière-plan
-    asyncio.create_task(matching_service.match_all_candidates(db, job))
+    # Matching en arrière-plan (session DB dédiée)
+    from app.services.matching_service import run_match_all_candidates_bg
+    asyncio.create_task(run_match_all_candidates_bg(job.id))
 
     return {"success": True, "embedding_generated": embedding is not None}
 

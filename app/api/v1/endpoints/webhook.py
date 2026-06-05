@@ -1169,6 +1169,8 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession, msg_t
     elif step == "exam_date":
         try:
             exam_date = datetime.strptime(text, "%d/%m/%Y")
+            conv_before = user.conversation_state or {}  # sauvegarde AVANT
+            editing_only = conv_before.get("editing_only", False)
             user = await user_service.set_exam_date(db, user, exam_date)
         except ValueError:
             await whatsapp_sender.send_text(
@@ -1177,9 +1179,12 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession, msg_t
             )
             return
 
-        # Mise à jour simple (via /profil → edit_etudes) → retour direct à done
+        # Restaure les clés de conversation_state éventuellement perdues
         conv = user.conversation_state or {}
-        if conv.get("editing_only"):
+        conv.update(conv_before)
+
+        # Mise à jour simple (via /profil → edit_etudes) → retour direct à done
+        if editing_only:
             conv.pop("editing_only", None)
             user.conversation_state = conv
             user.onboarding_step = "done"

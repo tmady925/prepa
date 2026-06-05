@@ -135,10 +135,15 @@ class CVProcessorService:
     async def _analyze_cv_with_llm(self, cv_text: str) -> dict:
         """Analyse le texte du CV avec Mistral pour extraire le profil structuré."""
         prompt = f"""Extrais le profil professionnel de ce CV sénégalais/africain.
+IMPORTANT :
+- "secteurs_interets" = secteurs basés sur l'EXPÉRIENCE et la FORMATION uniquement (pas les centres d'intérêt personnels)
+- "competences" = compétences techniques et soft skills listées ou déduites de l'expérience
+- "annees_experience" = nombre total d'années d'expérience professionnelle
+
 Retourne UNIQUEMENT ce JSON valide (sans markdown) :
 {{
   "competences": ["compétence1", "compétence2"],
-  "secteurs_interets": ["secteur1", "secteur2"],
+  "secteurs_interets": ["Finance/Comptabilité", "Informatique/Tech"],
   "niveau_etudes": "bac|bac+2|bac+3|bac+5|doctorat",
   "annees_experience": 0,
   "localisation": "ville ou pays",
@@ -146,9 +151,9 @@ Retourne UNIQUEMENT ce JSON valide (sans markdown) :
 }}
 
 CV :
----
+----
 {cv_text[:4000]}
----"""
+----"""
         try:
             async with httpx.AsyncClient(timeout=30.0) as client:
                 response = await client.post(

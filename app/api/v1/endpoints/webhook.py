@@ -96,7 +96,13 @@ async def webhook_receive(
         try:
             await process_message(message, db)
         except Exception as e:
+            import traceback
             print(f"process_message error (phone={message.get('from', '?')}): {e}")
+            traceback.print_exc()
+            try:
+                await db.rollback()
+            except Exception:
+                pass
 
     return {"status": "ok"}
 

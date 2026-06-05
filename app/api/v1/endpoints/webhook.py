@@ -320,6 +320,9 @@ async def handle_command(command: str, phone: str, user, db: AsyncSession):
                 await whatsapp_sender.send_text(phone, msg)
 
     elif command == "edit_etudes":
+        conv = user.conversation_state or {}
+        conv["editing_only"] = True  # mise à jour, pas un onboarding initial
+        user.conversation_state = conv
         user.onboarding_step = "exam"
         await db.flush()
         await _ask_exam(phone, user, db)
@@ -1165,6 +1168,18 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession, msg_t
             await whatsapp_sender.send_text(
                 phone,
                 "Format invalide. Utilise *JJ/MM/AAAA*\nExemple : *15/06/2026*"
+            )
+            return
+
+        # Mise à jour simple (via /profil → edit_etudes) → retour direct à done
+        conv = user.conversation_state or {}
+        if conv.get("editing_only"):
+            conv.pop("editing_only", None)
+            user.conversation_state = conv
+            user.onboarding_step = "done"
+            await db.flush()
+            await whatsapp_sender.send_text(
+                phone, f"✅ Infos études mises à jour *{user.name}* !"
             )
             return
 

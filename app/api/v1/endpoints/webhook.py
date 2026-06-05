@@ -282,7 +282,14 @@ async def handle_command(command: str, phone: str, user, db: AsyncSession):
                 buttons.append({"id": "add_concours", "title": "🏆 Ajouter concours"})
             if "emploi" not in usage and "tout" not in usage:
                 buttons.append({"id": "add_emploi", "title": "💼 Ajouter emploi"})
-            await whatsapp_sender.send_buttons(phone, msg, buttons[:3])
+            buttons = buttons[:3]
+            # Mémorise le menu pour interpréter les réponses "1/2/3"
+            conv = user.conversation_state or {}
+            conv["pending_menu"] = "profil"
+            conv["menu_options"] = [b["id"] for b in buttons]
+            user.conversation_state = conv
+            await db.flush()
+            await whatsapp_sender.send_buttons(phone, msg, buttons)
         else:
             profile = await mastery_service.get_student_profile(db, user.id)
             if not profile:
@@ -1804,9 +1811,38 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession, msg_t
             await _do_free_correction(phone, user, db, image_bytes, exercise_text)
             return
 
+        # Réponse à un menu en attente (ex: /profil) — interprète "1/2/3"
+        conv_state = user.conversation_state or {}
+        if conv_state.get("pending_menu") == "profil":
+            menu_options = conv_state.get("menu_options", [])
+            raw = text.lower().strip()
+            cmd = None
+            # Choix par numéro
+            if raw.isdigit():
+                idx = int(raw) - 1
+                if 0 <= idx < len(menu_options):
+                    cmd = menu_options[idx]
+            # Choix par id direct (clic bouton)
+            elif raw in menu_options:
+                cmd = raw
+            if cmd:
+                conv_state["pending_menu"] = None
+                conv_state["menu_options"] = None
+                user.conversation_state = conv_state
+                await db.flush()
+                await handle_command(cmd, phone, user, db)
+                await user_service.increment_message_count(db, user)
+                return
+
         # Détecte les commandes spéciales
         command = detect_command(text)
         if command:
+            # Toute commande explicite annule un menu en attente
+            if conv_state.get("pending_menu"):
+                conv_state["pending_menu"] = None
+                conv_state["menu_options"] = None
+                user.conversation_state = conv_state
+                await db.flush()
             await handle_command(command, phone, user, db)
             await user_service.increment_message_count(db, user)
             return

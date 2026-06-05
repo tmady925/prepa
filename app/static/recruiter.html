@@ -1,0 +1,764 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Prepa Emploi — Espace Recruteur</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&display=swap');
+:root {
+  --bg: #080b14; --surface: #0d1117; --surface2: #131920; --surface3: #1a2332;
+  --border: rgba(255,255,255,0.06); --border2: rgba(255,255,255,0.1);
+  --text: #e2e8f0; --text2: #8b9cb0; --text3: #4a5568;
+  --accent: #3b82f6; --accent2: #60a5fa; --accent-glow: rgba(59,130,246,0.15);
+  --green: #10b981; --green-dim: rgba(16,185,129,0.1);
+  --red: #ef4444; --red-dim: rgba(239,68,68,0.1);
+  --yellow: #f59e0b; --yellow-dim: rgba(245,158,11,0.1);
+  --purple: #8b5cf6; --purple-dim: rgba(139,92,246,0.1);
+  --radius: 12px; --radius-sm: 8px;
+  --sidebar-w: 220px; --topbar-h: 56px;
+}
+* { margin:0; padding:0; box-sizing:border-box; }
+body { font-family:'Space Grotesk',sans-serif; background:var(--bg); color:var(--text); min-height:100vh; }
+
+/* ── Auth ── */
+#auth-overlay { position:fixed; inset:0; z-index:1000; background:var(--bg); display:flex; align-items:center; justify-content:center; }
+.auth-card { width:380px; background:var(--surface); border:1px solid var(--border2); border-radius:20px; padding:40px; text-align:center; }
+.auth-logo { width:56px; height:56px; background:linear-gradient(135deg,var(--accent),var(--purple)); border-radius:16px; display:flex; align-items:center; justify-content:center; font-size:24px; margin:0 auto 20px; }
+.auth-card h1 { font-size:22px; font-weight:700; margin-bottom:6px; }
+.auth-card p { color:var(--text2); font-size:13px; margin-bottom:28px; }
+.auth-input { width:100%; background:var(--surface2); border:1px solid var(--border2); color:var(--text); padding:12px 16px; border-radius:var(--radius-sm); font-size:14px; font-family:inherit; margin-bottom:12px; outline:none; transition:border-color 0.2s; }
+.auth-input:focus { border-color:var(--accent); }
+.auth-btn { width:100%; background:linear-gradient(135deg,var(--accent),var(--purple)); color:white; border:none; padding:12px; border-radius:var(--radius-sm); font-size:14px; font-weight:600; cursor:pointer; font-family:inherit; }
+.auth-error { color:var(--red); font-size:13px; margin-top:8px; display:none; }
+.auth-link { color:var(--accent2); font-size:13px; margin-top:16px; cursor:pointer; display:block; }
+
+/* ── Layout ── */
+#app { display:none; }
+.sidebar { position:fixed; top:0; left:0; bottom:0; width:var(--sidebar-w); background:var(--surface); border-right:1px solid var(--border); display:flex; flex-direction:column; z-index:100; }
+.sidebar-logo { padding:20px 16px; display:flex; align-items:center; gap:10px; border-bottom:1px solid var(--border); }
+.logo-icon { width:36px; height:36px; background:linear-gradient(135deg,var(--accent),var(--purple)); border-radius:10px; display:flex; align-items:center; justify-content:center; font-size:16px; }
+.logo-text { font-weight:700; font-size:15px; }
+.logo-sub { font-size:11px; color:var(--text2); }
+.nav-item { display:flex; align-items:center; gap:10px; padding:10px 16px; cursor:pointer; border-radius:8px; margin:2px 8px; color:var(--text2); font-size:13px; font-weight:500; transition:all 0.15s; text-decoration:none; }
+.nav-item:hover { background:var(--surface2); color:var(--text); }
+.nav-item.active { background:var(--accent-glow); color:var(--accent2); }
+.nav-item .icon { font-size:15px; width:20px; text-align:center; }
+.sidebar-footer { margin-top:auto; padding:16px; border-top:1px solid var(--border); }
+.plan-badge { background:var(--surface2); border-radius:8px; padding:10px 12px; font-size:12px; }
+.plan-badge .plan-name { font-weight:600; color:var(--accent2); }
+.plan-badge .plan-quota { color:var(--text2); margin-top:2px; }
+.topbar { position:fixed; top:0; left:var(--sidebar-w); right:0; height:var(--topbar-h); background:var(--surface); border-bottom:1px solid var(--border); display:flex; align-items:center; justify-content:space-between; padding:0 24px; z-index:50; }
+.topbar-title { font-size:15px; font-weight:600; }
+.topbar-user { display:flex; align-items:center; gap:8px; font-size:13px; color:var(--text2); }
+.main { margin-left:var(--sidebar-w); margin-top:var(--topbar-h); padding:24px; min-height:calc(100vh - var(--topbar-h)); }
+
+/* ── Cards / Stats ── */
+.stats-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:12px; margin-bottom:20px; }
+.stat-card { background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); padding:16px; }
+.stat-value { font-size:28px; font-weight:700; margin:8px 0 4px; }
+.stat-label { font-size:12px; color:var(--text2); }
+.card { background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); padding:20px; margin-bottom:16px; }
+.card-title { font-size:15px; font-weight:600; margin-bottom:16px; }
+.page { display:none; }
+.page.active { display:block; }
+.page-title { font-size:18px; font-weight:700; margin-bottom:4px; }
+.page-sub { font-size:13px; color:var(--text2); margin-bottom:20px; }
+
+/* ── Form ── */
+.form-group { margin-bottom:16px; }
+.form-label { font-size:13px; color:var(--text2); margin-bottom:6px; display:block; }
+.form-label.required::after { content:" *"; color:var(--red); }
+.form-input { width:100%; background:var(--surface2); border:1px solid var(--border2); color:var(--text); padding:10px 14px; border-radius:var(--radius-sm); font-size:13px; font-family:inherit; outline:none; transition:border-color 0.2s; }
+.form-input:focus { border-color:var(--accent); }
+textarea.form-input { min-height:120px; resize:vertical; }
+.form-row { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+.btn { padding:10px 18px; border-radius:var(--radius-sm); border:none; font-size:13px; font-weight:600; cursor:pointer; font-family:inherit; transition:opacity 0.2s; }
+.btn:hover { opacity:0.85; }
+.btn-primary { background:linear-gradient(135deg,var(--accent),var(--purple)); color:white; }
+.btn-secondary { background:var(--surface2); color:var(--text); border:1px solid var(--border2); }
+.btn-danger { background:var(--red-dim); color:var(--red); }
+.btn-full { width:100%; }
+
+/* ── Table ── */
+.table-wrap { overflow-x:auto; }
+table { width:100%; border-collapse:collapse; font-size:13px; }
+th { text-align:left; padding:10px 12px; color:var(--text2); font-weight:500; border-bottom:1px solid var(--border); }
+td { padding:12px; border-bottom:1px solid var(--border); vertical-align:middle; }
+tr:hover td { background:var(--surface2); }
+
+/* ── Badge ── */
+.badge { display:inline-block; padding:2px 8px; border-radius:20px; font-size:11px; font-weight:500; }
+.badge-green { background:var(--green-dim); color:var(--green); }
+.badge-yellow { background:var(--yellow-dim); color:var(--yellow); }
+.badge-red { background:var(--red-dim); color:var(--red); }
+.badge-blue { background:var(--accent-glow); color:var(--accent2); }
+
+/* ── Toast ── */
+.toast { position:fixed; bottom:24px; right:24px; background:var(--surface3); border:1px solid var(--border2); border-radius:var(--radius-sm); padding:12px 18px; font-size:13px; z-index:9999; transform:translateY(100px); opacity:0; transition:all 0.3s; }
+.toast.show { transform:translateY(0); opacity:1; }
+
+/* ── Alert doublon ── */
+.duplicate-alert { background:var(--yellow-dim); border:1px solid var(--yellow); border-radius:var(--radius-sm); padding:12px 16px; margin-bottom:16px; font-size:13px; display:none; }
+
+/* ── Tags compétences ── */
+.tags-input { display:flex; flex-wrap:wrap; gap:6px; padding:8px; background:var(--surface2); border:1px solid var(--border2); border-radius:var(--radius-sm); min-height:44px; cursor:text; }
+.tag { background:var(--accent-glow); color:var(--accent2); padding:3px 10px; border-radius:20px; font-size:12px; display:flex; align-items:center; gap:4px; }
+.tag-remove { cursor:pointer; opacity:0.7; }
+.tag-remove:hover { opacity:1; }
+.tags-input input { border:none; background:transparent; color:var(--text); font-size:13px; font-family:inherit; outline:none; flex:1; min-width:120px; }
+
+/* ── Upgrade banner ── */
+.upgrade-banner { background:linear-gradient(135deg,rgba(59,130,246,0.1),rgba(139,92,246,0.1)); border:1px solid rgba(139,92,246,0.3); border-radius:var(--radius); padding:16px 20px; display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; }
+.upgrade-banner h3 { font-size:14px; font-weight:600; margin-bottom:4px; }
+.upgrade-banner p { font-size:12px; color:var(--text2); }
+
+/* ── Mobile ── */
+.hamburger { display:none; background:none; border:none; color:var(--text); font-size:20px; cursor:pointer; }
+@media (max-width: 768px) {
+  :root { --sidebar-w: 0px; }
+  .sidebar { transform:translateX(-220px); width:220px; transition:transform 0.3s; }
+  .sidebar.open { transform:translateX(0); }
+  .topbar { left:0; }
+  .main { margin-left:0; padding:16px; }
+  .hamburger { display:block; }
+  .form-row { grid-template-columns:1fr; }
+  .stats-grid { grid-template-columns:repeat(2,1fr); }
+}
+</style>
+</head>
+<body>
+
+<!-- Auth -->
+<div id="auth-overlay">
+  <div id="login-card" class="auth-card">
+    <div class="auth-logo">🏢</div>
+    <h1>Espace Recruteur</h1>
+    <p>Publiez vos offres et trouvez les meilleurs candidats</p>
+    <input id="login-email" class="auth-input" type="email" placeholder="Email professionnel">
+    <input id="login-password" class="auth-input" type="password" placeholder="Mot de passe">
+    <button class="auth-btn" onclick="doLogin()">Se connecter</button>
+    <div id="login-error" class="auth-error"></div>
+    <span class="auth-link" onclick="showRegister()">Pas encore de compte ? S'inscrire gratuitement</span>
+  </div>
+
+  <div id="register-card" class="auth-card" style="display:none">
+    <div class="auth-logo">✨</div>
+    <h1>Créer un compte</h1>
+    <p>Gratuit — 2 annonces offertes</p>
+    <input id="reg-nom" class="auth-input" placeholder="Votre nom">
+    <input id="reg-entreprise" class="auth-input" placeholder="Nom de l'entreprise">
+    <input id="reg-email" class="auth-input" type="email" placeholder="Email professionnel">
+    <input id="reg-phone" class="auth-input" placeholder="Téléphone (optionnel)">
+    <input id="reg-password" class="auth-input" type="password" placeholder="Mot de passe (min 6 caractères)">
+    <button class="auth-btn" onclick="doRegister()">Créer mon compte</button>
+    <div id="register-error" class="auth-error"></div>
+    <span class="auth-link" onclick="showLogin()">← Retour connexion</span>
+  </div>
+</div>
+
+<!-- App -->
+<div id="app">
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-logo">
+      <div class="logo-icon">🎯</div>
+      <div>
+        <div class="logo-text">Prepa Emploi</div>
+        <div class="logo-sub">Espace Recruteur</div>
+      </div>
+    </div>
+    <nav style="padding:12px 0;flex:1">
+      <a class="nav-item active" onclick="showPage('overview')">
+        <span class="icon">📊</span> Vue d'ensemble
+      </a>
+      <a class="nav-item" onclick="showPage('post-job')">
+        <span class="icon">➕</span> Publier une annonce
+      </a>
+      <a class="nav-item" onclick="showPage('my-jobs')">
+        <span class="icon">📝</span> Mes annonces
+      </a>
+      <a class="nav-item" onclick="showPage('profile')">
+        <span class="icon">👤</span> Mon profil
+      </a>
+    </nav>
+    <div class="sidebar-footer">
+      <div class="plan-badge">
+        <div class="plan-name" id="sidebar-plan">—</div>
+        <div class="plan-quota" id="sidebar-quota">—</div>
+      </div>
+      <button class="btn btn-secondary" style="width:100%;margin-top:8px;font-size:12px" onclick="doLogout()">
+        Déconnexion
+      </button>
+    </div>
+  </aside>
+
+  <div class="topbar">
+    <div style="display:flex;align-items:center;gap:12px">
+      <button class="hamburger" onclick="toggleSidebar()">☰</button>
+      <div class="topbar-title" id="topbar-title">Vue d'ensemble</div>
+    </div>
+    <div class="topbar-user">
+      <span id="topbar-name">—</span>
+    </div>
+  </div>
+
+  <main class="main">
+
+    <!-- ── OVERVIEW ── -->
+    <div id="page-overview" class="page active">
+      <div id="upgrade-banner" class="upgrade-banner" style="display:none">
+        <div>
+          <h3>🚀 Passez Pro pour plus de visibilité</h3>
+          <p>Annonces illimitées · Matching prioritaire · 15 000 FCFA/mois</p>
+        </div>
+        <button class="btn btn-primary" onclick="showPage('profile')">Voir les offres →</button>
+      </div>
+
+      <div class="stats-grid">
+        <div class="stat-card">
+          <div style="font-size:20px">✅</div>
+          <div class="stat-value" id="stat-active">—</div>
+          <div class="stat-label">Annonces actives</div>
+        </div>
+        <div class="stat-card">
+          <div style="font-size:20px">⏳</div>
+          <div class="stat-value" id="stat-pending">—</div>
+          <div class="stat-label">En attente validation</div>
+        </div>
+        <div class="stat-card">
+          <div style="font-size:20px">🎯</div>
+          <div class="stat-value" id="stat-matches">—</div>
+          <div class="stat-label">Candidats notifiés</div>
+        </div>
+        <div class="stat-card">
+          <div style="font-size:20px">📋</div>
+          <div class="stat-value" id="stat-quota">—</div>
+          <div class="stat-label">Annonces restantes</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Dernières annonces</div>
+        <div id="recent-jobs-list"><div style="color:var(--text2);font-size:13px">Chargement...</div></div>
+      </div>
+    </div>
+
+    <!-- ── POST JOB ── -->
+    <div id="page-post-job" class="page">
+      <div class="page-title">➕ Publier une annonce</div>
+      <div class="page-sub">Remplissez le formulaire — votre annonce sera validée sous 24h</div>
+
+      <div id="duplicate-alert" class="duplicate-alert">
+        ⚠️ <strong>Annonce similaire détectée</strong> — <span id="duplicate-msg"></span>
+        <br><br>
+        <button class="btn btn-secondary" style="font-size:12px" onclick="submitJobForce()">Publier quand même</button>
+      </div>
+
+      <div class="card">
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label required">Titre du poste</label>
+            <input id="job-titre" class="form-input" placeholder="Ex: Développeur Full Stack">
+          </div>
+          <div class="form-group">
+            <label class="form-label required">Entreprise</label>
+            <input id="job-entreprise" class="form-input" placeholder="Nom de l'entreprise">
+          </div>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label required">Secteur</label>
+            <select id="job-secteur" class="form-input">
+              <option value="">Choisir...</option>
+              <option>Informatique/Tech</option>
+              <option>Finance/Comptabilité</option>
+              <option>Marketing/Communication</option>
+              <option>Santé</option>
+              <option>Éducation</option>
+              <option>BTP/Ingénierie</option>
+              <option>Commerce/Vente</option>
+              <option>RH/Recrutement</option>
+              <option>Juridique</option>
+              <option>Agriculture</option>
+              <option>Transport/Logistique</option>
+              <option>Humanitaire/ONG</option>
+              <option>Hôtellerie/Restauration</option>
+              <option>Autre</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label required">Type de contrat</label>
+            <select id="job-contrat" class="form-input">
+              <option value="">Choisir...</option>
+              <option>CDI</option>
+              <option>CDD</option>
+              <option>Stage</option>
+              <option>Freelance</option>
+              <option>Peu importe</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label required">Localisation</label>
+            <input id="job-localisation" class="form-input" placeholder="Ex: Dakar, Sénégal">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Niveau d'études requis</label>
+            <select id="job-niveau" class="form-input">
+              <option value="">Non requis</option>
+              <option>Bac ou moins</option>
+              <option>Bac+2 / BTS</option>
+              <option>Licence / Bac+3</option>
+              <option>Master / Bac+5</option>
+              <option>Doctorat</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label required">Description du poste</label>
+          <textarea id="job-description" class="form-input" placeholder="Décrivez le poste, les missions, le profil recherché..."></textarea>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Compétences requises</label>
+          <div class="tags-input" id="competences-container" onclick="document.getElementById('competences-input').focus()">
+            <input id="competences-input" placeholder="Tapez une compétence et appuyez Entrée" onkeydown="addTag(event)">
+          </div>
+          <div style="font-size:11px;color:var(--text2);margin-top:4px">Appuyez sur Entrée pour ajouter</div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label required">Email de candidature</label>
+          <input id="job-email" class="form-input" type="email" placeholder="recrutement@entreprise.com">
+        </div>
+
+        <div style="display:flex;gap:10px;margin-top:8px">
+          <button class="btn btn-secondary" onclick="resetJobForm()">Effacer</button>
+          <button class="btn btn-primary" onclick="submitJob()">Soumettre l'annonce →</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── MY JOBS ── -->
+    <div id="page-my-jobs" class="page">
+      <div class="page-title">📝 Mes annonces</div>
+      <div class="page-sub">Gérez vos offres publiées</div>
+      <div id="my-jobs-list" class="card">
+        <div style="color:var(--text2);font-size:13px">Chargement...</div>
+      </div>
+    </div>
+
+    <!-- ── PROFILE ── -->
+    <div id="page-profile" class="page">
+      <div class="page-title">👤 Mon profil & Abonnement</div>
+      <div class="page-sub">Gérez vos informations et votre plan</div>
+
+      <div class="card" id="profile-card">
+        <div style="color:var(--text2);font-size:13px">Chargement...</div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">💎 Plans disponibles</div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px">
+          <div style="background:var(--surface2);border-radius:var(--radius-sm);padding:16px;border:1px solid var(--border)">
+            <div style="font-weight:600;margin-bottom:8px">Gratuit</div>
+            <div style="font-size:22px;font-weight:700;margin-bottom:8px">0 FCFA</div>
+            <div style="font-size:12px;color:var(--text2);margin-bottom:12px">
+              ✅ 2 annonces/mois<br>
+              ✅ Matching basique<br>
+              ❌ Annonces illimitées<br>
+              ❌ Matching prioritaire
+            </div>
+            <div style="font-size:12px;color:var(--text3)">Plan actuel</div>
+          </div>
+          <div style="background:linear-gradient(135deg,rgba(59,130,246,0.1),rgba(139,92,246,0.1));border-radius:var(--radius-sm);padding:16px;border:1px solid rgba(139,92,246,0.3)">
+            <div style="font-weight:600;margin-bottom:8px">⭐ Starter</div>
+            <div style="font-size:22px;font-weight:700;margin-bottom:8px">15 000 <span style="font-size:13px;color:var(--text2)">FCFA/mois</span></div>
+            <div style="font-size:12px;color:var(--text2);margin-bottom:12px">
+              ✅ Annonces illimitées<br>
+              ✅ Matching actif WhatsApp<br>
+              ✅ Stats candidats<br>
+              ✅ Logo entreprise
+            </div>
+            <button class="btn btn-primary btn-full" onclick="subscribe('starter')">Passer Starter →</button>
+          </div>
+          <div style="background:linear-gradient(135deg,rgba(139,92,246,0.15),rgba(59,130,246,0.15));border-radius:var(--radius-sm);padding:16px;border:1px solid rgba(139,92,246,0.4)">
+            <div style="font-weight:600;margin-bottom:8px">🚀 Pro</div>
+            <div style="font-size:22px;font-weight:700;margin-bottom:8px">45 000 <span style="font-size:13px;color:var(--text2)">FCFA/mois</span></div>
+            <div style="font-size:12px;color:var(--text2);margin-bottom:12px">
+              ✅ Tout Starter<br>
+              ✅ Matching prioritaire<br>
+              ✅ Remontée annonces 48h<br>
+              ✅ Support 7j/7
+            </div>
+            <button class="btn btn-primary btn-full" onclick="subscribe('pro')">Passer Pro →</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </main>
+</div>
+
+<div id="toast" class="toast"></div>
+
+<script>
+const API = '/api/v1';
+let apiKey = localStorage.getItem('recruiter_api_key');
+let recruiterData = null;
+let competences = [];
+
+// ── Auth ──────────────────────────────────────────────────────
+function showRegister() {
+  document.getElementById('login-card').style.display = 'none';
+  document.getElementById('register-card').style.display = 'block';
+}
+function showLogin() {
+  document.getElementById('register-card').style.display = 'none';
+  document.getElementById('login-card').style.display = 'block';
+}
+
+async function doLogin() {
+  const email = document.getElementById('login-email').value.trim();
+  const password = document.getElementById('login-password').value;
+  if (!email || !password) return showError('login-error', 'Remplissez tous les champs');
+
+  const r = await fetch(`${API}/recruiters/login`, {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({email, password}),
+  });
+  const data = await r.json();
+
+  if (data.success) {
+    apiKey = data.api_key;
+    localStorage.setItem('recruiter_api_key', apiKey);
+    recruiterData = data.recruiter;
+    initApp();
+  } else {
+    showError('login-error', data.detail || data.message || 'Email ou mot de passe incorrect');
+  }
+}
+
+async function doRegister() {
+  const nom = document.getElementById('reg-nom').value.trim();
+  const entreprise = document.getElementById('reg-entreprise').value.trim();
+  const email = document.getElementById('reg-email').value.trim();
+  const phone = document.getElementById('reg-phone').value.trim();
+  const password = document.getElementById('reg-password').value;
+
+  if (!nom || !entreprise || !email || !password) {
+    return showError('register-error', 'Remplissez les champs obligatoires');
+  }
+
+  const r = await fetch(`${API}/recruiters/register`, {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({nom, entreprise, email, phone: phone || null, password}),
+  });
+  const data = await r.json();
+
+  if (data.success) {
+    toast('Compte créé ! En attente de validation par l\'admin (sous 24h).');
+    showLogin();
+  } else {
+    showError('register-error', data.detail || 'Erreur lors de l\'inscription');
+  }
+}
+
+function doLogout() {
+  localStorage.removeItem('recruiter_api_key');
+  apiKey = null;
+  document.getElementById('auth-overlay').style.display = 'flex';
+  document.getElementById('app').style.display = 'none';
+}
+
+function showError(id, msg) {
+  const el = document.getElementById(id);
+  el.textContent = msg;
+  el.style.display = 'block';
+}
+
+// ── Init ──────────────────────────────────────────────────────
+async function initApp() {
+  document.getElementById('auth-overlay').style.display = 'none';
+  document.getElementById('app').style.display = 'block';
+  await loadMe();
+  loadOverview();
+}
+
+async function loadMe() {
+  const r = await apiCall('/recruiters/me');
+  if (!r) return doLogout();
+  recruiterData = r;
+  document.getElementById('topbar-name').textContent = r.nom;
+  document.getElementById('sidebar-plan').textContent = r.plan.toUpperCase();
+  document.getElementById('sidebar-quota').textContent =
+    r.annonces_restantes !== null ? `${r.annonces_restantes} annonces restantes` : 'Illimité';
+  if (r.plan === 'gratuit') {
+    document.getElementById('upgrade-banner').style.display = 'flex';
+  }
+}
+
+// ── API helper ────────────────────────────────────────────────
+async function apiCall(path, options = {}) {
+  try {
+    const r = await fetch(`${API}${path}`, {
+      ...options,
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Api-Key': apiKey,
+        ...(options.headers || {}),
+      },
+    });
+    if (r.status === 401) { doLogout(); return null; }
+    return await r.json();
+  } catch(e) {
+    toast('Erreur réseau');
+    return null;
+  }
+}
+
+// ── Navigation ────────────────────────────────────────────────
+const PAGE_TITLES = {
+  'overview':  'Vue d\'ensemble',
+  'post-job':  'Publier une annonce',
+  'my-jobs':   'Mes annonces',
+  'profile':   'Mon profil & Abonnement',
+};
+
+function showPage(name) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  document.getElementById(`page-${name}`).classList.add('active');
+  document.querySelectorAll('.nav-item').forEach(n => {
+    if (n.getAttribute('onclick')?.includes(`'${name}'`)) n.classList.add('active');
+  });
+  document.getElementById('topbar-title').textContent = PAGE_TITLES[name] || name;
+  if (name === 'my-jobs')  loadMyJobs();
+  if (name === 'profile')  loadProfile();
+  if (name === 'overview') loadOverview();
+  document.getElementById('sidebar').classList.remove('open');
+}
+
+function toggleSidebar() {
+  document.getElementById('sidebar').classList.toggle('open');
+}
+
+// ── Overview ──────────────────────────────────────────────────
+async function loadOverview() {
+  const jobs = await apiCall('/recruiters/jobs');
+  if (!jobs) return;
+  const active  = jobs.filter(j => j.statut === 'active').length;
+  const pending = jobs.filter(j => j.statut === 'pending').length;
+  const matches = jobs.reduce((s, j) => s + (j.nb_matches || 0), 0);
+  document.getElementById('stat-active').textContent  = active;
+  document.getElementById('stat-pending').textContent = pending;
+  document.getElementById('stat-matches').textContent = matches;
+  document.getElementById('stat-quota').textContent   =
+    recruiterData?.annonces_restantes !== null ? (recruiterData?.annonces_restantes ?? '—') : '∞';
+
+  const recent = jobs.slice(0, 5);
+  document.getElementById('recent-jobs-list').innerHTML = recent.length
+    ? recent.map(j => `
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--border)">
+          <div>
+            <div style="font-weight:500;font-size:13px">${j.titre}</div>
+            <div style="font-size:11px;color:var(--text2)">${j.localisation || ''} · ${j.type_contrat || ''}</div>
+          </div>
+          <span class="badge badge-${j.statut === 'active' ? 'green' : j.statut === 'pending' ? 'yellow' : 'red'}">
+            ${j.statut}
+          </span>
+        </div>`).join('')
+    : '<div style="color:var(--text2);font-size:13px">Aucune annonce pour l\'instant.<br><br><button class="btn btn-primary" onclick="showPage(\'post-job\')">Publier ma première offre →</button></div>';
+}
+
+// ── My Jobs ───────────────────────────────────────────────────
+async function loadMyJobs() {
+  const jobs = await apiCall('/recruiters/jobs');
+  if (!jobs) return;
+  const container = document.getElementById('my-jobs-list');
+  if (!jobs.length) {
+    container.innerHTML = '<div style="color:var(--text2);font-size:13px;text-align:center;padding:20px">Aucune annonce.<br><br><button class="btn btn-primary" onclick="showPage(\'post-job\')">Publier ma première offre →</button></div>';
+    return;
+  }
+  container.innerHTML = `
+    <div class="table-wrap">
+      <table>
+        <thead><tr>
+          <th>Titre</th><th>Localisation</th><th>Contrat</th>
+          <th>Statut</th><th>Matchs</th><th>Actions</th>
+        </tr></thead>
+        <tbody>
+          ${jobs.map(j => `
+            <tr>
+              <td>
+                <div style="font-weight:500">${j.titre}</div>
+                <div style="font-size:11px;color:var(--text2)">${j.secteur || ''}</div>
+              </td>
+              <td style="font-size:12px">${j.localisation || '—'}</td>
+              <td>${j.type_contrat || '—'}</td>
+              <td><span class="badge badge-${j.statut === 'active' ? 'green' : j.statut === 'pending' ? 'yellow' : 'red'}">${j.statut}</span></td>
+              <td>${j.nb_matches || 0}</td>
+              <td>
+                <button class="btn btn-danger" style="font-size:11px;padding:4px 8px" onclick="deleteJob('${j.id}')">🗑 Retirer</button>
+              </td>
+            </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>`;
+}
+
+async function deleteJob(id) {
+  if (!confirm('Retirer cette annonce ?')) return;
+  const r = await apiCall(`/recruiters/jobs/${id}`, {method:'DELETE'});
+  if (r?.success) { toast('Annonce retirée'); loadMyJobs(); loadOverview(); }
+}
+
+// ── Post Job ──────────────────────────────────────────────────
+function addTag(e) {
+  if (e.key !== 'Enter') return;
+  e.preventDefault();
+  const input = document.getElementById('competences-input');
+  const val = input.value.trim();
+  if (!val || competences.includes(val)) return;
+  competences.push(val);
+  renderTags();
+  input.value = '';
+}
+
+function renderTags() {
+  const container = document.getElementById('competences-container');
+  const input = document.getElementById('competences-input');
+  container.innerHTML = '';
+  competences.forEach((t, i) => {
+    const tag = document.createElement('span');
+    tag.className = 'tag';
+    tag.innerHTML = `${t} <span class="tag-remove" onclick="removeTag(${i})">×</span>`;
+    container.appendChild(tag);
+  });
+  container.appendChild(input);
+}
+
+function removeTag(i) {
+  competences.splice(i, 1);
+  renderTags();
+}
+
+function resetJobForm() {
+  ['job-titre','job-entreprise','job-description','job-email','job-localisation'].forEach(id => {
+    document.getElementById(id).value = '';
+  });
+  document.getElementById('job-secteur').value = '';
+  document.getElementById('job-contrat').value = '';
+  document.getElementById('job-niveau').value  = '';
+  competences = [];
+  renderTags();
+  document.getElementById('duplicate-alert').style.display = 'none';
+}
+
+async function submitJob(force = false) {
+  const titre           = document.getElementById('job-titre').value.trim();
+  const entreprise      = document.getElementById('job-entreprise').value.trim();
+  const secteur         = document.getElementById('job-secteur').value;
+  const type_contrat    = document.getElementById('job-contrat').value;
+  const localisation    = document.getElementById('job-localisation').value.trim();
+  const description     = document.getElementById('job-description').value.trim();
+  const email_candidature = document.getElementById('job-email').value.trim();
+  const niveau_etudes   = document.getElementById('job-niveau').value;
+
+  if (!titre || !entreprise || !secteur || !type_contrat || !localisation || !description || !email_candidature) {
+    toast('⚠️ Remplissez tous les champs obligatoires');
+    return;
+  }
+
+  const body = {
+    titre, entreprise, secteur, type_contrat, localisation,
+    description, email_candidature,
+    competences_requises: competences,
+    niveau_etudes: niveau_etudes || null,
+    force_publish: force,
+    annee_publication: new Date().getFullYear(),
+  };
+
+  const r = await apiCall('/recruiters/jobs', {method:'POST', body: JSON.stringify(body)});
+  if (!r) return;
+
+  if (r.duplicate && !force) {
+    document.getElementById('duplicate-msg').textContent = r.message;
+    document.getElementById('duplicate-alert').style.display = 'block';
+    return;
+  }
+  if (r.success) {
+    toast('✅ Annonce soumise ! Elle sera visible après validation.');
+    resetJobForm();
+    showPage('my-jobs');
+  } else {
+    toast('❌ ' + (r.detail || r.message || 'Erreur'));
+  }
+}
+
+function submitJobForce() { submitJob(true); }
+
+// ── Profile ───────────────────────────────────────────────────
+async function loadProfile() {
+  const r = await apiCall('/recruiters/me');
+  if (!r) return;
+  document.getElementById('profile-card').innerHTML = `
+    <div class="card-title">Informations entreprise</div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px">
+      <div>
+        <div style="font-size:12px;color:var(--text2);margin-bottom:4px">Nom</div>
+        <div style="font-weight:500">${r.nom}</div>
+      </div>
+      <div>
+        <div style="font-size:12px;color:var(--text2);margin-bottom:4px">Entreprise</div>
+        <div style="font-weight:500">${r.entreprise}</div>
+      </div>
+      <div>
+        <div style="font-size:12px;color:var(--text2);margin-bottom:4px">Email</div>
+        <div style="font-weight:500">${r.email}</div>
+      </div>
+      <div>
+        <div style="font-size:12px;color:var(--text2);margin-bottom:4px">Plan actuel</div>
+        <div style="font-weight:600;color:var(--accent2)">${r.plan.toUpperCase()}</div>
+      </div>
+      <div>
+        <div style="font-size:12px;color:var(--text2);margin-bottom:4px">Annonces restantes</div>
+        <div style="font-weight:500">${r.annonces_restantes !== null ? r.annonces_restantes : '∞ Illimité'}</div>
+      </div>
+      ${r.abonnement_expire_at ? `
+      <div>
+        <div style="font-size:12px;color:var(--text2);margin-bottom:4px">Abonnement jusqu'au</div>
+        <div style="font-weight:500">${new Date(r.abonnement_expire_at).toLocaleDateString('fr-FR')}</div>
+      </div>` : ''}
+    </div>`;
+}
+
+async function subscribe(plan) {
+  toast('Création du lien de paiement...');
+  const r = await apiCall('/recruiters/subscribe', {method:'POST', body: JSON.stringify({plan})});
+  if (r?.success && r.payment_url) {
+    window.open(r.payment_url, '_blank');
+  } else {
+    toast('❌ Erreur lors de la création du lien');
+  }
+}
+
+// ── Toast ─────────────────────────────────────────────────────
+function toast(msg) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.classList.add('show');
+  setTimeout(() => el.classList.remove('show'), 3500);
+}
+
+// ── Boot ──────────────────────────────────────────────────────
+if (apiKey) initApp();
+</script>
+</body>
+</html>

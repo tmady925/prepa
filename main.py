@@ -56,7 +56,12 @@ async def health():
     return {"status": "ok"}
 
 
+from fastapi.responses import FileResponse
 from app.api.v1.endpoints import webhook, payments, admin, tasks, recruiters
+
+@app.get("/recruiter")
+async def recruiter_dashboard():
+    return FileResponse("app/static/recruiter.html")
 app.include_router(webhook.router, prefix="/api/v1")
 app.include_router(payments.router, prefix="/api/v1")
 app.include_router(admin.router, prefix="/api/v1")

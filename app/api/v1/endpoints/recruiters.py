@@ -267,7 +267,9 @@ async def list_recruiter_jobs(
     recruiter: Recruiter = Depends(get_recruiter),
     db: AsyncSession = Depends(get_db),
 ):
-    """Liste les annonces du recruteur avec stats basiques."""
+    """Liste les annonces du recruteur avec stats basiques + nb matchs."""
+    from app.models.candidate_profile import JobMatch
+
     result = await db.execute(
         select(JobOpportunity)
         .where(JobOpportunity.recruiter_id == recruiter.id)
@@ -275,8 +277,12 @@ async def list_recruiter_jobs(
     )
     jobs = result.scalars().all()
 
-    return [
-        {
+    out = []
+    for j in jobs:
+        nb_matches = await db.scalar(
+            select(func.count(JobMatch.id)).where(JobMatch.job_id == j.id)
+        ) or 0
+        out.append({
             "id": str(j.id),
             "titre": j.titre,
             "secteur": j.secteur,
@@ -286,11 +292,11 @@ async def list_recruiter_jobs(
             "statut": j.statut,
             "vues": j.vues,
             "is_featured": j.is_featured,
+            "nb_matches": nb_matches,
             "created_at": j.created_at.isoformat() if j.created_at else None,
             "expires_at": j.expires_at.isoformat() if j.expires_at else None,
-        }
-        for j in jobs
-    ]
+        })
+    return out
 
 
 # ── Expirer une annonce ────────────────────────────────────────────────

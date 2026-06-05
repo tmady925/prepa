@@ -304,15 +304,27 @@ class Messages:
         {"id": "onboarding_pro", "title": "Passer Pro ⭐"},
     ]
 
-    def onboarding_complete(self, name: str, days_left: int) -> str:
-        return (
-            f"✅ Tout est prêt *{name}* !\n\n"
-            f"Il te reste *{days_left} jours* avant ton examen.\n\n"
-            "Tu peux maintenant :\n"
-            "• Demander des exercices\n"
-            "• Soumettre tes réponses pour correction\n\n"
-            "Par quoi on commence ? 🚀"
-        )
+    def onboarding_complete(self, name: str, days_left: int, usage=None) -> str:
+        usage = usage or ["etudes"]
+        if isinstance(usage, str):
+            usage = [usage]
+
+        msg = f"✅ Tout est prêt *{name}* !\n\n"
+
+        if "etudes" in usage and days_left:
+            msg += f"Il te reste *{days_left} jours* avant ton examen.\n\n"
+
+        msg += "Tu peux maintenant :\n"
+        if "etudes" in usage:
+            msg += "• Demander des exercices 📝\n"
+            msg += "• Soumettre tes réponses pour correction 📸\n"
+        if "concours" in usage:
+            msg += "• T'entraîner pour ton concours 🏆\n"
+        if "emploi" in usage:
+            msg += "• Recevoir des offres d'emploi adaptées 💼\n"
+
+        msg += "\nPar quoi on commence ? 🚀"
+        return msg
 
     # ── Quota ─────────────────────────────────────────────────────
 

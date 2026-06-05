@@ -739,9 +739,16 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession, msg_t
                 return
 
         usage = user.usage or []
+        if isinstance(usage, str):
+            usage = [usage]
         if "emploi" in usage:
             user.onboarding_step = "emploi_secteur"
             await db.flush()
+            await whatsapp_sender.send_text(
+                phone,
+                f"✅ Concours enregistré *{user.name}* !\n\n"
+                "Passons maintenant à ton *profil emploi* 💼"
+            )
             await whatsapp_sender.send_text(phone, messages.ask_secteur_emploi(user.name))
         else:
             user.onboarding_step = "plan"
@@ -1022,7 +1029,6 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession, msg_t
         ]
 
         choice = detect_choice(text, choices)
-        print(f"DEBUG exam choice: text='{text}' choice={choice['value'] if choice else None}")
 
         if not choice:
             await _ask_exam(phone, user, db)
@@ -1146,15 +1152,43 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession, msg_t
         try:
             exam_date = datetime.strptime(text, "%d/%m/%Y")
             user = await user_service.set_exam_date(db, user, exam_date)
-            await whatsapp_sender.send_buttons(
-                phone,
-                messages.ask_plan(user.name),
-                messages.PLAN_ONBOARDING_BUTTONS,
-            )
         except ValueError:
             await whatsapp_sender.send_text(
                 phone,
                 "Format invalide. Utilise *JJ/MM/AAAA*\nExemple : *15/06/2026*"
+            )
+            return
+
+        # Chaînage multi-usage : études → concours → emploi → plan
+        usage = user.usage or []
+        if isinstance(usage, str):
+            usage = [usage]
+
+        if "concours" in usage:
+            user.onboarding_step = "type_concours"
+            await db.flush()
+            await whatsapp_sender.send_text(
+                phone,
+                f"✅ Partie études enregistrée *{user.name}* !\n\n"
+                "Passons maintenant à ton *concours* 🏆"
+            )
+            await whatsapp_sender.send_buttons(
+                phone, messages.ask_type_concours(user.name), messages.TYPE_CONCOURS_BUTTONS
+            )
+        elif "emploi" in usage:
+            user.onboarding_step = "emploi_secteur"
+            await db.flush()
+            await whatsapp_sender.send_text(
+                phone,
+                f"✅ Partie études enregistrée *{user.name}* !\n\n"
+                "Passons maintenant à ton *profil emploi* 💼"
+            )
+            await whatsapp_sender.send_text(phone, messages.ask_secteur_emploi(user.name))
+        else:
+            await whatsapp_sender.send_buttons(
+                phone,
+                messages.ask_plan(user.name),
+                messages.PLAN_ONBOARDING_BUTTONS,
             )
 
     elif step == "plan":
@@ -1165,7 +1199,7 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession, msg_t
             days_left = max(0, (exam_date - datetime.now()).days)
         await whatsapp_sender.send_text(
             phone,
-            messages.onboarding_complete(user.name, days_left)
+            messages.onboarding_complete(user.name, days_left, user.usage)
         )
         if text in ("onboarding_pro", "action_pro"):
             from app.services.payment_service import payment_service

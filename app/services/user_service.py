@@ -39,9 +39,9 @@ class UserService:
         return user, True
 
     async def set_name(self, db: AsyncSession, user: User, name: str) -> User:
+        # L'étape suivante (confirm_pays / saisie_pays) est définie par le handler appelant
         user.name = name
         user.referral_code = generate_referral_code(name)
-        user.onboarding_step = "exam"
         await db.flush()
         return user
 

@@ -3229,7 +3229,7 @@ async function loadJobs() {
   const source  = document.getElementById('job-filter-source')?.value || '';
   const secteur = document.getElementById('job-filter-secteur')?.value || '';
 
-  let url = `/api/v1/admin/jobs?limit=50`;
+  let url = `/admin/jobs?limit=50`;
   if (statut)  url += `&statut=${statut}`;
   if (source)  url += `&source=${source}`;
   if (secteur) url += `&secteur=${encodeURIComponent(secteur)}`;

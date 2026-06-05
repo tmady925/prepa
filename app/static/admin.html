@@ -235,6 +235,14 @@ body {
 .page { display: none; }
 .page.active { display: block; }
 
+/* ── Tables emploi ── */
+.data-table { width: 100%; border-collapse: collapse; font-size: 13px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+.data-table th { text-align: left; padding: 10px 12px; color: var(--text2); font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; border-bottom: 1px solid var(--border); background: var(--surface2); }
+.data-table td { padding: 12px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+.data-table tr:last-child td { border-bottom: none; }
+.data-table tr:hover td { background: var(--surface2); }
+.empty { text-align: center; padding: 40px; color: var(--text3); font-size: 13px; }
+
 /* ── Cards ── */
 .card {
   background: var(--surface);
@@ -1237,6 +1245,117 @@ tr:hover td { background: rgba(255,255,255,0.02); }
       </div>
     </div>
 
+    <!-- ── PAGE JOBS ─────────────────────────────────── -->
+    <div id="page-jobs" class="page">
+      <div class="section-header">
+        <div>
+          <div class="section-title">💼 Offres d'emploi</div>
+          <div class="section-sub" id="jobs-sub">Chargement...</div>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn btn-secondary" onclick="runScraping()">🔍 Scraper maintenant</button>
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap">
+        <select id="job-filter-statut" onchange="loadJobs()" class="filter-select">
+          <option value="">Tous statuts</option>
+          <option value="pending">En attente</option>
+          <option value="active">Actives</option>
+          <option value="expired">Expirées</option>
+        </select>
+        <select id="job-filter-source" onchange="loadJobs()" class="filter-select">
+          <option value="">Toutes sources</option>
+          <option value="scraping">Scraping</option>
+          <option value="recruteur">Recruteur</option>
+          <option value="admin">Admin</option>
+        </select>
+        <select id="job-filter-secteur" onchange="loadJobs()" class="filter-select">
+          <option value="">Tous secteurs</option>
+          <option value="Informatique/Tech">Informatique/Tech</option>
+          <option value="Finance/Comptabilité">Finance/Comptabilité</option>
+          <option value="Commerce/Vente">Commerce/Vente</option>
+          <option value="RH/Recrutement">RH/Recrutement</option>
+          <option value="Humanitaire/ONG">Humanitaire/ONG</option>
+        </select>
+      </div>
+      <div id="jobs-list">
+        <div style="text-align:center;padding:40px;color:var(--text3)">Chargement...</div>
+      </div>
+    </div>
+
+    <!-- ── PAGE RECRUITERS ───────────────────────────── -->
+    <div id="page-recruiters" class="page">
+      <div class="section-header">
+        <div>
+          <div class="section-title">🏢 Recruteurs</div>
+          <div class="section-sub" id="recruiters-sub">Chargement...</div>
+        </div>
+      </div>
+      <div id="recruiters-list">
+        <div style="text-align:center;padding:40px;color:var(--text3)">Chargement...</div>
+      </div>
+    </div>
+
+    <!-- ── PAGE CANDIDATES ───────────────────────────── -->
+    <div id="page-candidates" class="page">
+      <div class="section-header">
+        <div>
+          <div class="section-title">👤 Candidats</div>
+          <div class="section-sub" id="candidates-sub">Chargement...</div>
+        </div>
+      </div>
+      <div id="candidates-list">
+        <div style="text-align:center;padding:40px;color:var(--text3)">Chargement...</div>
+      </div>
+    </div>
+
+    <!-- ── PAGE SCRAPING ─────────────────────────────── -->
+    <div id="page-scraping" class="page">
+      <div class="section-header">
+        <div>
+          <div class="section-title">🔍 Scraping</div>
+          <div class="section-sub">Gestion des sources de scraping</div>
+        </div>
+        <button class="btn btn-primary" onclick="runScraping()">▶ Lancer maintenant</button>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin-bottom:20px">
+        <div class="kpi-card green">
+          <div class="kpi-icon">✅</div>
+          <div class="kpi-label">Dernières nouvelles offres</div>
+          <div class="kpi-value green" id="scraping-last-new">—</div>
+        </div>
+        <div class="kpi-card yellow">
+          <div class="kpi-icon">🔄</div>
+          <div class="kpi-label">Doublons ignorés</div>
+          <div class="kpi-value yellow" id="scraping-last-dup">—</div>
+        </div>
+        <div class="kpi-card red">
+          <div class="kpi-icon">⏰</div>
+          <div class="kpi-label">Expirées</div>
+          <div class="kpi-value red" id="scraping-last-exp">—</div>
+        </div>
+      </div>
+      <div class="card">
+        <div style="font-weight:600;margin-bottom:12px">Sources configurées</div>
+        <div style="display:flex;flex-direction:column;gap:8px">
+          <div style="display:flex;justify-content:space-between;align-items:center;padding:12px;background:var(--surface2);border-radius:8px">
+            <div>
+              <div style="font-weight:500">EmploiDakar.com</div>
+              <div style="font-size:12px;color:var(--text2)">Via Zyte API — Cloudflare bypass</div>
+            </div>
+            <span style="color:var(--green);font-size:12px">● Actif</span>
+          </div>
+          <div style="display:flex;justify-content:space-between;align-items:center;padding:12px;background:var(--surface2);border-radius:8px">
+            <div>
+              <div style="font-weight:500">Senjob.com</div>
+              <div style="font-size:12px;color:var(--text2)">Via httpx direct</div>
+            </div>
+            <span style="color:var(--green);font-size:12px">● Actif</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
   </main>
 </div>
 
@@ -1662,118 +1781,6 @@ tr:hover td { background: rgba(255,255,255,0.02); }
     <div style="display:flex;gap:10px;justify-content:flex-end">
       <button class="btn btn-ghost" onclick="closeModal('modal-simulation')">Annuler</button>
       <button class="btn btn-primary" onclick="createSimulation()">🎯 Créer la simulation</button>
-    </div>
-  </div>
-</div>
-
-<!-- ── PAGE JOBS ─────────────────────────────────── -->
-<div id="page-jobs" class="page" style="display:none">
-  <div class="section-header">
-    <div>
-      <div class="section-title">💼 Offres d'emploi</div>
-      <div class="section-sub" id="jobs-sub">Chargement...</div>
-    </div>
-    <div style="display:flex;gap:8px;flex-wrap:wrap">
-      <button class="btn btn-secondary" onclick="runScraping()">🔍 Scraper maintenant</button>
-      <button class="btn btn-primary" onclick="showAddJobModal()">+ Ajouter offre</button>
-    </div>
-  </div>
-  <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap">
-    <select id="job-filter-statut" onchange="loadJobs()" class="filter-select">
-      <option value="">Tous statuts</option>
-      <option value="pending">En attente</option>
-      <option value="active">Actives</option>
-      <option value="expired">Expirées</option>
-    </select>
-    <select id="job-filter-source" onchange="loadJobs()" class="filter-select">
-      <option value="">Toutes sources</option>
-      <option value="scraping">Scraping</option>
-      <option value="recruteur">Recruteur</option>
-      <option value="admin">Admin</option>
-    </select>
-    <select id="job-filter-secteur" onchange="loadJobs()" class="filter-select">
-      <option value="">Tous secteurs</option>
-      <option value="Informatique/Tech">Informatique/Tech</option>
-      <option value="Finance/Comptabilité">Finance/Comptabilité</option>
-      <option value="Commerce/Vente">Commerce/Vente</option>
-      <option value="RH/Recrutement">RH/Recrutement</option>
-      <option value="Humanitaire/ONG">Humanitaire/ONG</option>
-    </select>
-  </div>
-  <div id="jobs-list" class="table-container">
-    <div class="loading">Chargement...</div>
-  </div>
-</div>
-
-<!-- ── PAGE RECRUITERS ───────────────────────────── -->
-<div id="page-recruiters" class="page" style="display:none">
-  <div class="section-header">
-    <div>
-      <div class="section-title">🏢 Recruteurs</div>
-      <div class="section-sub" id="recruiters-sub">Chargement...</div>
-    </div>
-  </div>
-  <div id="recruiters-list" class="table-container">
-    <div class="loading">Chargement...</div>
-  </div>
-</div>
-
-<!-- ── PAGE CANDIDATES ───────────────────────────── -->
-<div id="page-candidates" class="page" style="display:none">
-  <div class="section-header">
-    <div>
-      <div class="section-title">👤 Candidats</div>
-      <div class="section-sub" id="candidates-sub">Chargement...</div>
-    </div>
-  </div>
-  <div id="candidates-list" class="table-container">
-    <div class="loading">Chargement...</div>
-  </div>
-</div>
-
-<!-- ── PAGE SCRAPING ─────────────────────────────── -->
-<div id="page-scraping" class="page" style="display:none">
-  <div class="section-header">
-    <div>
-      <div class="section-title">🔍 Scraping</div>
-      <div class="section-sub">Gestion des sources de scraping</div>
-    </div>
-    <button class="btn btn-primary" onclick="runScraping()">▶ Lancer maintenant</button>
-  </div>
-  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin-bottom:20px">
-    <div class="kpi-card green">
-      <div class="kpi-icon">✅</div>
-      <div class="kpi-label">Dernières nouvelles offres</div>
-      <div class="kpi-value green" id="scraping-last-new">—</div>
-    </div>
-    <div class="kpi-card yellow">
-      <div class="kpi-icon">🔄</div>
-      <div class="kpi-label">Doublons ignorés</div>
-      <div class="kpi-value yellow" id="scraping-last-dup">—</div>
-    </div>
-    <div class="kpi-card red">
-      <div class="kpi-icon">⏰</div>
-      <div class="kpi-label">Expirées</div>
-      <div class="kpi-value red" id="scraping-last-exp">—</div>
-    </div>
-  </div>
-  <div class="card">
-    <div style="font-weight:600;margin-bottom:12px">Sources configurées</div>
-    <div style="display:flex;flex-direction:column;gap:8px">
-      <div style="display:flex;justify-content:space-between;align-items:center;padding:12px;background:var(--surface2);border-radius:8px">
-        <div>
-          <div style="font-weight:500">EmploiDakar.com</div>
-          <div style="font-size:12px;color:var(--text2)">Via Zyte API — Cloudflare bypass</div>
-        </div>
-        <span style="color:var(--green);font-size:12px">● Actif</span>
-      </div>
-      <div style="display:flex;justify-content:space-between;align-items:center;padding:12px;background:var(--surface2);border-radius:8px">
-        <div>
-          <div style="font-weight:500">Senjob.com</div>
-          <div style="font-size:12px;color:var(--text2)">Via httpx direct</div>
-        </div>
-        <span style="color:var(--green);font-size:12px">● Actif</span>
-      </div>
     </div>
   </div>
 </div>

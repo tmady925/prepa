@@ -2,6 +2,7 @@ import uuid
 from datetime import datetime
 from sqlalchemy import String, Integer, Boolean, DateTime, ForeignKey, Text
 from sqlalchemy.dialects.postgresql import UUID, JSONB
+from sqlalchemy.ext.mutable import MutableDict
 from sqlalchemy.orm import Mapped, mapped_column
 from app.models.base import Base, TimestampMixin
 
@@ -21,7 +22,9 @@ class User(Base, TimestampMixin):
     plan: Mapped[str] = mapped_column(String(20), default="free", nullable=False)
     status: Mapped[str] = mapped_column(String(20), default="onboarding", nullable=False)
     onboarding_step: Mapped[str] = mapped_column(String(30), default="start", nullable=False)
-    conversation_state: Mapped[dict | None] = mapped_column(JSONB, default=None)
+    conversation_state: Mapped[dict | None] = mapped_column(
+        MutableDict.as_mutable(JSONB), default=None
+    )
 
     # Contexte examen
     exam_type: Mapped[str | None] = mapped_column(String(50))

@@ -307,7 +307,20 @@ async def _fetch_emploidakar_jobs() -> list[dict]:
         print("  ⚠️ ZYTE_API_KEY manquant — emploidakar.com ignoré")
         return []
 
+    # Pages de navigation / catégories à exclure (ce ne sont pas des offres)
+    _NAV_EXCLUDE = (
+        "/offres-demploi", "/publier", "/gerer", "/deposer", "/pourquoi",
+        "/liste-des", "/les-entreprises", "/recrutement-centre", "/emploidakar/",
+        "/alertes", "/nous-contacter", "/exemple-de-cv", "/modeles-lettres",
+        "/candidature-spontanee", "/service-de-redaction", "/acceder-a-la-cvtheque",
+        "/mon-espace", "/formation-en-ligne", "/actualites", "/boutique", "/panier",
+        "/a-propos", "/conditions-generales", "/politique-de", "/fiches-metier",
+        "/sourcing-premium", "/stages-bourses", "/top-10", "/cgu", "wp-", "xmlrpc",
+        "#", "/categorie", "/category", "/tag/", "/auth", "/connexion", "/inscription",
+    )
+
     jobs = []
+    seen = set()
     try:
         async with httpx.AsyncClient(timeout=60.0) as client:
             resp = await client.post(
@@ -318,44 +331,70 @@ async def _fetch_emploidakar_jobs() -> list[dict]:
                     "browserHtml": True,
                 },
             )
+            if resp.status_code != 200:
+                print(f"  ⚠️ EmploiDakar: Zyte HTTP {resp.status_code} — {resp.text[:200]}")
+                return []
             data = resp.json()
             html = data.get("browserHtml", "")
             if not html:
-                print("  ⚠️ EmploiDakar: HTML vide depuis Zyte")
+                print(f"  ⚠️ EmploiDakar: HTML vide depuis Zyte — réponse: {str(data)[:200]}")
                 return []
 
             soup = BeautifulSoup(html, "html.parser")
+            all_links = soup.find_all("a", href=True)
 
-            for link in soup.find_all("a", href=True):
+            matched_strict = 0
+            for link in all_links:
                 href = link.get("href", "")
                 text = link.get_text(strip=True)
 
-                if "/offre-demploi/" not in href:
-                    continue
-                if not text or len(text) < 5:
-                    continue
-
                 # URL absolue
-                if not href.startswith("http"):
+                if href.startswith("/"):
                     href = f"https://www.emploidakar.com{href}"
+                if "emploidakar.com" not in href:
+                    continue
 
-                type_contrat = _detect_type_contrat(text)
-                annee = _extract_annee(text)
+                # Motif strict (WP Job Manager : offre individuelle)
+                is_strict = "/offre-demploi/" in href
+                if is_strict:
+                    matched_strict += 1
+
+                # Heuristique de repli : lien interne à 1 segment, hors navigation,
+                # avec un texte d'intitulé suffisamment long → probablement une offre
+                path = href.split("emploidakar.com", 1)[-1]
+                is_nav = any(n in path for n in _NAV_EXCLUDE)
+                seg_count = len([p for p in path.split("/") if p])
+                is_heuristic = (
+                    not is_nav and seg_count == 1 and text and len(text) >= 12
+                )
+
+                if not (is_strict or is_heuristic):
+                    continue
+                if href in seen:
+                    continue
+                seen.add(href)
 
                 jobs.append({
                     "titre": text[:100].strip(),
                     "entreprise": "",
                     "localisation": "Dakar, Sénégal",
-                    "type_contrat": type_contrat,
+                    "type_contrat": _detect_type_contrat(text),
                     "source_url": href,
                     "source": "scraping",
-                    "annee_publication": annee,
+                    "annee_publication": _extract_annee(text),
                     "email_candidature": None,
                     "description": None,
                     "secteur": None,
                 })
 
-        print(f"  → EmploiDakar: {len(jobs)} offres scrapées")
+            print(
+                f"  → EmploiDakar: {len(jobs)} offres "
+                f"(liens totaux={len(all_links)}, motif strict /offre-demploi/={matched_strict})"
+            )
+            if len(jobs) == 0 and all_links:
+                # Diagnostic : échantillon de hrefs pour identifier le vrai motif
+                sample = [l.get("href", "") for l in all_links[:40] if l.get("href")]
+                print(f"  🔎 EmploiDakar échantillon hrefs: {sample}")
     except Exception as e:
         print(f"  ⚠️ EmploiDakar scraping error: {e}")
 

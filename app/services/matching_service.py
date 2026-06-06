@@ -208,8 +208,27 @@ class MatchingService:
                 )
                 data = resp.json()
                 if "choices" in data:
-                    txt = re.sub(r"```json|```", "", data["choices"][0]["message"]["content"]).strip()
-                    parsed = json.loads(txt)
+                    txt = data["choices"][0]["message"]["content"].strip()
+                    txt = re.sub(r"```json|```", "", txt).strip()
+
+                    # Tente parsing direct
+                    try:
+                        parsed = json.loads(txt)
+                    except json.JSONDecodeError:
+                        # Fallback — extrait les champs avec regex
+                        score_match = re.search(r'"score"\s*:\s*(\d+)', txt)
+                        if not score_match:
+                            print(f"  ⚠️ LLM match JSON illisible: {txt[:120]}")
+                            return {}
+                        compatible_match = re.search(r'"compatible"\s*:\s*(true|false)', txt)
+                        raison_match = re.search(r'"raison"\s*:\s*"([^"]*)"', txt)
+                        parsed = {
+                            "score": int(score_match.group(1)),
+                            "compatible": compatible_match.group(1) == "true" if compatible_match else True,
+                            "raison": raison_match.group(1) if raison_match else "",
+                            "conseils": [],
+                        }
+
                     try:
                         parsed["score"] = int(parsed.get("score", 0))
                     except (TypeError, ValueError):

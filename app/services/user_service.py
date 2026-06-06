@@ -72,6 +72,11 @@ class UserService:
     async def complete_onboarding(self, db: AsyncSession, user: User) -> User:
         user.onboarding_step = "done"
         user.status = "active"
+        # L'onboarding ne doit pas consommer le quota journalier :
+        # on repart d'un quota plein pour le premier vrai jour d'utilisation.
+        now = datetime.now(ZoneInfo("Africa/Dakar"))
+        user.daily_messages_used = 0
+        user.quota_reset_at = now.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
         await db.flush()
         return user
 

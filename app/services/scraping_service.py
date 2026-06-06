@@ -18,6 +18,26 @@ settings = get_settings()
 
 # ── Helpers ────────────────────────────────────────────────────────────
 
+def clean_text(s: str | None) -> str | None:
+    """
+    Nettoie un texte scrapé pour qu'il soit sûr en DB et dans un prompt LLM :
+    - supprime les caractères de contrôle / invisibles (zero-width, etc.)
+    - normalise les guillemets typographiques en apostrophe simple
+    - remplace retours/tabulations par des espaces, compacte les espaces
+    """
+    if not s:
+        return s
+    # Supprime les caractères de contrôle (catégorie Unicode "C*") sauf espace usuel
+    s = "".join(ch for ch in s if ch in ("\n", "\t", " ") or unicodedata.category(ch)[0] != "C")
+    s = s.replace(" ", " ")  # espace insécable
+    s = re.sub(r"[\r\n\t]+", " ", s)
+    # Guillemets / apostrophes typographiques → apostrophe simple (sûr pour JSON)
+    s = re.sub(r"[“”„‟″\"]", "'", s)
+    s = re.sub(r"[‘’‚‛′`]", "'", s)
+    s = re.sub(r"\s+", " ", s).strip()
+    return s
+
+
 def _normalize(text: str) -> str:
     """Normalise un texte pour le hash : minuscules, sans accents, sans ponctuation."""
     text = text.lower().strip()
@@ -483,6 +503,22 @@ class ScrapingService:
         existing_urls = {j.source_url for j in existing_jobs if j.source_url}
         existing_hashes = {j.content_hash: j for j in existing_jobs if j.content_hash}
 
+        # Nettoyage en DB des offres existantes aux titres/desc mal parsés
+        cleaned_existing = 0
+        for j in existing_jobs:
+            new_titre = clean_text(j.titre)
+            new_entr = clean_text(j.entreprise)
+            new_desc = clean_text(j.description)
+            if new_titre != j.titre or new_entr != j.entreprise or new_desc != j.description:
+                j.titre = new_titre
+                if new_entr is not None:
+                    j.entreprise = new_entr
+                j.description = new_desc
+                cleaned_existing += 1
+        if cleaned_existing:
+            await db.flush()
+            print(f"  → {cleaned_existing} offres existantes nettoyées en DB")
+
         # Scrape toutes les sources
         all_scraped: list[dict] = []
         all_scraped += await _fetch_emploidakar_jobs()
@@ -528,13 +564,22 @@ class ScrapingService:
 
         for job_data in all_scraped:
             source_url = job_data.get("source_url", "")
-            titre = job_data.get("titre", "")
-            entreprise = job_data.get("entreprise", "")
-            localisation = job_data.get("localisation", "")
+            # Nettoyage des champs texte (caractères de contrôle, guillemets…)
+            titre = clean_text(job_data.get("titre", ""))
+            entreprise = clean_text(job_data.get("entreprise", "")) or ""
+            localisation = clean_text(job_data.get("localisation", "")) or ""
             annee = job_data.get("annee_publication", datetime.now().year)
 
             if not titre or not source_url:
                 continue
+
+            # Réinjecte les valeurs nettoyées pour l'insert
+            job_data["titre"] = titre
+            job_data["entreprise"] = entreprise
+            job_data["localisation"] = localisation
+            job_data["secteur"] = clean_text(job_data.get("secteur"))
+            job_data["description"] = clean_text(job_data.get("description"))
+            job_data["description_complete"] = clean_text(job_data.get("description_complete"))
 
             scraped_urls.add(source_url)
 

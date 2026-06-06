@@ -168,17 +168,25 @@ class MatchingService:
         """LLM juge la compatibilité entre candidat et offre."""
         if not settings.mistral_api_key:
             return {}
-        resume = candidate.resume_profil or ""
-        metiers = ", ".join((candidate.metiers_cibles or [])[:5])
-        competences = ", ".join((candidate.competences_normalisees or [])[:8])
 
-        job_desc = f"{job.titre} - {job.entreprise}\n"
-        job_desc += f"Secteur: {job.secteur or ''}\n"
-        job_desc += f"Description: {(job.description_complete or job.description or '')[:500]}\n"
+        # Nettoyage défensif : couvre les offres déjà en DB dont le titre/desc
+        # contient des caractères de contrôle/guillemets cassant le JSON.
+        from app.services.scraping_service import clean_text
+
+        def _cl(s):
+            return clean_text(s) or ""
+
+        resume = _cl(candidate.resume_profil)
+        metiers = _cl(", ".join((candidate.metiers_cibles or [])[:5]))
+        competences = _cl(", ".join((candidate.competences_normalisees or [])[:8]))
+
+        job_desc = f"{_cl(job.titre)} - {_cl(job.entreprise)}\n"
+        job_desc += f"Secteur: {_cl(job.secteur)}\n"
+        job_desc += f"Description: {_cl((job.description_complete or job.description or ''))[:500]}\n"
         if job.taches:
-            job_desc += f"Missions: {', '.join(job.taches[:3])}\n"
+            job_desc += f"Missions: {_cl(', '.join(str(t) for t in job.taches[:3]))}\n"
         if job.conditions_requises:
-            job_desc += f"Conditions: {', '.join(job.conditions_requises[:3])}\n"
+            job_desc += f"Conditions: {_cl(', '.join(str(c) for c in job.conditions_requises[:3]))}\n"
 
         try:
             async with httpx.AsyncClient(timeout=15.0) as client:

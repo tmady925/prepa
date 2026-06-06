@@ -519,10 +519,19 @@ class ScrapingService:
             await db.flush()
             print(f"  → {cleaned_existing} offres existantes nettoyées en DB")
 
-        # Scrape toutes les sources
-        all_scraped: list[dict] = []
-        all_scraped += await _fetch_emploidakar_jobs()
-        all_scraped += await _fetch_senjob_jobs()
+        # Scrape toutes les sources (séparément pour suivre leur santé)
+        ed_jobs = await _fetch_emploidakar_jobs()
+        sj_jobs = await _fetch_senjob_jobs()
+        all_scraped: list[dict] = list(ed_jobs) + list(sj_jobs)
+
+        # Domaines ayant renvoyé des résultats ce run → seuls leurs offres
+        # absentes peuvent être expirées. Si une source échoue (Zyte KO),
+        # on NE touche PAS à ses offres existantes.
+        healthy_domains = set()
+        if ed_jobs:
+            healthy_domains.add("emploidakar.com")
+        if sj_jobs:
+            healthy_domains.add("senjob.com")
 
         # Enrichit les offres via scraping des pages détail
         if all_scraped:
@@ -632,13 +641,20 @@ class ScrapingService:
             await db.execute(stmt)
             new_count += 1
 
-        # Expire les offres non revues depuis 3 jours
+        # Expire les offres non revues depuis 3 jours — UNIQUEMENT pour les
+        # sources qui ont répondu ce run (évite d'expirer EmploiDakar si Zyte a échoué)
         cutoff = now - timedelta(days=3)
         for job in existing_jobs:
-            if job.source_url not in scraped_urls:
-                if job.last_seen_at and job.last_seen_at < cutoff:
-                    job.statut = "expired"
-                    expired_count += 1
+            if job.source_url in scraped_urls:
+                continue
+            # Le domaine de cette offre a-t-il répondu ce run ?
+            job_domain = next((d for d in ("emploidakar.com", "senjob.com")
+                               if job.source_url and d in job.source_url), None)
+            if job_domain and job_domain not in healthy_domains:
+                continue  # source en échec → on préserve ses offres
+            if job.last_seen_at and job.last_seen_at < cutoff:
+                job.statut = "expired"
+                expired_count += 1
 
         try:
             await db.commit()
@@ -647,18 +663,19 @@ class ScrapingService:
             print(f"  ⚠️ scrape_all commit error: {e}")
             raise
 
-        # Génère les embeddings pour les nouvelles offres sans embedding
-        if new_count > 0:
-            try:
-                from app.services.rag.embedding_service import embedding_service
-                result2 = await db.execute(
-                    select(JobOpportunity).where(
-                        JobOpportunity.source == "scraping",
-                        JobOpportunity.statut == "active",
-                        JobOpportunity.embedding.is_(None),
-                    )
+        # Génère/rattrape les embeddings de TOUTE offre active sans embedding
+        # (couvre aussi les offres dont l'embedding avait échoué un run précédent)
+        try:
+            from app.services.rag.embedding_service import embedding_service
+            result2 = await db.execute(
+                select(JobOpportunity).where(
+                    JobOpportunity.source == "scraping",
+                    JobOpportunity.statut == "active",
+                    JobOpportunity.embedding.is_(None),
                 )
-                jobs_sans_embedding = result2.scalars().all()
+            )
+            jobs_sans_embedding = result2.scalars().all()
+            if jobs_sans_embedding:
                 for job in jobs_sans_embedding:
                     taches_str = " ".join(job.taches or [])
                     embed_text = (
@@ -672,8 +689,8 @@ class ScrapingService:
                         job.embedding = embedding
                 await db.commit()
                 print(f"  → {len(jobs_sans_embedding)} embeddings générés")
-            except Exception as e:
-                print(f"  ⚠️ Embedding error: {e}")
+        except Exception as e:
+            print(f"  ⚠️ Embedding error: {e}")
 
         print(f"Scraping terminé: {new_count} nouvelles, {duplicate_count} doublons, {expired_count} expirées")
         return {

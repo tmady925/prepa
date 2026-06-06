@@ -515,14 +515,29 @@ async def process_message(message: dict, db: AsyncSession):
 
     if user.status == "active":
         quota = await user_service.check_quota(user)
-        if not quota["allowed"]:
-            # Détecte toutes les variantes possibles
+        conv_q = user.conversation_state or {}
+        menu_pending = conv_q.get("pending_menu")
+        menu_options = conv_q.get("menu_options", []) or []
+
+        # Seule la VRAIE navigation de menu (un chiffre ou un id d'option) échappe
+        # au quota — une question libre reste bloquée même si un menu traîne.
+        is_menu_nav = bool(menu_pending) and (
+            text.strip().isdigit() or text.lower().strip() in menu_options
+        )
+
+        if not quota["allowed"] and not is_menu_nav:
+            # Ici aucun menu profil n'est en attente → "1"/"2" réfèrent au mur de quota
             text_lower = text.lower().strip()
             if text_lower in ("action_invite", "1", "inviter des amis", "inviter", "/inviter"):
                 await handle_command("inviter", phone, user, db)
                 return
             if text_lower in ("action_pro", "2", "passer pro", "pro", "/plan"):
                 await handle_command("plan", phone, user, db)
+                return
+            # Les commandes de consultation restent accessibles (pas de LLM)
+            _cmd_over_quota = detect_command(text)
+            if _cmd_over_quota in ("profil", "progression", "aide", "inviter"):
+                await handle_command(_cmd_over_quota, phone, user, db)
                 return
             # Affiche le message quota avec options
             await whatsapp_sender.send_buttons(
@@ -1233,6 +1248,17 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession, msg_t
             )
 
     elif step == "plan":
+        # L'utilisateur tape une commande (/profil, /aide…) au lieu de choisir un plan
+        cmd_at_plan = detect_command(text)
+        is_pro_choice = text in ("onboarding_pro", "action_pro")
+        is_free_choice = text in ("onboarding_free", "action_free", "gratuit")
+
+        if cmd_at_plan and not is_pro_choice and not is_free_choice:
+            # Termine l'onboarding en gratuit puis exécute la commande
+            user = await user_service.complete_onboarding(db, user)
+            await handle_command(cmd_at_plan, phone, user, db)
+            return
+
         user = await user_service.complete_onboarding(db, user)
         days_left = 0
         if user.exam_date:

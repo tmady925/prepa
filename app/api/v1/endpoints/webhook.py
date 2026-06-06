@@ -1190,9 +1190,16 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession, msg_t
             user.onboarding_step = "done"
             await db.flush()
             await whatsapp_sender.send_text(
-                phone, f"✅ Infos études mises à jour *{user.name}* !"
+                phone,
+                f"✅ Infos études mises à jour *{user.name}* !\n\n"
+                "Tu peux maintenant :\n"
+                "• Demander un exercice 📝 (ex: *donne-moi un exercice de maths*)\n"
+                "• Soumettre une copie pour correction 📸\n"
+                "• Taper */profil* pour revoir ton profil\n\n"
+                "Par quoi on commence ? 🚀"
             )
-            returnc
+            return
+
         # Chaînage multi-usage : études → concours → emploi → plan
         usage = user.usage or []
         if isinstance(usage, str):

@@ -1256,6 +1256,124 @@ tr:hover td { background: rgba(255,255,255,0.02); }
           <button class="btn btn-secondary" onclick="runScraping()">🔍 Scraper maintenant</button>
         </div>
       </div>
+
+      <!-- ── Import offre ── -->
+      <div class="card" style="margin-bottom:16px">
+        <div class="card-title">➕ Ajouter une offre</div>
+        <div style="display:flex;gap:8px;margin-bottom:16px">
+          <button class="btn btn-secondary" id="tab-url" onclick="switchImportTab('url')" style="font-size:12px">🔗 Par URL</button>
+          <button class="btn btn-secondary" id="tab-manual" onclick="switchImportTab('manual')" style="font-size:12px">✍️ Manuel</button>
+          <button class="btn btn-secondary" id="tab-pdf" onclick="switchImportTab('pdf')" style="font-size:12px">📄 PDF</button>
+        </div>
+
+        <!-- Tab URL -->
+        <div id="import-url" class="import-tab">
+          <div style="display:flex;gap:8px">
+            <input id="import-url-input" class="filter-select" style="flex:1;padding:8px 12px"
+                   placeholder="https://www.emploidakar.com/offre-demploi/...">
+            <button class="btn btn-primary" onclick="importFromUrl()" style="font-size:12px">Importer</button>
+          </div>
+          <div id="import-url-result" style="margin-top:8px;font-size:12px"></div>
+        </div>
+
+        <!-- Tab Manuel -->
+        <div id="import-manual" class="import-tab" style="display:none">
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+            <div>
+              <label style="font-size:12px;color:var(--text2)">Titre *</label>
+              <input id="m-titre" class="filter-select" style="width:100%;margin-top:4px" placeholder="Développeur Frontend">
+            </div>
+            <div>
+              <label style="font-size:12px;color:var(--text2)">Entreprise *</label>
+              <input id="m-entreprise" class="filter-select" style="width:100%;margin-top:4px" placeholder="Entreprise SA">
+            </div>
+            <div>
+              <label style="font-size:12px;color:var(--text2)">Secteur</label>
+              <select id="m-secteur" class="filter-select" style="width:100%;margin-top:4px">
+                <option value="">Choisir...</option>
+                <option>Informatique/Tech</option>
+                <option>Finance/Comptabilité</option>
+                <option>Marketing/Communication</option>
+                <option>Commerce/Vente</option>
+                <option>RH/Recrutement</option>
+                <option>Humanitaire/ONG</option>
+                <option>Juridique</option>
+                <option>BTP/Ingénierie</option>
+                <option>Santé</option>
+                <option>Éducation</option>
+                <option>Transport/Logistique</option>
+                <option>Hôtellerie/Restauration</option>
+                <option>Agriculture</option>
+                <option>Autre</option>
+              </select>
+            </div>
+            <div>
+              <label style="font-size:12px;color:var(--text2)">Type contrat</label>
+              <select id="m-contrat" class="filter-select" style="width:100%;margin-top:4px">
+                <option value="">Choisir...</option>
+                <option>CDI</option><option>CDD</option>
+                <option>Stage</option><option>Freelance</option>
+              </select>
+            </div>
+            <div>
+              <label style="font-size:12px;color:var(--text2)">Localisation *</label>
+              <input id="m-localisation" class="filter-select" style="width:100%;margin-top:4px" placeholder="Dakar, Sénégal">
+            </div>
+            <div>
+              <label style="font-size:12px;color:var(--text2)">Email candidature</label>
+              <input id="m-email" class="filter-select" style="width:100%;margin-top:4px" placeholder="rh@entreprise.com">
+            </div>
+            <div>
+              <label style="font-size:12px;color:var(--text2)">Niveau études requis</label>
+              <select id="m-niveau" class="filter-select" style="width:100%;margin-top:4px">
+                <option value="">Non requis</option>
+                <option>bac</option><option>bac+2</option>
+                <option>bac+3</option><option>bac+5</option>
+              </select>
+            </div>
+            <div>
+              <label style="font-size:12px;color:var(--text2)">Expérience min (années)</label>
+              <input id="m-experience" class="filter-select" type="number" style="width:100%;margin-top:4px" placeholder="0">
+            </div>
+          </div>
+          <div style="margin-top:10px">
+            <label style="font-size:12px;color:var(--text2)">Description *</label>
+            <textarea id="m-description" class="filter-select" style="width:100%;margin-top:4px;min-height:80px;resize:vertical"
+                      placeholder="Description du poste, missions, profil recherché..."></textarea>
+          </div>
+          <div style="margin-top:10px">
+            <label style="font-size:12px;color:var(--text2)">Source URL (optionnel)</label>
+            <input id="m-source-url" class="filter-select" style="width:100%;margin-top:4px" placeholder="https://...">
+          </div>
+          <button class="btn btn-primary" style="margin-top:12px;font-size:12px" onclick="submitManualJob()">
+            Publier l'offre →
+          </button>
+          <div id="import-manual-result" style="margin-top:8px;font-size:12px"></div>
+        </div>
+
+        <!-- Tab PDF -->
+        <div id="import-pdf" class="import-tab" style="display:none">
+          <div id="pdf-dropzone" style="border:2px dashed var(--border2);border-radius:8px;padding:30px;text-align:center;cursor:pointer;transition:border-color 0.2s"
+               onclick="document.getElementById('pdf-input').click()"
+               ondragover="event.preventDefault();this.style.borderColor='var(--accent)'"
+               ondragleave="this.style.borderColor='var(--border2)'"
+               ondrop="handlePdfDrop(event)">
+            <div style="font-size:24px;margin-bottom:8px">📄</div>
+            <div style="font-size:13px;color:var(--text2)">Glisser le PDF ici ou cliquer pour sélectionner</div>
+            <div style="font-size:11px;color:var(--text3);margin-top:4px">Fiche de poste PDF — champs extraits automatiquement</div>
+          </div>
+          <input type="file" id="pdf-input" accept=".pdf" style="display:none" onchange="handlePdfFile(this.files[0])">
+          <div id="import-pdf-preview" style="margin-top:12px;display:none">
+            <div style="font-size:12px;color:var(--text2);margin-bottom:8px">Aperçu extrait :</div>
+            <div id="pdf-preview-content" style="background:var(--surface2);border-radius:8px;padding:12px;font-size:12px"></div>
+            <button class="btn btn-primary" style="margin-top:10px;font-size:12px" onclick="confirmPdfImport()">
+              ✅ Confirmer et publier
+            </button>
+          </div>
+          <div id="import-pdf-result" style="margin-top:8px;font-size:12px"></div>
+        </div>
+      </div>
+
       <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap">
         <select id="job-filter-statut" onchange="loadJobs()" class="filter-select">
           <option value="">Tous statuts</option>
@@ -3306,7 +3424,139 @@ async function runScraping() {
     loadJobs();
   }
 }
-function showAddJobModal() { toast('Formulaire ajout offre — à implémenter'); }
+function showAddJobModal() { switchImportTab('manual'); }
+
+// ── Import offre : tabs ────────────────────────────────────────
+let currentPdfData = null;
+
+function switchImportTab(tab) {
+  document.querySelectorAll('.import-tab').forEach(t => t.style.display = 'none');
+  const el = document.getElementById(`import-${tab}`);
+  if (el) el.style.display = 'block';
+}
+
+// ── Import URL ─────────────────────────────────────────────────
+async function importFromUrl() {
+  const url = document.getElementById('import-url-input').value.trim();
+  if (!url) return toast('⚠️ Entrez une URL');
+  const resultEl = document.getElementById('import-url-result');
+  resultEl.style.color = 'var(--text2)';
+  resultEl.textContent = '⏳ Import en cours...';
+
+  const r = await api('/admin/jobs/import-url', 'POST', {url});
+  if (!r) { resultEl.textContent = ''; return; }
+
+  if (r.duplicate) {
+    resultEl.style.color = 'var(--yellow)';
+    resultEl.textContent = `⚠️ ${r.message}`;
+  } else if (r.success) {
+    resultEl.style.color = 'var(--green)';
+    resultEl.textContent = `✅ Importé : ${r.job.titre} — ${r.job.entreprise}`;
+    document.getElementById('import-url-input').value = '';
+    loadJobs();
+  } else {
+    resultEl.style.color = 'var(--red)';
+    resultEl.textContent = `❌ ${r.message || r.detail || 'Erreur'}`;
+  }
+}
+
+// ── Import Manuel ──────────────────────────────────────────────
+async function submitManualJob() {
+  const titre = document.getElementById('m-titre').value.trim();
+  const entreprise = document.getElementById('m-entreprise').value.trim();
+  const localisation = document.getElementById('m-localisation').value.trim();
+  const description = document.getElementById('m-description').value.trim();
+  if (!titre || !entreprise || !localisation || !description) {
+    return toast('⚠️ Remplissez les champs obligatoires (*)');
+  }
+  const body = {
+    titre, entreprise, localisation, description,
+    secteur: document.getElementById('m-secteur').value || null,
+    type_contrat: document.getElementById('m-contrat').value || null,
+    email_candidature: document.getElementById('m-email').value || null,
+    niveau_etudes: document.getElementById('m-niveau').value || null,
+    experience_min_annees: parseInt(document.getElementById('m-experience').value) || 0,
+    source_url: document.getElementById('m-source-url').value || null,
+    source: 'admin',
+    annee_publication: new Date().getFullYear(),
+  };
+  const resultEl = document.getElementById('import-manual-result');
+  resultEl.style.color = 'var(--text2)';
+  resultEl.textContent = '⏳ Publication en cours...';
+
+  const r = await api('/admin/jobs', 'POST', body);
+  if (!r) { resultEl.textContent = ''; return; }
+
+  if (r.duplicate) {
+    resultEl.style.color = 'var(--yellow)';
+    resultEl.textContent = `⚠️ ${r.message}`;
+  } else if (r.success) {
+    resultEl.style.color = 'var(--green)';
+    resultEl.textContent = '✅ Offre publiée !';
+    ['m-titre','m-entreprise','m-localisation','m-description','m-email','m-source-url','m-experience'].forEach(id => {
+      document.getElementById(id).value = '';
+    });
+    loadJobs();
+  } else {
+    resultEl.style.color = 'var(--red)';
+    resultEl.textContent = `❌ ${r.detail || r.message || 'Erreur'}`;
+  }
+}
+
+// ── Import PDF ─────────────────────────────────────────────────
+function handlePdfDrop(e) {
+  e.preventDefault();
+  document.getElementById('pdf-dropzone').style.borderColor = 'var(--border2)';
+  const file = e.dataTransfer.files[0];
+  if (file && file.type === 'application/pdf') handlePdfFile(file);
+  else toast('⚠️ Fichier PDF uniquement');
+}
+
+async function handlePdfFile(file) {
+  if (!file) return;
+  const resultEl = document.getElementById('import-pdf-result');
+  const previewEl = document.getElementById('import-pdf-preview');
+  resultEl.style.color = 'var(--text2)';
+  resultEl.textContent = '⏳ Lecture du PDF...';
+  previewEl.style.display = 'none';
+
+  const reader = new FileReader();
+  reader.onload = async (e) => {
+    const b64 = e.target.result.split(',')[1];
+    currentPdfData = {pdf_b64: b64, filename: file.name};
+    resultEl.textContent = '⏳ Extraction des informations...';
+    const r = await api('/admin/jobs/import-pdf', 'POST', currentPdfData);
+    if (!r) { resultEl.textContent = ''; return; }
+
+    if (r.duplicate) {
+      resultEl.style.color = 'var(--yellow)';
+      resultEl.textContent = `⚠️ ${r.message}`;
+    } else if (r.success) {
+      resultEl.textContent = '';
+      document.getElementById('pdf-preview-content').innerHTML = `
+        <div><strong>Titre :</strong> ${r.job.titre}</div>
+        <div><strong>Entreprise :</strong> ${r.job.entreprise}</div>
+        <div><strong>Secteur :</strong> ${r.job.secteur || '—'}</div>
+        <div><strong>Localisation :</strong> ${r.job.localisation || '—'}</div>
+        <div><strong>Contrat :</strong> ${r.job.type_contrat || '—'}</div>
+        ${r.job.taches?.length ? `<div><strong>Missions :</strong> ${r.job.taches.slice(0,3).join(', ')}</div>` : ''}
+        ${r.job.conditions_requises?.length ? `<div><strong>Conditions :</strong> ${r.job.conditions_requises.slice(0,2).join(', ')}</div>` : ''}
+      `;
+      previewEl.style.display = 'block';
+      loadJobs();
+    } else {
+      resultEl.style.color = 'var(--red)';
+      resultEl.textContent = `❌ ${r.message || r.detail || 'Erreur'}`;
+    }
+  };
+  reader.readAsDataURL(file);
+}
+
+async function confirmPdfImport() {
+  toast('✅ Offre publiée et matching lancé !');
+  document.getElementById('import-pdf-preview').style.display = 'none';
+  currentPdfData = null;
+}
 
 // ════════════════════════════════════════════════════════════
 // RECRUITERS

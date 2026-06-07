@@ -520,7 +520,9 @@ class ScrapingService:
             print(f"  → {cleaned_existing} offres existantes nettoyées en DB")
 
         # Scrape toutes les sources (séparément pour suivre leur santé)
-        ed_jobs = await _fetch_emploidakar_jobs()
+        # EmploiDakar désactivé du scraping auto (JS dynamique, Cloudflare) :
+        # ajout manuel via le dashboard (URL / manuel / PDF).
+        ed_jobs = []
         sj_jobs = await _fetch_senjob_jobs()
         all_scraped: list[dict] = list(ed_jobs) + list(sj_jobs)
 

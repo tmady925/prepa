@@ -1608,6 +1608,270 @@ async def list_jobs(
     return out
 
 
+@router.post("/admin/jobs/import-url")
+async def import_job_from_url(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    _: bool = Depends(verify_admin),
+):
+    """
+    Importe une offre depuis une URL (EmploiDakar ou autre).
+    Scrape via Zyte → LLM extrait les champs → doublon → création + embedding + matching.
+    """
+    from app.models.job_opportunity import JobOpportunity
+    from app.services.scraping_service import _extract_job_details_llm, _content_hash, clean_text
+    from app.services.rag.embedding_service import embedding_service
+    from app.services.matching_service import run_match_all_candidates_bg
+    from datetime import timezone, timedelta
+    import httpx, asyncio
+
+    try:
+        data = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Corps de requête invalide")
+
+    url = (data.get("url") or "").strip()
+    if not url:
+        raise HTTPException(status_code=400, detail="URL manquante")
+
+    # Doublon URL
+    existing = (await db.execute(
+        select(JobOpportunity).where(JobOpportunity.source_url == url)
+    )).scalar_one_or_none()
+    if existing:
+        return {"success": False, "duplicate": True,
+                "message": f"Offre déjà importée ({existing.titre})",
+                "existing_id": str(existing.id)}
+
+    # Scrape via Zyte
+    description_raw = ""
+    if not settings.zyte_api_key:
+        return {"success": False, "message": "ZYTE_API_KEY non configurée"}
+    try:
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            resp = await client.post(
+                "https://api.zyte.com/v1/extract",
+                auth=(settings.zyte_api_key, ""),
+                json={"url": url, "browserHtml": True},
+            )
+            html = resp.json().get("browserHtml", "")
+            if html:
+                from bs4 import BeautifulSoup
+                soup = BeautifulSoup(html, "html.parser")
+                meta = soup.find("meta", attrs={"name": "description"})
+                if meta:
+                    description_raw = meta.get("content", "")
+                if not description_raw:
+                    # Fallback : texte visible principal
+                    body = soup.find("body")
+                    if body:
+                        description_raw = body.get_text(" ", strip=True)[:2000]
+    except Exception as e:
+        print(f"import-url Zyte error: {e}")
+
+    description_raw = clean_text(description_raw) or ""
+    if not description_raw:
+        return {"success": False, "message": "Impossible de lire le contenu de cette URL"}
+
+    detail = await _extract_job_details_llm(description_raw, url)
+    if not detail.get("titre"):
+        return {"success": False, "message": "Impossible d'extraire les infos de cette URL"}
+
+    annee = datetime.now().year
+    c_hash = _content_hash(
+        detail.get("titre", ""), detail.get("entreprise", ""),
+        detail.get("localisation", ""), annee,
+    )
+    existing_hash = (await db.execute(
+        select(JobOpportunity).where(JobOpportunity.content_hash == c_hash)
+    )).scalar_one_or_none()
+    if existing_hash:
+        return {"success": False, "duplicate": True,
+                "message": f"Offre similaire déjà existante ({existing_hash.titre})",
+                "existing_id": str(existing_hash.id)}
+
+    now = datetime.now(timezone.utc)
+    job = JobOpportunity(
+        titre=(clean_text(detail.get("titre")) or "")[:200],
+        entreprise=(clean_text(detail.get("entreprise")) or "Non précisé")[:200],
+        secteur=(clean_text(detail.get("secteur")) or None),
+        localisation=(clean_text(detail.get("localisation")) or "Sénégal")[:200],
+        description=description_raw[:500],
+        description_complete=description_raw[:3000],
+        type_contrat=detail.get("type_contrat"),
+        email_candidature=detail.get("email_candidature"),
+        taches=detail.get("taches", []),
+        conditions_requises=detail.get("conditions_requises", []),
+        avantages=detail.get("avantages", []),
+        experience_min_annees=detail.get("experience_min_annees"),
+        source="admin",
+        source_url=url,
+        statut="active",
+        content_hash=c_hash,
+        annee_publication=annee,
+        last_seen_at=now,
+        expires_at=now + timedelta(days=60),
+    )
+    db.add(job)
+    await db.flush()
+
+    try:
+        embed_text = (
+            f"{job.titre} {job.entreprise} {job.secteur or ''} "
+            f"{job.localisation} {job.type_contrat or ''} {' '.join(job.taches or [])}"
+        )
+        embedding = await embedding_service.embed_text(embed_text)
+        if embedding:
+            job.embedding = embedding
+    except Exception as e:
+        print(f"import-url embedding error: {e}")
+
+    try:
+        await db.commit()
+    except Exception as e:
+        await db.rollback()
+        raise HTTPException(status_code=500, detail=f"Erreur base de données: {e}")
+
+    asyncio.create_task(run_match_all_candidates_bg(job.id))
+
+    return {"success": True, "job": {
+        "id": str(job.id), "titre": job.titre, "entreprise": job.entreprise,
+        "secteur": job.secteur, "localisation": job.localisation,
+        "type_contrat": job.type_contrat, "taches": job.taches,
+        "conditions_requises": job.conditions_requises,
+    }}
+
+
+@router.post("/admin/jobs/import-pdf")
+async def import_job_from_pdf(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    _: bool = Depends(verify_admin),
+):
+    """
+    Importe une offre depuis un PDF (fiche de poste).
+    Extraction fitz → LLM → stockage PDF → création + embedding + matching.
+    """
+    from app.models.job_opportunity import JobOpportunity
+    from app.services.scraping_service import _extract_job_details_llm, _content_hash, clean_text
+    from app.services.rag.embedding_service import embedding_service
+    from app.services.matching_service import run_match_all_candidates_bg
+    from datetime import timezone, timedelta
+    from pathlib import Path
+    import base64, hashlib, asyncio, re
+
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Corps de requête invalide")
+
+    pdf_b64 = body.get("pdf_b64", "")
+    filename = body.get("filename", "offre.pdf")
+    if not pdf_b64:
+        raise HTTPException(status_code=400, detail="PDF manquant")
+
+    try:
+        pdf_bytes = base64.b64decode(pdf_b64)
+    except Exception:
+        raise HTTPException(status_code=400, detail="PDF invalide (base64)")
+    if len(pdf_bytes) > 15 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="PDF trop volumineux (max 15 MB)")
+
+    try:
+        import fitz
+        doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+        text = ""
+        for page in doc:
+            text += page.get_text("text")
+        doc.close()
+    except Exception as e:
+        return {"success": False, "message": f"Impossible de lire le PDF: {e}"}
+
+    text = clean_text(text) or ""
+    if not text.strip():
+        return {"success": False, "message": "PDF vide ou illisible"}
+
+    detail = await _extract_job_details_llm(text[:2000], "pdf_upload")
+    if not detail.get("titre"):
+        return {"success": False, "message": "Impossible d'extraire les infos du PDF"}
+
+    # Stocke le PDF
+    try:
+        pdf_dir = Path("/home/prepa/app/job_pdfs")
+        pdf_dir.mkdir(parents=True, exist_ok=True)
+        pdf_hash = hashlib.sha256(pdf_bytes).hexdigest()[:16]
+        safe_name = re.sub(r"[^\w.\-]", "_", filename)[:60]
+        pdf_path = pdf_dir / f"{pdf_hash}_{safe_name}"
+        pdf_path.write_bytes(pdf_bytes)
+        pdf_path.chmod(0o644)
+        pdf_url = f"http://72.62.4.97/job_pdfs/{pdf_path.name}"
+    except Exception as e:
+        return {"success": False, "message": f"Impossible de stocker le PDF: {e}"}
+
+    annee = datetime.now().year
+    c_hash = _content_hash(
+        detail.get("titre", ""), detail.get("entreprise", ""),
+        detail.get("localisation", ""), annee,
+    )
+    existing = (await db.execute(
+        select(JobOpportunity).where(JobOpportunity.content_hash == c_hash)
+    )).scalar_one_or_none()
+    if existing:
+        return {"success": False, "duplicate": True,
+                "message": f"Offre similaire déjà existante ({existing.titre})"}
+
+    now = datetime.now(timezone.utc)
+    job = JobOpportunity(
+        titre=(clean_text(detail.get("titre")) or "")[:200],
+        entreprise=(clean_text(detail.get("entreprise")) or "Non précisé")[:200],
+        secteur=(clean_text(detail.get("secteur")) or None),
+        localisation=(clean_text(detail.get("localisation")) or "Sénégal")[:200],
+        description=text[:500],
+        description_complete=text[:3000],
+        type_contrat=detail.get("type_contrat"),
+        email_candidature=detail.get("email_candidature"),
+        taches=detail.get("taches", []),
+        conditions_requises=detail.get("conditions_requises", []),
+        avantages=detail.get("avantages", []),
+        experience_min_annees=detail.get("experience_min_annees"),
+        source="admin",
+        source_url=pdf_url,
+        statut="active",
+        content_hash=c_hash,
+        annee_publication=annee,
+        last_seen_at=now,
+        expires_at=now + timedelta(days=60),
+    )
+    db.add(job)
+    await db.flush()
+
+    try:
+        embed_text = (
+            f"{job.titre} {job.entreprise} {job.secteur or ''} "
+            f"{job.localisation} {' '.join(job.taches or [])}"
+        )
+        embedding = await embedding_service.embed_text(embed_text)
+        if embedding:
+            job.embedding = embedding
+    except Exception as e:
+        print(f"import-pdf embedding error: {e}")
+
+    try:
+        await db.commit()
+    except Exception as e:
+        await db.rollback()
+        raise HTTPException(status_code=500, detail=f"Erreur base de données: {e}")
+
+    asyncio.create_task(run_match_all_candidates_bg(job.id))
+
+    return {"success": True, "job": {
+        "id": str(job.id), "titre": job.titre, "entreprise": job.entreprise,
+        "secteur": job.secteur, "localisation": job.localisation,
+        "type_contrat": job.type_contrat, "taches": job.taches,
+        "conditions_requises": job.conditions_requises,
+    }, "pdf_url": pdf_url, "extracted_text_preview": text[:200]}
+
+
 @router.post("/admin/jobs")
 async def create_job_admin(
     request: Request,

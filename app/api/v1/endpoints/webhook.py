@@ -552,7 +552,9 @@ async def process_message(message: dict, db: AsyncSession):
                     await whatsapp_sender.send_text(
                         referrer.phone_number,
                         f"🎉 Un ami vient de s'inscrire avec ton lien !\n\n"
-                        f"Tu gagneras *20 messages bonus* quand il sera actif 💪"
+                        f"Quand il sera actif tu gagneras :\n"
+                        f"✅ *+20 messages* bonus\n"
+                        f"✅ *+1 offre d'emploi* supplémentaire par semaine 💪"
                     )
 
     if user.status == "active":
@@ -868,8 +870,20 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession, msg_t
         user.secteur_emploi = chosen
         user.onboarding_step = "emploi_niveau"
         await db.flush()
-        await whatsapp_sender.send_buttons(
-            phone, messages.ask_niveau_etudes(user.name), messages.NIVEAU_ETUDES_BUTTONS
+        await whatsapp_sender.send_list(
+            phone,
+            messages.ask_niveau_etudes(user.name),
+            "Choisir",
+            [{
+                "title": "Niveau d'études",
+                "rows": [
+                    {"id": "niveau_bac",      "title": "Bac ou moins"},
+                    {"id": "niveau_bac2",     "title": "Bac+2 / BTS"},
+                    {"id": "niveau_bac3",     "title": "Licence / Bac+3"},
+                    {"id": "niveau_bac5",     "title": "Master / Bac+5"},
+                    {"id": "niveau_doctorat", "title": "Doctorat"},
+                ],
+            }],
         )
 
     elif step == "emploi_niveau":
@@ -1247,22 +1261,36 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession, msg_t
             return
 
         user = await user_service.complete_onboarding(db, user)
-        days_left = 0
-        if user.exam_date:
-            exam_date = user.exam_date.replace(tzinfo=None)
-            days_left = max(0, (exam_date - datetime.now()).days)
-        await whatsapp_sender.send_text(
-            phone,
-            messages.onboarding_complete(user.name, days_left, user.usage)
-        )
-        if text in ("onboarding_pro", "action_pro"):
-            await _send_pro_offer(phone, user, _usage_context(user))
 
-        # ── Matching emploi après onboarding ─────────────────────────
-        # match_candidate envoie lui-même les notifications WhatsApp (3 couches + quota)
         usage_ob = user.usage or []
         if isinstance(usage_ob, str):
             usage_ob = [usage_ob]
+        _is_emploi = "emploi" in usage_ob or "tout" in usage_ob
+
+        if _is_emploi and is_free_choice:
+            await whatsapp_sender.send_text(
+                phone,
+                f"✅ Tout est prêt *{user.name}* !\n\n"
+                f"Tu peux maintenant :\n"
+                f"• Recevoir des offres d'emploi adaptées 💼\n\n"
+                f"Merci de patienter pendant le matching !"
+            )
+        elif _is_emploi and is_pro_choice:
+            await _send_pro_offer(phone, user, _usage_context(user))
+        else:
+            days_left = 0
+            if user.exam_date:
+                exam_date = user.exam_date.replace(tzinfo=None)
+                days_left = max(0, (exam_date - datetime.now()).days)
+            await whatsapp_sender.send_text(
+                phone,
+                messages.onboarding_complete(user.name, days_left, user.usage)
+            )
+            if is_pro_choice:
+                await _send_pro_offer(phone, user, _usage_context(user))
+
+        # ── Matching emploi après onboarding ─────────────────────────
+        # match_candidate envoie lui-même les notifications WhatsApp (3 couches + quota)
         if "emploi" in usage_ob or "tout" in usage_ob:
             try:
                 from app.services.matching_service import matching_service

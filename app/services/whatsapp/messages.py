@@ -11,8 +11,8 @@ class Messages:
 
     WELCOME = (
         "👋 Bienvenue sur *Prepa* !\n\n"
-        "Je suis ton assistant personnel de révision. "
-        "Je vais t'aider à préparer ton examen étape par étape.\n\n"
+        "Ton assistant personnel pour réussir tes études et ta carrière. "
+        "Je vais t'accompagner dans tes révisions, tes concours et ta recherche d'emploi.\n\n"
         "Pour commencer — *comment tu t'appelles ?*"
     )
 
@@ -400,7 +400,7 @@ class Messages:
         return (
             f"{intro}\n\n"
             "Pour continuer aujourd'hui :\n\n"
-            "📤 *Inviter des amis* → gagne 20 messages par ami actif\n"
+            "📤 *Inviter des amis* → +20 messages & +1 offre emploi/semaine par ami actif\n"
             "⭐ *Passer Pro* → *tout en illimité* (études · concours · emploi) pour *500 FCFA/mois*"
         )
 
@@ -494,12 +494,15 @@ class Messages:
         wa_link = f"https://wa.me/{wa_number}?text=PREPA-{code}"
 
         return (
-            f"🎁 *Invite tes amis et gagne des messages gratuits !*\n\n"
+            f"🎁 *Invite tes amis et gagne des récompenses !*\n\n"
             f"Partage ce lien à tes amis :\n"
             f"{wa_link}\n\n"
-            f"Quand ils cliquent et s'inscrivent avec ton lien :\n"
-            f"✅ Tu gagnes *20 messages* par ami actif\n"
-            f"✅ Tu gagnes *50 messages* si ton ami passe Pro\n\n"
+            f"Quand un ami rejoint avec ton lien et devient actif :\n"
+            f"✅ *+20 messages* bonus\n"
+            f"✅ *+1 offre d'emploi* supplémentaire par semaine\n\n"
+            f"Si ton ami passe *Pro* :\n"
+            f"✅ *+50 messages* bonus\n"
+            f"✅ *+1 offre d'emploi* supplémentaire par semaine\n\n"
             f"Ton code : *{code}*"
         )
 

@@ -1640,6 +1640,7 @@ async def list_jobs(
             "source": j.source,
             "is_featured": j.is_featured,
             "vues": j.vues,
+            "nb_notifications_sent": j.nb_notifications_sent or 0,
             "has_embedding": j.embedding is not None,
             "recruiter": recruiter_info,
             "created_at": j.created_at.isoformat() if j.created_at else None,
@@ -2100,6 +2101,201 @@ async def delete_job(
     await db.delete(job)
     await db.commit()
     return {"success": True}
+
+
+@router.get("/admin/jobs/stats")
+async def jobs_stats(
+    db: AsyncSession = Depends(get_db),
+    _: bool = Depends(verify_admin),
+):
+    """
+    Statistiques globales emploi :
+    - Nombre d'offres par statut
+    - Total matchs envoyés (et cette semaine)
+    - Top 5 offres par nb_notifications_sent
+    """
+    from app.models.job_opportunity import JobOpportunity
+    from app.models.candidate_profile import JobMatch
+    from sqlalchemy import func as sqlfunc
+    from datetime import timezone, timedelta
+
+    # Comptes par statut
+    statuts_res = await db.execute(
+        select(JobOpportunity.statut, sqlfunc.count().label("nb"))
+        .group_by(JobOpportunity.statut)
+    )
+    statuts = {row.statut: row.nb for row in statuts_res}
+
+    # Total matchs
+    total_matchs_res = await db.execute(select(sqlfunc.count()).select_from(JobMatch))
+    total_matchs = total_matchs_res.scalar() or 0
+
+    # Matchs cette semaine
+    week_ago = datetime.now(timezone.utc) - timedelta(days=7)
+    week_res = await db.execute(
+        select(sqlfunc.count()).select_from(JobMatch)
+        .where(JobMatch.created_at >= week_ago)
+    )
+    matchs_semaine = week_res.scalar() or 0
+
+    # Top 5 offres par notifications envoyées
+    top_res = await db.execute(
+        select(JobOpportunity)
+        .where(JobOpportunity.nb_notifications_sent > 0)
+        .order_by(JobOpportunity.nb_notifications_sent.desc())
+        .limit(5)
+    )
+    top_jobs = top_res.scalars().all()
+
+    return {
+        "statuts": statuts,
+        "total_matchs": total_matchs,
+        "matchs_semaine": matchs_semaine,
+        "top_offres": [
+            {
+                "id": str(j.id),
+                "titre": j.titre,
+                "entreprise": j.entreprise,
+                "nb_notifications_sent": j.nb_notifications_sent,
+                "statut": j.statut,
+            }
+            for j in top_jobs
+        ],
+    }
+
+
+@router.get("/admin/jobs/{job_id}/detail")
+async def get_job_detail(
+    job_id: str,
+    db: AsyncSession = Depends(get_db),
+    _: bool = Depends(verify_admin),
+):
+    """Retourne tous les champs d'une offre (vue détaillée)."""
+    from app.models.job_opportunity import JobOpportunity
+
+    try:
+        job_uuid = uuid.UUID(job_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="job_id invalide")
+
+    result = await db.execute(select(JobOpportunity).where(JobOpportunity.id == job_uuid))
+    j = result.scalar_one_or_none()
+    if not j:
+        raise HTTPException(status_code=404, detail="Annonce introuvable")
+
+    return {
+        "id": str(j.id),
+        "titre": j.titre,
+        "entreprise": j.entreprise,
+        "secteur": j.secteur,
+        "localisation": j.localisation,
+        "type_contrat": j.type_contrat,
+        "niveau_etudes": j.niveau_etudes,
+        "experience_min_annees": j.experience_min_annees,
+        "description": j.description,
+        "description_complete": j.description_complete,
+        "taches": j.taches or [],
+        "conditions_requises": j.conditions_requises or [],
+        "competences_requises": j.competences_requises or [],
+        "avantages": j.avantages or [],
+        "email_candidature": j.email_candidature,
+        "source_url": j.source_url,
+        "source": j.source,
+        "statut": j.statut,
+        "is_featured": j.is_featured,
+        "vues": j.vues,
+        "nb_notifications_sent": j.nb_notifications_sent,
+        "has_embedding": j.embedding is not None,
+        "created_at": j.created_at.isoformat() if j.created_at else None,
+        "expires_at": j.expires_at.isoformat() if j.expires_at else None,
+        "date_limite": j.date_limite.isoformat() if j.date_limite else None,
+        "logo_url": j.logo_url,
+    }
+
+
+@router.get("/admin/jobs/{job_id}/matches")
+async def get_job_matches(
+    job_id: str,
+    db: AsyncSession = Depends(get_db),
+    _: bool = Depends(verify_admin),
+    limit: int = 100,
+    offset: int = 0,
+):
+    """Liste les candidats matchés pour une offre donnée avec leur score et statut."""
+    from app.models.candidate_profile import JobMatch
+    from app.models.user import User
+
+    try:
+        job_uuid = uuid.UUID(job_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="job_id invalide")
+
+    result = await db.execute(
+        select(JobMatch, User)
+        .join(User, User.id == JobMatch.user_id)
+        .where(JobMatch.job_id == job_uuid)
+        .order_by(JobMatch.score_match.desc())
+        .limit(limit).offset(offset)
+    )
+    rows = result.all()
+
+    total_res = await db.execute(
+        select(func.count()).select_from(JobMatch).where(JobMatch.job_id == job_uuid)
+    )
+    total = total_res.scalar() or 0
+
+    return {
+        "total": total,
+        "matches": [
+            {
+                "match_id": str(m.id),
+                "user_id": str(u.id),
+                "nom": u.name or "—",
+                "phone": u.phone_number,
+                "plan": u.plan,
+                "score_match": round(m.score_match, 2),
+                "statut": m.statut,
+                "notifie_at": m.notifie_at.isoformat() if m.notifie_at else None,
+                "created_at": m.created_at.isoformat() if m.created_at else None,
+            }
+            for m, u in rows
+        ],
+    }
+
+
+@router.post("/admin/jobs/{job_id}/rematch")
+async def rematch_job(
+    job_id: str,
+    db: AsyncSession = Depends(get_db),
+    _: bool = Depends(verify_admin),
+):
+    """
+    Relance le matching d'une offre contre tous les candidats.
+    Utile si l'offre existait avant l'inscription de nouveaux candidats.
+    """
+    from app.models.job_opportunity import JobOpportunity
+    from app.services.matching_service import run_match_all_candidates_bg
+    import asyncio
+
+    try:
+        job_uuid = uuid.UUID(job_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="job_id invalide")
+
+    result = await db.execute(select(JobOpportunity).where(JobOpportunity.id == job_uuid))
+    job = result.scalar_one_or_none()
+    if not job:
+        raise HTTPException(status_code=404, detail="Annonce introuvable")
+
+    if job.statut != "active":
+        raise HTTPException(status_code=400, detail="Seules les offres actives peuvent être re-matchées")
+
+    if not job.embedding:
+        raise HTTPException(status_code=400, detail="Offre sans embedding — validez-la d'abord")
+
+    asyncio.create_task(run_match_all_candidates_bg(job.id))
+
+    return {"success": True, "message": f"Matching relancé pour « {job.titre} »"}
 
 
 # ── CANDIDATS ─────────────────────────────────────────────────────────

@@ -364,6 +364,9 @@ tr:hover td { background: rgba(255,255,255,0.02); }
 .badge-blue   { background: var(--accent-glow);color: var(--accent2); border-radius: 20px; padding: 3px 10px; font-size: 11px; font-weight: 600; }
 .badge-purple { background: var(--purple-dim); color: var(--purple);  border-radius: 20px; padding: 3px 10px; font-size: 11px; font-weight: 600; }
 .btn-icon { padding: 6px; width: 30px; height: 30px; justify-content: center; }
+.stat-mini { background: var(--bg2); border-radius: 10px; padding: 10px 14px; display: flex; flex-direction: column; align-items: center; min-width: 80px; }
+.stat-mini-val { font-size: 20px; font-weight: 700; color: var(--text1); line-height: 1.2; }
+.stat-mini-lbl { font-size: 11px; color: var(--text2); margin-top: 2px; text-align: center; }
 
 /* ── Form elements ── */
 .form-group { margin-bottom: 16px; }
@@ -1257,6 +1260,9 @@ tr:hover td { background: rgba(255,255,255,0.02); }
         </div>
       </div>
 
+      <!-- ── Stats globales emploi ── -->
+      <div id="jobs-global-stats"></div>
+
       <!-- ── Import offre ── -->
       <div class="card" style="margin-bottom:16px">
         <div class="card-title">➕ Ajouter une offre</div>
@@ -1660,6 +1666,40 @@ tr:hover td { background: rgba(255,255,255,0.02); }
     <div style="display:flex;gap:10px;justify-content:flex-end">
       <button class="btn btn-ghost" onclick="closeModal('modal-upload-doc')">Annuler</button>
       <button class="btn btn-primary" onclick="uploadDocument()">⬆️ Indexer</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: Détail offre emploi -->
+<div class="modal-overlay" id="modal-job-detail">
+  <div class="modal" style="max-width:680px;width:95%">
+    <div class="modal-header">
+      <div class="modal-title">💼 Détail de l'offre</div>
+      <button class="modal-close" onclick="closeModal('modal-job-detail')">✕</button>
+    </div>
+    <div id="job-detail-body" style="padding:0 4px;max-height:70vh;overflow-y:auto">
+      <div class="empty">Chargement...</div>
+    </div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px;flex-wrap:wrap">
+      <button class="btn btn-ghost" onclick="closeModal('modal-job-detail')">Fermer</button>
+      <button class="btn btn-primary" id="btn-job-detail-matches" onclick="">👥 Voir candidats matchés</button>
+      <button class="btn btn-warning" id="btn-job-detail-rematch" onclick="">🔄 Relancer matching</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: Candidats matchés -->
+<div class="modal-overlay" id="modal-job-matches">
+  <div class="modal" style="max-width:740px;width:95%">
+    <div class="modal-header">
+      <div class="modal-title" id="matches-modal-title">👥 Candidats matchés</div>
+      <button class="modal-close" onclick="closeModal('modal-job-matches')">✕</button>
+    </div>
+    <div id="job-matches-body" style="max-height:65vh;overflow-y:auto">
+      <div class="empty">Chargement...</div>
+    </div>
+    <div style="display:flex;justify-content:flex-end;margin-top:16px">
+      <button class="btn btn-ghost" onclick="closeModal('modal-job-matches')">Fermer</button>
     </div>
   </div>
 </div>
@@ -3359,11 +3399,41 @@ async function loadJobs() {
   if (source)  url += `&source=${source}`;
   if (secteur) url += `&secteur=${encodeURIComponent(secteur)}`;
 
-  const jobs = await api(url);
+  const [jobsResult, statsResult] = await Promise.allSettled([api(url), api('/admin/jobs/stats')]);
+  if (jobsResult.status === 'rejected') return;
+  const jobs = jobsResult.value;
+  const stats = statsResult.status === 'fulfilled' ? statsResult.value : null;
   if (!jobs) return;
 
   document.getElementById('jobs-sub').textContent = `${jobs.length} offres`;
   document.getElementById('jobs-count').textContent = jobs.filter(j => j.statut === 'active').length;
+
+  // Bloc stats globales emploi
+  if (stats) {
+    const statsEl = document.getElementById('jobs-global-stats');
+    if (statsEl) {
+      statsEl.innerHTML = `
+        <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px">
+          <div class="stat-mini"><span class="stat-mini-val">${stats.statuts?.active || 0}</span><span class="stat-mini-lbl">Actives</span></div>
+          <div class="stat-mini"><span class="stat-mini-val">${stats.statuts?.pending || 0}</span><span class="stat-mini-lbl">En attente</span></div>
+          <div class="stat-mini"><span class="stat-mini-val">${stats.statuts?.expired || 0}</span><span class="stat-mini-lbl">Expirées</span></div>
+          <div class="stat-mini"><span class="stat-mini-val">${stats.total_matchs}</span><span class="stat-mini-lbl">Matchs total</span></div>
+          <div class="stat-mini"><span class="stat-mini-val">${stats.matchs_semaine}</span><span class="stat-mini-lbl">Matchs 7j</span></div>
+        </div>
+        ${stats.top_offres?.length ? `
+          <div style="font-size:12px;color:var(--text2);margin-bottom:6px;font-weight:600">🏆 Top offres (matchs envoyés)</div>
+          <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px">
+            ${stats.top_offres.map(o => `
+              <div style="background:var(--bg2);border-radius:8px;padding:6px 10px;font-size:12px;cursor:pointer" onclick="openJobDetail('${o.id}')">
+                <strong>${o.titre}</strong> · ${o.entreprise}<br>
+                <span style="color:var(--accent)">📨 ${o.nb_notifications_sent} notif.</span>
+                <span class="badge-${o.statut === 'active' ? 'green' : 'red'}" style="margin-left:4px">${o.statut}</span>
+              </div>
+            `).join('')}
+          </div>` : ''}
+      `;
+    }
+  }
 
   const container = document.getElementById('jobs-list');
   if (!jobs.length) { container.innerHTML = '<div class="empty">Aucune offre</div>'; return; }
@@ -3372,24 +3442,28 @@ async function loadJobs() {
     <table class="data-table">
       <thead><tr>
         <th>Titre</th><th>Entreprise</th><th>Secteur</th>
-        <th>Contrat</th><th>Source</th><th>Statut</th><th>Actions</th>
+        <th>Contrat</th><th>📨</th><th>Source</th><th>Statut</th><th>Actions</th>
       </tr></thead>
       <tbody>
         ${jobs.map(j => `
           <tr>
             <td>
-              <div style="font-weight:500;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${j.titre}</div>
+              <div style="font-weight:500;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer;color:var(--accent)" onclick="openJobDetail('${j.id}')">${j.titre}</div>
               <div style="font-size:11px;color:var(--text2)">${j.localisation || ''}</div>
             </td>
             <td>${j.entreprise || '—'}</td>
             <td><span style="font-size:11px">${j.secteur || '—'}</span></td>
             <td>${j.type_contrat || '—'}</td>
+            <td style="text-align:center;font-size:12px;color:var(--accent);font-weight:600">${j.nb_notifications_sent ?? 0}</td>
             <td><span class="badge-${j.source === 'scraping' ? 'blue' : j.source === 'recruteur' ? 'purple' : 'green'}">${j.source}</span></td>
             <td><span class="badge-${j.statut === 'active' ? 'green' : j.statut === 'pending' ? 'yellow' : 'red'}">${j.statut}</span></td>
             <td>
-              <div style="display:flex;gap:4px">
-                ${j.statut === 'pending' ? `<button class="btn-sm btn-success" onclick="validateJob('${j.id}')">✓ Valider</button>` : ''}
-                ${j.statut === 'active'  ? `<button class="btn-sm btn-warning" onclick="expireJob('${j.id}')">⏹ Expirer</button>` : ''}
+              <div style="display:flex;gap:4px;flex-wrap:wrap">
+                <button class="btn-sm" onclick="openJobDetail('${j.id}')" title="Voir détail">🔍</button>
+                <button class="btn-sm" onclick="openJobMatches('${j.id}','${(j.titre||'').replace(/'/g,"\\'")}')">👥</button>
+                ${j.statut === 'pending' ? `<button class="btn-sm btn-success" onclick="validateJob('${j.id}')">✓</button>` : ''}
+                ${j.statut === 'active'  ? `<button class="btn-sm btn-warning" onclick="expireJob('${j.id}')">⏹</button>` : ''}
+                ${j.statut === 'active'  ? `<button class="btn-sm" onclick="rematchJob('${j.id}')" title="Relancer matching">🔄</button>` : ''}
                 <button class="btn-sm btn-danger" onclick="deleteJob('${j.id}')">🗑</button>
               </div>
             </td>
@@ -3397,6 +3471,155 @@ async function loadJobs() {
         `).join('')}
       </tbody>
     </table>`;
+}
+
+async function openJobDetail(id) {
+  openModal('modal-job-detail');
+  document.getElementById('job-detail-body').innerHTML = '<div class="empty">Chargement...</div>';
+  document.getElementById('btn-job-detail-matches').onclick = () => { closeModal('modal-job-detail'); openJobMatches(id, ''); };
+  document.getElementById('btn-job-detail-rematch').onclick = () => rematchJobFromModal(id);
+
+  let j;
+  try {
+    j = await api(`/admin/jobs/${id}/detail`);
+  } catch(e) {
+    document.getElementById('job-detail-body').innerHTML = '<div class="empty">❌ Erreur chargement — vérifiez la console</div>';
+    console.error('openJobDetail error:', e);
+    return;
+  }
+  if (!j) { document.getElementById('job-detail-body').innerHTML = '<div class="empty">Erreur chargement</div>'; return; }
+
+  const badge = (statut) => `<span class="badge-${statut==='active'?'green':statut==='pending'?'yellow':'red'}">${statut}</span>`;
+  const list = (arr) => arr && arr.length ? `<ul style="margin:4px 0 0 16px;padding:0">${arr.map(x=>`<li style="font-size:13px;margin-bottom:2px">${x}</li>`).join('')}</ul>` : '<span style="color:var(--text2);font-size:12px">—</span>';
+
+  document.getElementById('job-detail-body').innerHTML = `
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px">
+      ${j.logo_url ? `<img src="${j.logo_url}" style="width:48px;height:48px;border-radius:8px;object-fit:contain;background:#f0f0f0;padding:4px">` : `<div style="width:48px;height:48px;border-radius:8px;background:var(--bg2);display:flex;align-items:center;justify-content:center;font-size:22px">💼</div>`}
+      <div>
+        <div style="font-size:16px;font-weight:700">${j.titre}</div>
+        <div style="color:var(--text2);font-size:13px">${j.entreprise} · ${j.localisation || '—'}</div>
+      </div>
+      <div style="margin-left:auto;display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+        ${badge(j.statut)}
+        ${j.is_featured ? '<span class="badge-yellow">⭐ Featured</span>' : ''}
+      </div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px;margin-bottom:16px">
+      <div class="stat-mini"><span class="stat-mini-val">${j.nb_notifications_sent ?? 0}</span><span class="stat-mini-lbl">Notifs envoyées</span></div>
+      <div class="stat-mini"><span class="stat-mini-val">${j.vues ?? 0}</span><span class="stat-mini-lbl">Vues</span></div>
+      <div class="stat-mini"><span class="stat-mini-val">${j.type_contrat || '—'}</span><span class="stat-mini-lbl">Contrat</span></div>
+      <div class="stat-mini"><span class="stat-mini-val">${j.niveau_etudes || '—'}</span><span class="stat-mini-lbl">Niveau</span></div>
+      <div class="stat-mini"><span class="stat-mini-val">${j.experience_min_annees ?? '—'}</span><span class="stat-mini-lbl">Exp. min (ans)</span></div>
+      <div class="stat-mini"><span class="stat-mini-val">${j.has_embedding ? '✅' : '❌'}</span><span class="stat-mini-lbl">Embedding</span></div>
+    </div>
+
+    ${j.description ? `
+      <div style="margin-bottom:12px">
+        <div style="font-size:12px;font-weight:600;color:var(--text2);margin-bottom:4px">DESCRIPTION</div>
+        <div style="font-size:13px;line-height:1.5;background:var(--bg2);padding:10px;border-radius:8px">${j.description}</div>
+      </div>` : ''}
+
+    ${j.taches?.length ? `
+      <div style="margin-bottom:12px">
+        <div style="font-size:12px;font-weight:600;color:var(--text2);margin-bottom:4px">MISSIONS / TÂCHES</div>
+        ${list(j.taches)}
+      </div>` : ''}
+
+    ${j.competences_requises?.length ? `
+      <div style="margin-bottom:12px">
+        <div style="font-size:12px;font-weight:600;color:var(--text2);margin-bottom:4px">COMPÉTENCES REQUISES</div>
+        ${list(j.competences_requises)}
+      </div>` : ''}
+
+    ${j.conditions_requises?.length ? `
+      <div style="margin-bottom:12px">
+        <div style="font-size:12px;font-weight:600;color:var(--text2);margin-bottom:4px">CONDITIONS</div>
+        ${list(j.conditions_requises)}
+      </div>` : ''}
+
+    ${j.avantages?.length ? `
+      <div style="margin-bottom:12px">
+        <div style="font-size:12px;font-weight:600;color:var(--text2);margin-bottom:4px">AVANTAGES</div>
+        ${list(j.avantages)}
+      </div>` : ''}
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:12px;color:var(--text2)">
+      ${j.email_candidature ? `<div>📧 ${j.email_candidature}</div>` : ''}
+      ${j.source_url ? `<div>🔗 <a href="${j.source_url}" target="_blank" style="color:var(--accent)">Source</a></div>` : ''}
+      <div>📅 Créé: ${j.created_at ? new Date(j.created_at).toLocaleDateString('fr-FR') : '—'}</div>
+      ${j.expires_at ? `<div>⏳ Expire: ${new Date(j.expires_at).toLocaleDateString('fr-FR')}</div>` : ''}
+      ${j.date_limite ? `<div>🗓 Limite candidature: ${new Date(j.date_limite).toLocaleDateString('fr-FR')}</div>` : ''}
+    </div>
+  `;
+
+  // Cacher le bouton rematch si pas active ou pas embedding
+  const btnRematch = document.getElementById('btn-job-detail-rematch');
+  btnRematch.style.display = (j.statut === 'active' && j.has_embedding) ? '' : 'none';
+}
+
+async function openJobMatches(id, titre) {
+  openModal('modal-job-matches');
+  document.getElementById('matches-modal-title').textContent = `👥 Candidats matchés${titre ? ' — ' + titre : ''}`;
+  document.getElementById('job-matches-body').innerHTML = '<div class="empty">Chargement...</div>';
+
+  let data;
+  try {
+    data = await api(`/admin/jobs/${id}/matches?limit=100`);
+  } catch(e) {
+    document.getElementById('job-matches-body').innerHTML = '<div class="empty">❌ Erreur chargement</div>';
+    console.error('openJobMatches error:', e);
+    return;
+  }
+  if (!data) { document.getElementById('job-matches-body').innerHTML = '<div class="empty">Erreur chargement</div>'; return; }
+
+  if (!data.matches?.length) {
+    document.getElementById('job-matches-body').innerHTML = '<div class="empty">Aucun candidat matché pour cette offre</div>';
+    return;
+  }
+
+  const scoreColor = s => s >= 75 ? '#22c55e' : s >= 50 ? '#f59e0b' : '#ef4444';
+  document.getElementById('job-matches-body').innerHTML = `
+    <div style="font-size:13px;color:var(--text2);margin-bottom:12px">${data.total} candidat(s) matché(s)</div>
+    <table class="data-table">
+      <thead><tr>
+        <th>Candidat</th><th>Plan</th><th>Score</th><th>Statut</th><th>Notifié</th>
+      </tr></thead>
+      <tbody>
+        ${data.matches.map(m => `
+          <tr>
+            <td>
+              <div style="font-weight:500">${m.nom}</div>
+              <div style="font-size:11px;color:var(--text2)">${m.phone}</div>
+            </td>
+            <td><span class="badge-${m.plan === 'pro' ? 'green' : 'yellow'}">${m.plan}</span></td>
+            <td>
+              <div style="display:flex;align-items:center;gap:6px">
+                <div style="width:50px;height:6px;background:var(--bg2);border-radius:3px;overflow:hidden">
+                  <div style="width:${m.score_match}%;height:100%;background:${scoreColor(m.score_match)};border-radius:3px"></div>
+                </div>
+                <span style="font-size:12px;font-weight:600;color:${scoreColor(m.score_match)}">${m.score_match}%</span>
+              </div>
+            </td>
+            <td><span class="badge-${m.statut === 'notifie' ? 'blue' : m.statut === 'vu' ? 'green' : 'red'}">${m.statut}</span></td>
+            <td style="font-size:11px;color:var(--text2)">${m.notifie_at ? new Date(m.notifie_at).toLocaleDateString('fr-FR') : '—'}</td>
+          </tr>
+        `).join('')}
+      </tbody>
+    </table>
+  `;
+}
+
+async function rematchJob(id) {
+  if (!confirm('Relancer le matching pour cette offre ?')) return;
+  const r = await api(`/admin/jobs/${id}/rematch`, 'POST');
+  if (r) toast(r.message || 'Matching relancé ✅');
+}
+
+async function rematchJobFromModal(id) {
+  if (!confirm('Relancer le matching pour cette offre ?')) return;
+  const r = await api(`/admin/jobs/${id}/rematch`, 'POST');
+  if (r) { toast(r.message || 'Matching relancé ✅'); closeModal('modal-job-detail'); }
 }
 
 async function validateJob(id) {

@@ -1332,6 +1332,63 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession, msg_t
             )
             return
 
+        # ── Inscription simulation via bouton "Je m'inscris" ──────────
+        if text and text.startswith("sim_inscrire_"):
+            sim_id_str = text.replace("sim_inscrire_", "").strip()
+            try:
+                import uuid as uuid_module
+                from app.services.simulation_service import simulation_service
+                from app.models.simulation import Simulation
+
+                sim_uuid = uuid_module.UUID(sim_id_str)
+                sim_result = await db.execute(
+                    sa_select(Simulation).where(Simulation.id == sim_uuid)
+                )
+                sim = sim_result.scalar_one_or_none()
+
+                if not sim:
+                    await whatsapp_sender.send_text(phone, "❌ Simulation introuvable.")
+                    return
+
+                if sim.statut in ("closed", "error"):
+                    await whatsapp_sender.send_text(
+                        phone,
+                        f"⏰ La simulation *{sim.titre}* est déjà terminée."
+                    )
+                    return
+
+                if user.plan != "pro":
+                    await whatsapp_sender.send_text(
+                        phone,
+                        "⭐ Les simulations d'examen sont réservées aux abonnés *Prepa Pro*.\n\n"
+                        "Tape */plan* pour passer Pro et participer ! 🚀"
+                    )
+                    return
+
+                inscrit = await simulation_service.inscrire_user(db, sim_uuid, user.id)
+                await db.commit()
+
+                if inscrit:
+                    date_str = sim.date_debut.strftime("%d/%m/%Y à %Hh%M")
+                    await whatsapp_sender.send_text(
+                        phone,
+                        f"✅ *Tu es inscrit(e) à la simulation — {sim.titre}* !\n\n"
+                        f"📅 Rendez-vous le *{date_str}*\n"
+                        f"⏱ Durée : *{sim.duree_minutes // 60}h{sim.duree_minutes % 60:02d}*\n\n"
+                        f"Le sujet te sera envoyé directement ici à l'heure H. "
+                        f"Prépare ton matériel ! ✏️📄"
+                    )
+                else:
+                    await whatsapp_sender.send_text(
+                        phone,
+                        f"✅ Tu es déjà inscrit(e) à *{sim.titre}*.\n"
+                        f"Le sujet te sera envoyé à l'heure H ! 🎯"
+                    )
+            except Exception as e:
+                print(f"Erreur inscription simulation {phone}: {e}")
+                await whatsapp_sender.send_text(phone, "❌ Erreur lors de l'inscription. Réessaie.")
+            return
+
         # Traitement copie simulation (priorité sur copie exercice)
         if msg_type == "image" and image_data:
             conv_state = user.conversation_state or {}

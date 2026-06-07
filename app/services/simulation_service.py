@@ -31,6 +31,16 @@ SIMULATIONS_BASE_URL = settings.simulations_base_url
 
 class SimulationService:
 
+    def _is_busy_user(self, user) -> bool:
+        """Vérifie si le user est dans un processus actif (même logique que queue_service)."""
+        conv = user.conversation_state or {}
+        return bool(
+            conv.get("awaiting_simulation_copy") or
+            conv.get("awaiting_copy") or
+            conv.get("exercise_path") or
+            conv.get("awaiting_copy_for_free_correction")
+        )
+
     async def get_active_simulations(self, db: AsyncSession) -> list[Simulation]:
         """Retourne les simulations scheduled ou active."""
         result = await db.execute(
@@ -182,16 +192,29 @@ class SimulationService:
         notified = 0
         for user in users:
             try:
-                # Inscrit d'abord, notifie ensuite
-                await self.inscrire_user(db, simulation.id, user.id)
-                msg = message_custom or (
-                    f"🔔 *Simulation {simulation.titre}*\n\n"
-                    f"📅 Date : *{date_str}*\n"
-                    f"⏱ Durée : *{heures}h*\n"
-                    f"👥 *{count} participants* inscrits\n\n"
-                    f"Prépare ton matériel : stylo, feuilles, calculatrice 📐"
-                )
-                await send_or_queue(db, user, msg)
+                if message_custom:
+                    # Message custom : envoi simple sans bouton
+                    await send_or_queue(db, user, message_custom)
+                else:
+                    # Message avec bouton d'inscription
+                    msg = (
+                        f"🎯 *Simulation — {simulation.titre}*\n\n"
+                        f"📅 Date : *{date_str}*\n"
+                        f"⏱ Durée : *{heures}h*\n"
+                        f"👥 *{count} participants* déjà inscrits\n\n"
+                        f"Prépare ton matériel : stylo, feuilles, calculatrice 📐\n\n"
+                        f"Appuie sur le bouton pour t'inscrire et recevoir le sujet à l'heure H !"
+                    )
+                    # Envoie avec bouton d'inscription (id = sim_inscrire_{simulation_id})
+                    if not self._is_busy_user(user):
+                        await whatsapp_sender.send_buttons(
+                            user.phone_number,
+                            msg,
+                            [{"id": f"sim_inscrire_{simulation.id}", "title": "Je m'inscris ✅"}],
+                        )
+                    else:
+                        # User occupé : enfile le message texte simple (sans bouton)
+                        await send_or_queue(db, user, msg + "\n\n_Réponds *Je m'inscris* pour t'inscrire._")
                 notified += 1
             except Exception as e:
                 print(f"Erreur notification à {user.phone_number}: {e}")

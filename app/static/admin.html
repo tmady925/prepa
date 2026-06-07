@@ -1842,6 +1842,30 @@ tr:hover td { background: rgba(255,255,255,0.02); }
   </div>
 </div>
 
+<!-- Modal: Notifier simulation -->
+<div class="modal-overlay" id="modal-notif-simulation">
+  <div class="modal" style="max-width:480px;width:95%">
+    <div class="modal-header">
+      <div class="modal-title">🔔 Notifier les élèves</div>
+      <button class="modal-close" onclick="closeModal('modal-notif-simulation')">✕</button>
+    </div>
+    <div style="margin-bottom:8px;font-size:13px;color:var(--text2)">
+      Simulation : <strong id="notif-sim-titre"></strong>
+    </div>
+    <div style="margin-bottom:12px;font-size:12px;color:var(--text2)">
+      La notification sera envoyée à tous les élèves <strong>Pro</strong> éligibles. Laisse le champ vide pour utiliser le message par défaut.
+    </div>
+    <label style="font-size:12px;color:var(--text2);display:block;margin-bottom:4px">Message personnalisé (optionnel)</label>
+    <textarea id="notif-sim-message" rows="5" style="width:100%;padding:10px;border-radius:8px;border:1px solid var(--border);background:var(--bg2);color:var(--text1);font-size:13px;resize:vertical;box-sizing:border-box"
+      placeholder="Ex : La simulation aura lieu demain à 9h. Prépare-toi ! ✏️"></textarea>
+    <div id="notif-sim-result" style="margin-top:10px;font-size:13px"></div>
+    <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:16px">
+      <button class="btn btn-ghost" onclick="closeModal('modal-notif-simulation')">Annuler</button>
+      <button class="btn btn-warning" onclick="envoyerNotifSimulation()">🔔 Envoyer la notification</button>
+    </div>
+  </div>
+</div>
+
 <!-- Modal: Simulation -->
 <div class="modal-overlay" id="modal-simulation">
   <div class="modal" style="width:600px">
@@ -3233,7 +3257,7 @@ function renderSimulationsGrid(sims) {
               → ${dateFin.toLocaleTimeString('fr',{hour:'2-digit',minute:'2-digit'})}
             </div>
             <div style="font-size:11px;color:var(--text3);margin-top:4px">
-              ${s.notif_j1_sent ? '✅ Notif J-1' : '⏳ Notif J-1'} &nbsp;·&nbsp;
+              ${s.notif_j1_sent ? '✅ Notif envoyée' : '⏳ Pas encore notifié'} &nbsp;·&nbsp;
               ${s.notif_debut_sent ? '✅ Lancée' : '⏳ Pas encore lancée'} &nbsp;·&nbsp;
               ${s.resultats_envoyes ? '✅ Résultats envoyés' : '⏳ Résultats en attente'}
             </div>
@@ -3247,6 +3271,9 @@ function renderSimulationsGrid(sims) {
             ` : ''}
             ${s.statut === 'closed' ? `
               <button class="btn btn-ghost btn-sm" onclick="voirParticipations('${s.id}')">📊 Résultats</button>
+            ` : ''}
+            ${s.statut !== 'closed' && s.statut !== 'error' ? `
+              <button class="btn btn-warning btn-sm" onclick="ouvrirNotifSimulation('${s.id}','${s.titre.replace(/'/g,"\\'")}')">🔔 Notifier</button>
             ` : ''}
             <button class="btn btn-danger btn-sm btn-icon" onclick="deleteSimulation('${s.id}','${s.titre.replace(/'/g,"\\'")}')">🗑</button>
           </div>
@@ -3324,6 +3351,33 @@ async function createSimulation() {
     }
   } catch(e) {
     status.textContent = e.name === 'AbortError' ? '❌ Timeout' : '❌ ' + e.message;
+  }
+}
+
+let _notifSimId = null;
+
+function ouvrirNotifSimulation(id, titre) {
+  _notifSimId = id;
+  document.getElementById('notif-sim-titre').textContent = titre;
+  document.getElementById('notif-sim-message').value = '';
+  document.getElementById('notif-sim-result').textContent = '';
+  openModal('modal-notif-simulation');
+}
+
+async function envoyerNotifSimulation() {
+  if (!_notifSimId) return;
+  const message = document.getElementById('notif-sim-message').value.trim();
+  const resultEl = document.getElementById('notif-sim-result');
+  resultEl.textContent = '⏳ Envoi en cours...';
+  try {
+    const body = message ? { message } : {};
+    const r = await api('/admin/simulations/' + _notifSimId + '/notifier', 'POST', body);
+    resultEl.style.color = 'var(--green)';
+    resultEl.textContent = `✅ ${r.message || 'Notification envoyée'} (${r.notifies} élève(s))`;
+    setTimeout(() => { closeModal('modal-notif-simulation'); loadSimulations(); }, 1500);
+  } catch(e) {
+    resultEl.style.color = 'var(--red)';
+    resultEl.textContent = '❌ Erreur lors de l\'envoi';
   }
 }
 

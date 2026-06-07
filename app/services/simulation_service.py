@@ -224,6 +224,10 @@ class SimulationService:
         users_result = await db.execute(query)
         users = users_result.scalars().all()
 
+        print(f"📣 envoyer_notification_manuelle: {len(users)} user(s) trouvé(s) pour '{simulation.titre}'")
+        for u in users:
+            print(f"   → {u.phone_number} | plan={u.plan} | status={u.status} | step={u.onboarding_step} | series={u.series}")
+
         date_str = simulation.date_debut.strftime("%d/%m/%Y à %Hh%M")
         heures = simulation.duree_minutes // 60
 

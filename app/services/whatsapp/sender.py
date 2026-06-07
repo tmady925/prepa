@@ -75,6 +75,7 @@ class WhatsAppSender:
             },
         }
         result = await self._send(payload)
+        print(f"send_buttons result: {result}")
 
         # Fallback texte si le format interactif est rejeté
         if not result.get("success") or result.get("error"):

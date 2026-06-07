@@ -59,7 +59,9 @@ class ReferralService:
         if referrer:
             bonus = await config_service.get_int("referral_bonus_messages")
             referrer.daily_messages_bonus += bonus
-            print(f"Parrainage activé: {referrer.phone_number} gagne {bonus} messages")
+            job_bonus = await config_service.get_int("referral_job_bonus_active")
+            referrer.extra_job_offers_bonus += job_bonus
+            print(f"Parrainage activé: {referrer.phone_number} gagne {bonus} messages + {job_bonus} offre(s)/semaine")
 
         await db.flush()
         return True
@@ -91,7 +93,9 @@ class ReferralService:
         if referrer:
             bonus = await config_service.get_int("referral_paid_bonus")
             referrer.daily_messages_bonus += bonus
-            print(f"Bonus payant: {referrer.phone_number} gagne {bonus} messages")
+            job_bonus = await config_service.get_int("referral_job_bonus_paid")
+            referrer.extra_job_offers_bonus += job_bonus
+            print(f"Bonus payant: {referrer.phone_number} gagne {bonus} messages + {job_bonus} offre(s)/semaine")
 
         await db.flush()
         return True

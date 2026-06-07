@@ -91,7 +91,11 @@ class MatchingService:
 
         results.sort(key=lambda x: x["score"], reverse=True)
         plan = getattr(user, "plan", "free")
-        top = results if plan == "pro" else results[:1]
+        if plan == "pro":
+            top = results
+        else:
+            max_to_send = 1 + (getattr(user, "extra_job_offers_bonus", 0) or 0)
+            top = results[:max_to_send]
 
         for match in top:
             await self._notify_candidate(user, match)
@@ -99,6 +103,29 @@ class MatchingService:
 
         if top:
             await self._update_quota(db, candidate, len(top))
+
+        # Upsell post-offre pour les utilisateurs gratuits
+        if top and plan != "pro" and getattr(user, "phone_number", None):
+            try:
+                from app.services.whatsapp.messages import messages
+                from app.services.payment_service import payment_service
+                from app.services.whatsapp.sender import whatsapp_sender
+                payment_url = None
+                try:
+                    inv = await payment_service.create_invoice(user=user, plan="pro")
+                    if inv.get("success") and inv.get("payment_url"):
+                        payment_url = inv["payment_url"]
+                except Exception:
+                    pass
+                upsell_msg = (
+                    "💼 *Tu viens de recevoir ton offre gratuite de la semaine !*\n\n"
+                    "Passe en *Pro* pour recevoir toutes les offres qui correspondent à ton profil, "
+                    "dès qu'elles sont disponibles — sans attendre.\n\n"
+                    + messages.pro_upsell(user.name or "toi", "emploi", payment_url)
+                )
+                await whatsapp_sender.send_text(user.phone_number, upsell_msg)
+            except Exception as e:
+                print(f"  ⚠️ upsell post-offre error: {e}")
 
         return top
 
@@ -301,7 +328,7 @@ class MatchingService:
         plan = getattr(user, "plan", "free")
         if plan == "pro":
             return True
-        max_notifs = 1  # gratuit : 1 notif/semaine
+        max_notifs = 1 + (getattr(user, "extra_job_offers_bonus", 0) or 0)
         now = datetime.now(timezone.utc)
         last_notif = candidate.last_notif_at
         if last_notif:

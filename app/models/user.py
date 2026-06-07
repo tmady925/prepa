@@ -38,6 +38,7 @@ class User(Base, TimestampMixin):
     # Quotas
     daily_messages_used: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     daily_messages_bonus: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    extra_job_offers_bonus: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     quota_reset_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     # Engagement

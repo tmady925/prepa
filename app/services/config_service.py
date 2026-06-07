@@ -11,6 +11,8 @@ DEFAULTS = {
     "free_messages_per_day": 10,
     "referral_bonus_messages": 20,
     "referral_paid_bonus": 50,
+    "referral_job_bonus_active": 1,
+    "referral_job_bonus_paid": 1,
     "referral_active_days": 7,
     "referral_min_msgs": 7,
     "bonus_expiry_days": 30,

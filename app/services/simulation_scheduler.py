@@ -1,13 +1,13 @@
 """
 Scheduler pour les simulations — vérifie toutes les minutes :
-- J-1 : envoie les notifications
-- Heure H : lance la simulation
-- Après la durée : ferme et corrige
+- Heure H  : lance la simulation (sujet envoyé aux inscrits Pro)
+- Après durée : ferme et corrige les copies soumises
 
-Corrections appliquées :
+Protections :
 - Statut "correcting" évite les retries infinis du scheduler
 - Statut "error" arrête les tentatives sur simulation en échec
-- Protection contre les appels concurrents via _en_cours
+- Protection contre les appels concurrents via _en_cours (single-process)
+- Recovery au démarrage : simulations bloquées en "correcting" → "error"
 """
 import asyncio
 from datetime import datetime, timezone, timedelta
@@ -16,12 +16,38 @@ from app.db.database import AsyncSessionLocal
 from app.models.simulation import Simulation
 from app.services.simulation_service import simulation_service
 
-# ── Set des IDs en cours de traitement (anti-concurrence en mémoire) ──
+# ── Set des IDs en cours de traitement (anti-concurrence intra-process) ──
 _en_cours: set[str] = set()
+_startup_done = False
+
+
+async def _recover_stuck_simulations():
+    """
+    Au démarrage, passe toute simulation bloquée en 'correcting' vers 'error'.
+    Évite qu'un crash de process laisse la simulation indéfiniment bloquée.
+    """
+    async with AsyncSessionLocal() as db:
+        try:
+            result = await db.execute(
+                select(Simulation).where(Simulation.statut == "correcting")
+            )
+            stuck = result.scalars().all()
+            for sim in stuck:
+                print(f"⚠️ Scheduler: simulation '{sim.titre}' était bloquée en 'correcting' → passage en 'error'")
+                sim.statut = "error"
+            if stuck:
+                await db.commit()
+        except Exception as e:
+            print(f"Scheduler recovery error: {e}")
 
 
 async def check_simulations():
     """Vérifie et lance les actions nécessaires pour chaque simulation."""
+    global _startup_done
+    if not _startup_done:
+        await _recover_stuck_simulations()
+        _startup_done = True
+
     async with AsyncSessionLocal() as db:
         try:
             now = datetime.now(timezone.utc)

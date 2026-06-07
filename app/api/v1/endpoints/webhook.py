@@ -1351,6 +1351,20 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession, msg_t
                     )
                     user.conversation_state = {}
                     await db.flush()
+                    from app.services.queue_service import flush_queue
+                    await flush_queue(db, user)
+                    return
+
+                # ── Validation sim_id avant conversion UUID ──
+                if not sim_id:
+                    await whatsapp_sender.send_text(
+                        phone,
+                        "❌ État de simulation invalide. Réessaie ou contacte le support."
+                    )
+                    user.conversation_state = {}
+                    await db.flush()
+                    from app.services.queue_service import flush_queue
+                    await flush_queue(db, user)
                     return
 
                 await whatsapp_sender.send_text(phone, "📸 Copie reçue ! Analyse en cours... ⏳")
@@ -1389,8 +1403,8 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession, msg_t
                         if "Délai dépassé" in error:
                             await whatsapp_sender.send_text(
                                 phone,
-                                f"⏰ Désolé, le délai de soumission est dépassé.\n\n"
-                                f"La correction sera quand même envoyée à tous les participants. 📄"
+                                f"⏰ Désolé, le délai de soumission pour *{simulation_titre}* est dépassé.\n\n"
+                                f"Les résultats seront envoyés à tous les participants ayant soumis leur copie. 📊"
                             )
                         else:
                             await whatsapp_sender.send_text(phone, f"❌ {error}")

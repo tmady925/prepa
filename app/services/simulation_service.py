@@ -95,6 +95,7 @@ class SimulationService:
         heures = simulation.duree_minutes // 60
         minutes = simulation.duree_minutes % 60
 
+        nb_envoyes = 0
         for participation, user in participants:
             try:
                 msg = (
@@ -117,6 +118,7 @@ class SimulationService:
                         "text": "📄 Sujet de l'épreuve",
                     })
 
+                # Mise à jour du state + flush immédiat pour chaque user
                 user.conversation_state = {
                     "awaiting_simulation_copy": True,
                     "simulation_id": str(simulation.id),
@@ -124,6 +126,8 @@ class SimulationService:
                     "heure_fin": heure_fin.isoformat(),
                     "duree_minutes": simulation.duree_minutes,
                 }
+                await db.flush()
+                nb_envoyes += 1
 
             except Exception as e:
                 print(f"Erreur envoi simulation à {user.phone_number}: {e}")
@@ -131,7 +135,7 @@ class SimulationService:
         simulation.statut = "active"
         simulation.notif_debut_sent = True
         await db.commit()
-        print(f"✅ Simulation {simulation.titre} lancée — {len(participants)} participants Pro")
+        print(f"✅ Simulation {simulation.titre} lancée — {nb_envoyes}/{len(participants)} participants Pro")
 
     async def envoyer_notification_manuelle(
         self,
@@ -178,6 +182,8 @@ class SimulationService:
         notified = 0
         for user in users:
             try:
+                # Inscrit d'abord, notifie ensuite
+                await self.inscrire_user(db, simulation.id, user.id)
                 msg = message_custom or (
                     f"🔔 *Simulation {simulation.titre}*\n\n"
                     f"📅 Date : *{date_str}*\n"
@@ -186,12 +192,12 @@ class SimulationService:
                     f"Prépare ton matériel : stylo, feuilles, calculatrice 📐"
                 )
                 await send_or_queue(db, user, msg)
-                await self.inscrire_user(db, simulation.id, user.id)
                 notified += 1
             except Exception as e:
                 print(f"Erreur notification à {user.phone_number}: {e}")
 
-        simulation.notif_j1_sent = True
+        if notified > 0:
+            simulation.notif_j1_sent = True
         await db.commit()
         print(f"✅ Notification manuelle envoyée — {notified} élèves Pro")
         return notified
@@ -317,21 +323,15 @@ class SimulationService:
             correction_text = self._extract_pdf_text(simulation.correction_pdf_path)
             matiere = simulation.matiere or ""
 
-            # ── Correction parallèle ──
-            tasks = [
-                self._corriger_une_copie(p, u, sujet_text, correction_text, matiere)
-                for p, u in participations
-            ]
-            results = await asyncio.gather(*tasks, return_exceptions=True)
-
+            # ── Correction séquentielle (AsyncSession non thread-safe) ──
+            # Les appels LLM sont lourds : on corrige l'un après l'autre
+            # pour éviter la corruption de session SQLAlchemy en parallèle.
             scores = []
-            for res in results:
-                if isinstance(res, tuple):
+            for p, u in participations:
+                res = await self._corriger_une_copie(p, u, sujet_text, correction_text, matiere)
+                if res is not None:
                     scores.append(res)
-                elif isinstance(res, Exception):
-                    print(f"Erreur correction (gather): {res}")
-
-            await db.flush()
+                await db.flush()  # persiste chaque correction immédiatement
 
             # Classement
             scores.sort(key=lambda x: x[2], reverse=True)
@@ -433,6 +433,43 @@ class SimulationService:
         simulation.statut = "closed"
         await db.commit()
         print(f"✅ Résultats envoyés — {total} participants")
+
+        # ── Nettoie les users encore bloqués en "awaiting_simulation_copy"
+        # (inscrits n'ayant pas soumis) et flush leur queue de notifications ──
+        await self._debloquer_non_soumetteurs(db, simulation)
+
+    async def _debloquer_non_soumetteurs(self, db: AsyncSession, simulation: Simulation):
+        """
+        Débloque les participants inscrits qui n'ont pas soumis de copie.
+        Ils ont encore awaiting_simulation_copy=True dans conversation_state.
+        On nettoie leur état et on flush leur queue de notifications.
+        """
+        from app.services.queue_service import flush_queue
+        try:
+            result = await db.execute(
+                select(SimulationParticipation, User).join(
+                    User, User.id == SimulationParticipation.user_id
+                ).where(
+                    SimulationParticipation.simulation_id == simulation.id,
+                    SimulationParticipation.statut == "inscrit",
+                )
+            )
+            rows = result.all()
+            for participation, user in rows:
+                conv = user.conversation_state or {}
+                if conv.get("awaiting_simulation_copy") and conv.get("simulation_id") == str(simulation.id):
+                    await whatsapp_sender.send_text(
+                        user.phone_number,
+                        f"⏰ Le temps imparti pour *{simulation.titre}* est écoulé.\n\n"
+                        f"Tu n'as pas soumis de copie cette fois — pas de problème, la prochaine sera la bonne ! 💪"
+                    )
+                    user.conversation_state = {}
+                    await db.flush()
+                    await flush_queue(db, user)
+            if rows:
+                await db.commit()
+        except Exception as e:
+            print(f"Erreur deblocage non-soumetteurs: {e}")
 
 
 simulation_service = SimulationService()

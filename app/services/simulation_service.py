@@ -87,11 +87,47 @@ class SimulationService:
         participants = result.all()
 
         if not participants:
-            print(f"Simulation {simulation.titre} : aucun participant Pro")
-            simulation.statut = "active"
-            simulation.notif_debut_sent = True
-            await db.commit()
-            return
+            # Fallback : aucun inscrit Pro → on envoie quand même à tous les Pro éligibles
+            print(f"Simulation {simulation.titre} : aucun inscrit Pro → fallback tous les Pro")
+            series_eligibles = simulation.series_eligibles or []
+            fallback_query = select(User).where(
+                User.status == "active",
+                User.plan == "pro",
+                User.onboarding_step == "done",
+            )
+            if series_eligibles:
+                fallback_query = fallback_query.where(User.series.in_(series_eligibles))
+            fallback_result = await db.execute(fallback_query)
+            fallback_users = fallback_result.scalars().all()
+
+            if not fallback_users:
+                print(f"Simulation {simulation.titre} : aucun utilisateur Pro trouvé")
+                simulation.statut = "active"
+                simulation.notif_debut_sent = True
+                await db.commit()
+                return
+
+            # Inscrit + construit la liste participants pour continuer normalement
+            for u in fallback_users:
+                await self.inscrire_user(db, simulation.id, u.id)
+            await db.flush()
+
+            # Recharge les participants après inscription
+            result2 = await db.execute(
+                select(SimulationParticipation, User).join(
+                    User, User.id == SimulationParticipation.user_id
+                ).where(
+                    SimulationParticipation.simulation_id == simulation.id,
+                    SimulationParticipation.statut == "inscrit",
+                    User.plan == "pro",
+                )
+            )
+            participants = result2.all()
+            if not participants:
+                simulation.statut = "active"
+                simulation.notif_debut_sent = True
+                await db.commit()
+                return
 
         heure_fin = simulation.date_debut + timedelta(minutes=simulation.duree_minutes)
         heure_fin_str = heure_fin.strftime("%H:%M")
@@ -167,12 +203,15 @@ class SimulationService:
         count = count_result.scalar() or 0
 
         series_eligibles = simulation.series_eligibles or []
+        # Filtre de base : users actifs ayant terminé l'onboarding
         query = select(User).where(
             User.status == "active",
-            User.plan == "pro",
+            User.onboarding_step == "done",
         )
+        # Filtre série uniquement si défini sur la simulation
         if series_eligibles:
             query = query.where(User.series.in_(series_eligibles))
+        # Filtre exam uniquement si défini sur la simulation
         if simulation.exam_id:
             from app.models.exam import Exam
             exam_result = await db.execute(

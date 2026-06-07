@@ -1,5 +1,5 @@
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 from fastapi import APIRouter, Request, Depends
 from sqlalchemy import select as sa_select, or_
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -1332,7 +1332,26 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession, msg_t
             )
             return
 
-        # ── Inscription simulation via bouton "Je m'inscris" ──────────
+        # ── Inscription simulation via bouton interactif OU texte fallback ──
+        # Cas 1 : bouton cliqué → text = "sim_inscrire_{uuid}"
+        # Cas 2 : fallback texte → user tape "je m'inscris" ou "1"
+        _text_lower = (text or "").lower().strip()
+        if _text_lower in ("je m'inscris", "je m inscrire", "inscrire", "inscription", "1") and not text.startswith("sim_inscrire_"):
+            # Cherche la simulation ouverte la plus proche pour cet user
+            from app.models.simulation import Simulation
+            from datetime import timezone as _tz
+            _now = datetime.now(_tz.utc)
+            _sim_res = await db.execute(
+                sa_select(Simulation).where(
+                    Simulation.statut.in_(["scheduled", "active"]),
+                    Simulation.date_debut >= _now - timedelta(hours=1),
+                ).order_by(Simulation.date_debut.asc()).limit(1)
+            )
+            _sim = _sim_res.scalar_one_or_none()
+            if _sim:
+                # Redirige vers le handler normal en forgeant le text
+                text = f"sim_inscrire_{_sim.id}"
+
         if text and text.startswith("sim_inscrire_"):
             sim_id_str = text.replace("sim_inscrire_", "").strip()
             try:

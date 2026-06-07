@@ -46,15 +46,48 @@ class WhatsAppSender:
         return {"error": "use_send_image_url"}
 
     async def send_buttons(self, phone: str, text: str, buttons: list[dict]) -> dict:
+        """
+        Envoie un message avec boutons interactifs WhatsApp (max 3).
+        Chaque bouton doit avoir 'id' et 'title' (title max 20 chars).
+        Fallback vers texte numéroté si l'API rejette le format interactif.
+        """
         cleaned = self._clean_for_whatsapp(text)
-        options = "\n".join(
-            f"{i + 1}. {btn['title']}" for i, btn in enumerate(buttons[:3])
-        )
+
+        # Format interactif Wasender (reply buttons)
         payload = {
             "to": phone,
-            "text": f"{cleaned}\n\n{options}",
+            "type": "interactive",
+            "interactive": {
+                "type": "button",
+                "body": {"text": cleaned},
+                "action": {
+                    "buttons": [
+                        {
+                            "type": "reply",
+                            "reply": {
+                                "id": btn.get("id", btn.get("title", str(i))),
+                                "title": btn["title"][:20],  # WhatsApp max 20 chars
+                            },
+                        }
+                        for i, btn in enumerate(buttons[:3])
+                    ]
+                },
+            },
         }
-        return await self._send(payload)
+        result = await self._send(payload)
+
+        # Fallback texte si le format interactif est rejeté
+        if not result.get("success") or result.get("error"):
+            options = "\n".join(
+                f"{i + 1}. {btn['title']}" for i, btn in enumerate(buttons[:3])
+            )
+            fallback_payload = {
+                "to": phone,
+                "text": f"{cleaned}\n\n{options}",
+            }
+            return await self._send(fallback_payload)
+
+        return result
 
     async def send_list(self, phone: str, text: str, button_label: str, sections: list[dict]) -> dict:
         cleaned = self._clean_for_whatsapp(text)

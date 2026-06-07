@@ -1679,8 +1679,8 @@ async def import_job_from_url(
 
     annee = datetime.now().year
     c_hash = _content_hash(
-        detail.get("titre", ""), detail.get("entreprise", ""),
-        detail.get("localisation", ""), annee,
+        detail.get("titre") or "", detail.get("entreprise") or "",
+        detail.get("localisation") or "", annee,
     )
     existing_hash = (await db.execute(
         select(JobOpportunity).where(JobOpportunity.content_hash == c_hash)
@@ -1810,8 +1810,8 @@ async def import_job_from_pdf(
 
     annee = datetime.now().year
     c_hash = _content_hash(
-        detail.get("titre", ""), detail.get("entreprise", ""),
-        detail.get("localisation", ""), annee,
+        detail.get("titre") or "", detail.get("entreprise") or "",
+        detail.get("localisation") or "", annee,
     )
     existing = (await db.execute(
         select(JobOpportunity).where(JobOpportunity.content_hash == c_hash)

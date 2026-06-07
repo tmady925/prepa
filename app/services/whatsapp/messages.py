@@ -327,8 +327,8 @@ class Messages:
             )
         if context == "etudes":
             return (
-                "📚 *En gratuit* : 10 messages par jour.\n"
-                "⭐ *En Pro* : messages *illimités* + corrections détaillées."
+                "📚 *En gratuit* : 10 messages par jour, pas d'accès aux simulations d'examen.\n"
+                "⭐ *En Pro* : messages *illimités* + corrections détaillées + simulations d'examen complètes."
             )
         return (
             "🆓 *En gratuit* : 10 messages/jour (études & concours) + 1 offre d'emploi/semaine.\n"

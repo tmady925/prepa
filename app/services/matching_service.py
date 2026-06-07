@@ -90,16 +90,17 @@ class MatchingService:
             })
 
         results.sort(key=lambda x: x["score"], reverse=True)
-        top3 = results[:3]
+        plan = getattr(user, "plan", "free")
+        top = results if plan == "pro" else results[:1]
 
-        for match in top3:
+        for match in top:
             await self._notify_candidate(user, match)
             await self._upsert_jobmatch(db, user_id, match["job"].id, match["score"])
 
-        if top3:
-            await self._update_quota(db, candidate, len(top3))
+        if top:
+            await self._update_quota(db, candidate, len(top))
 
-        return top3
+        return top
 
     # ═══════════════════════════════════════════════════════════════
     # Entrée secondaire — une offre contre tous les candidats

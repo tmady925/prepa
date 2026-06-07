@@ -1258,6 +1258,9 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession, msg_t
                 phone,
                 messages.onboarding_complete(user.name, days_left, user.usage)
             )
+            # Upsell Pro juste après le message de bienvenue études
+            if user.plan != "pro":
+                await _send_pro_offer(phone, user, _usage_context(user))
 
     elif step == "plan":
         # L'utilisateur tape une commande (/profil, /aide…) au lieu de choisir un plan

@@ -41,6 +41,9 @@ class User(Base, TimestampMixin):
     extra_job_offers_bonus: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     quota_reset_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
+    # Queue de notifications (messages en attente si user occupé)
+    notification_queue: Mapped[list] = mapped_column(JSONB, default=list, nullable=False)
+
     # Engagement
     streak_days: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     streak_last_active: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

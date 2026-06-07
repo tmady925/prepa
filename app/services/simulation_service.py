@@ -1,11 +1,19 @@
 """
 Service de gestion des simulations d'examens et concours.
 Gère le cycle complet : programmation → lancement → collecte → correction → classement.
+
+Corrections appliquées :
+- Pro gating : seuls les users Pro reçoivent les simulations
+- Chemins externalisés dans settings
+- Correction parallèle avec asyncio.gather()
+- Resoumission de copie autorisée (écrasement)
+- conversation_state nettoyé dans tous les cas d'erreur
 """
 import uuid
+import asyncio
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
-from sqlalchemy import select, func, update
+from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.simulation import Simulation, SimulationParticipation
 from app.models.user import User
@@ -15,6 +23,10 @@ from app.core.settings import get_settings
 import fitz
 
 settings = get_settings()
+
+# Répertoires depuis settings
+SIMULATIONS_DIR = Path(settings.simulations_dir)
+SIMULATIONS_BASE_URL = settings.simulations_base_url
 
 
 class SimulationService:
@@ -50,21 +62,25 @@ class SimulationService:
 
     async def lancer_simulation(self, db: AsyncSession, simulation: Simulation):
         """
-        Lance une simulation — envoie le sujet à tous les inscrits.
+        Lance une simulation — envoie le sujet à tous les inscrits Pro.
+        Seuls les utilisateurs Pro reçoivent la simulation (Pro gating).
         """
-        # Récupère les participants
         result = await db.execute(
             select(SimulationParticipation, User).join(
                 User, User.id == SimulationParticipation.user_id
             ).where(
                 SimulationParticipation.simulation_id == simulation.id,
                 SimulationParticipation.statut == "inscrit",
+                User.plan == "pro",  # ── Pro gating ──
             )
         )
         participants = result.all()
 
         if not participants:
-            print(f"Simulation {simulation.titre} : aucun participant")
+            print(f"Simulation {simulation.titre} : aucun participant Pro")
+            simulation.statut = "active"
+            simulation.notif_debut_sent = True
+            await db.commit()
             return
 
         heure_fin = simulation.date_debut + timedelta(minutes=simulation.duree_minutes)
@@ -74,14 +90,16 @@ class SimulationService:
         if simulation.sujet_pdf_path:
             path = Path(simulation.sujet_pdf_path)
             if path.exists():
-                sujet_url = f"http://72.62.4.97/simulations/{path.name}"
+                sujet_url = f"{SIMULATIONS_BASE_URL}/sujets/{path.name}"
+
+        heures = simulation.duree_minutes // 60
+        minutes = simulation.duree_minutes % 60
 
         for participation, user in participants:
             try:
-                # Message de lancement
                 msg = (
                     f"🎓 *{simulation.titre}* — C'est parti !\n\n"
-                    f"⏱ Durée : *{simulation.duree_minutes // 60}h{simulation.duree_minutes % 60:02d}*\n"
+                    f"⏱ Durée : *{heures}h{minutes:02d}*\n"
                     f"🕐 Heure limite : *{heure_fin_str}*\n\n"
                     f"📝 Instructions :\n"
                     f"- Fais l'épreuve sur papier ✏️\n"
@@ -91,7 +109,6 @@ class SimulationService:
                 )
                 await whatsapp_sender.send_text(user.phone_number, msg)
 
-                # Envoie le sujet PDF
                 if sujet_url:
                     await whatsapp_sender._send({
                         "to": user.phone_number,
@@ -100,7 +117,6 @@ class SimulationService:
                         "text": "📄 Sujet de l'épreuve",
                     })
 
-                # Met à jour le conversation_state pour attendre la copie
                 user.conversation_state = {
                     "awaiting_simulation_copy": True,
                     "simulation_id": str(simulation.id),
@@ -112,15 +128,23 @@ class SimulationService:
             except Exception as e:
                 print(f"Erreur envoi simulation à {user.phone_number}: {e}")
 
-        # Met à jour le statut
         simulation.statut = "active"
         simulation.notif_debut_sent = True
         await db.commit()
-        print(f"✅ Simulation {simulation.titre} lancée — {len(participants)} participants")
+        print(f"✅ Simulation {simulation.titre} lancée — {len(participants)} participants Pro")
 
-    async def envoyer_notif_j1(self, db: AsyncSession, simulation: Simulation):
-        """Envoie la notification J-1."""
-        # Compte les inscrits
+    async def envoyer_notification_manuelle(
+        self,
+        db: AsyncSession,
+        simulation: Simulation,
+        message_custom: str | None = None,
+    ) -> int:
+        """
+        Envoie une notification manuelle aux utilisateurs Pro éligibles.
+        Inscrit automatiquement les destinataires si pas encore inscrits.
+        Peut être déclenchée à tout moment par l'admin.
+        Retourne le nombre d'utilisateurs notifiés.
+        """
         count_result = await db.execute(
             select(func.count()).where(
                 SimulationParticipation.simulation_id == simulation.id
@@ -128,9 +152,11 @@ class SimulationService:
         )
         count = count_result.scalar() or 0
 
-        # Récupère les élèves éligibles (par série)
         series_eligibles = simulation.series_eligibles or []
-        query = select(User).where(User.status == "active")
+        query = select(User).where(
+            User.status == "active",
+            User.plan == "pro",
+        )
         if series_eligibles:
             query = query.where(User.series.in_(series_eligibles))
         if simulation.exam_id:
@@ -146,28 +172,29 @@ class SimulationService:
         users = users_result.scalars().all()
 
         date_str = simulation.date_debut.strftime("%d/%m/%Y à %Hh%M")
+        heures = simulation.duree_minutes // 60
 
+        from app.services.queue_service import send_or_queue
+        notified = 0
         for user in users:
             try:
-                msg = (
+                msg = message_custom or (
                     f"🔔 *Simulation {simulation.titre}*\n\n"
-                    f"📅 Demain : *{date_str}*\n"
-                    f"⏱ Durée : *{simulation.duree_minutes // 60}h*\n"
-                    f"👥 *{count} participants* déjà inscrits\n\n"
-                    f"Réponds *OUI* pour confirmer ta participation !\n\n"
-                    f"_Prépare ton matériel : stylo, feuilles, calculatrice 📐_"
+                    f"📅 Date : *{date_str}*\n"
+                    f"⏱ Durée : *{heures}h*\n"
+                    f"👥 *{count} participants* inscrits\n\n"
+                    f"Prépare ton matériel : stylo, feuilles, calculatrice 📐"
                 )
-                await whatsapp_sender.send_text(user.phone_number, msg)
-
-                # Inscrit automatiquement si pas encore inscrit
+                await send_or_queue(db, user, msg)
                 await self.inscrire_user(db, simulation.id, user.id)
-
+                notified += 1
             except Exception as e:
-                print(f"Erreur notif J-1 à {user.phone_number}: {e}")
+                print(f"Erreur notification à {user.phone_number}: {e}")
 
         simulation.notif_j1_sent = True
         await db.commit()
-        print(f"✅ Notif J-1 envoyée — {len(users)} élèves")
+        print(f"✅ Notification manuelle envoyée — {notified} élèves Pro")
+        return notified
 
     async def soumettre_copie(
         self,
@@ -176,8 +203,10 @@ class SimulationService:
         user_id: uuid.UUID,
         image_bytes: bytes,
     ) -> dict:
-        """Traite la soumission d'une copie."""
-        # Récupère la participation
+        """
+        Traite la soumission (ou resoumission) d'une copie.
+        Une resoumission est autorisée tant que le délai n'est pas dépassé.
+        """
         result = await db.execute(
             select(SimulationParticipation).where(
                 SimulationParticipation.simulation_id == simulation_id,
@@ -188,10 +217,6 @@ class SimulationService:
         if not participation:
             return {"success": False, "error": "Participation non trouvée"}
 
-        if participation.statut == "soumis":
-            return {"success": False, "error": "Copie déjà soumise"}
-
-        # Récupère la simulation
         sim_result = await db.execute(
             select(Simulation).where(Simulation.id == simulation_id)
         )
@@ -199,14 +224,13 @@ class SimulationService:
         if not simulation:
             return {"success": False, "error": "Simulation non trouvée"}
 
-        # Vérifie le délai
         now = datetime.now(timezone.utc)
         heure_fin = simulation.date_debut + timedelta(minutes=simulation.duree_minutes)
         if now > heure_fin:
             return {"success": False, "error": "Délai dépassé"}
 
-        # Sauvegarde la copie
-        copies_dir = Path(f"/home/prepa/app/simulations/{simulation_id}")
+        # Sauvegarde (ou écrase) la copie — settings-based path
+        copies_dir = SIMULATIONS_DIR / str(simulation_id)
         copies_dir.mkdir(parents=True, exist_ok=True)
         copie_path = copies_dir / f"{user_id}.jpg"
         copie_path.write_bytes(image_bytes)
@@ -219,98 +243,134 @@ class SimulationService:
 
         return {"success": True}
 
-    async def corriger_toutes_copies(self, db: AsyncSession, simulation: Simulation):
-        """Corrige toutes les copies soumises et calcule le classement."""
-        result = await db.execute(
-            select(SimulationParticipation, User).join(
-                User, User.id == SimulationParticipation.user_id
-            ).where(
-                SimulationParticipation.simulation_id == simulation.id,
-                SimulationParticipation.statut == "soumis",
+    # ─────────────────────────────────────────────────────────────────
+    # Correction parallèle
+    # ─────────────────────────────────────────────────────────────────
+
+    async def _corriger_une_copie(
+        self,
+        participation: SimulationParticipation,
+        user: User,
+        sujet_text: str,
+        correction_text: str,
+        matiere: str,
+    ) -> tuple | None:
+        """Corrige une copie individuelle. Retourne (participation, user, score) ou None."""
+        try:
+            if not participation.copie_path:
+                return None
+            copie_path = Path(participation.copie_path)
+            if not copie_path.exists():
+                return None
+
+            image_bytes = copie_path.read_bytes()
+            analysis = await copy_analyzer_service.analyze_copy(
+                image_bytes=image_bytes,
+                exercise_text=sujet_text,
+                correction_text=correction_text,
+                matiere=matiere,
+                chapitre="",
+                niveau=2,
+                student_name=user.name or "élève",
             )
-        )
-        participations = result.all()
+            if analysis:
+                score = analysis.get("score", 0)
+                participation.score = score
+                participation.mention = analysis.get("mention", "")
+                participation.feedback = analysis
+                participation.statut = "corrigé"
+                participation.corrected_at = datetime.now(timezone.utc)
+                return (participation, user, score)
+        except Exception as e:
+            print(f"Erreur correction copie {user.phone_number}: {e}")
+        return None
 
-        if not participations:
-            print(f"Simulation {simulation.titre} : aucune copie à corriger")
-            return
-
-        # Extrait le texte du sujet et de la correction
-        sujet_text = ""
-        correction_text = ""
-
-        if simulation.sujet_pdf_path:
-            try:
-                doc = fitz.open(simulation.sujet_pdf_path)
-                for page in doc:
-                    sujet_text += page.get_text("text")
-                doc.close()
-            except Exception:
-                pass
-
-        if simulation.correction_pdf_path:
-            try:
-                doc = fitz.open(simulation.correction_pdf_path)
-                for page in doc:
-                    correction_text += page.get_text("text")
-                doc.close()
-            except Exception:
-                pass
-
-        scores = []
-
-        for participation, user in participations:
-            try:
-                if not participation.copie_path:
-                    continue
-
-                copie_path = Path(participation.copie_path)
-                if not copie_path.exists():
-                    continue
-
-                image_bytes = copie_path.read_bytes()
-
-                # Analyse avec Mistral Vision
-                analysis = await copy_analyzer_service.analyze_copy(
-                    image_bytes=image_bytes,
-                    exercise_text=sujet_text,
-                    correction_text=correction_text,
-                    matiere=simulation.matiere or "",
-                    chapitre="",
-                    niveau=2,
-                    student_name=user.name or "élève",
-                )
-
-                if analysis:
-                    score = analysis.get("score", 0)
-                    participation.score = score
-                    participation.mention = analysis.get("mention", "")
-                    participation.feedback = analysis
-                    participation.statut = "corrigé"
-                    participation.corrected_at = datetime.now(timezone.utc)
-                    scores.append((participation, user, score))
-
-            except Exception as e:
-                print(f"Erreur correction copie {user.phone_number}: {e}")
-
-        await db.flush()
-
-        # Calcule le classement
-        scores.sort(key=lambda x: x[2], reverse=True)
-        for rang, (participation, user, score) in enumerate(scores, 1):
-            participation.classement = rang
-
+    async def corriger_toutes_copies(self, db: AsyncSession, simulation: Simulation):
+        """
+        Corrige toutes les copies soumises en parallèle et calcule le classement.
+        Le statut passe à 'correcting' avant de commencer pour éviter les retries du scheduler.
+        """
+        # ── Marque comme "en cours de correction" pour bloquer le scheduler ──
+        simulation.statut = "correcting"
         await db.commit()
 
-        # Envoie les résultats individuels
-        await self.envoyer_resultats(db, simulation, scores)
+        try:
+            result = await db.execute(
+                select(SimulationParticipation, User).join(
+                    User, User.id == SimulationParticipation.user_id
+                ).where(
+                    SimulationParticipation.simulation_id == simulation.id,
+                    SimulationParticipation.statut == "soumis",
+                )
+            )
+            participations = result.all()
+
+            if not participations:
+                print(f"Simulation {simulation.titre} : aucune copie à corriger")
+                simulation.statut = "closed"
+                simulation.resultats_envoyes = True
+                await db.commit()
+                return
+
+            # Extrait les textes des PDFs
+            sujet_text = self._extract_pdf_text(simulation.sujet_pdf_path)
+            correction_text = self._extract_pdf_text(simulation.correction_pdf_path)
+            matiere = simulation.matiere or ""
+
+            # ── Correction parallèle ──
+            tasks = [
+                self._corriger_une_copie(p, u, sujet_text, correction_text, matiere)
+                for p, u in participations
+            ]
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+
+            scores = []
+            for res in results:
+                if isinstance(res, tuple):
+                    scores.append(res)
+                elif isinstance(res, Exception):
+                    print(f"Erreur correction (gather): {res}")
+
+            await db.flush()
+
+            # Classement
+            scores.sort(key=lambda x: x[2], reverse=True)
+            for rang, (participation, user, score) in enumerate(scores, 1):
+                participation.classement = rang
+
+            await db.commit()
+
+            # Envoi des résultats
+            await self.envoyer_resultats(db, simulation, scores)
+
+        except Exception as e:
+            print(f"Erreur critique correction simulation {simulation.titre}: {e}")
+            # ── Statut error pour éviter la boucle infinie du scheduler ──
+            simulation.statut = "error"
+            await db.commit()
+
+    def _extract_pdf_text(self, pdf_path: str | None) -> str:
+        """Extrait le texte d'un PDF. Retourne '' si indisponible."""
+        if not pdf_path:
+            return ""
+        try:
+            doc = fitz.open(pdf_path)
+            text = "".join(page.get_text("text") for page in doc)
+            doc.close()
+            return text
+        except Exception:
+            return ""
 
     async def envoyer_resultats(self, db: AsyncSession, simulation: Simulation, scores: list):
         """Envoie les résultats individuels + classement général."""
         total = len(scores)
-        moyenne = sum(s for _, _, s in scores) / total if total else 0
+        if not total:
+            simulation.resultats_envoyes = True
+            simulation.statut = "closed"
+            await db.commit()
+            return
 
-        # Top 3
+        moyenne = sum(s for _, _, s in scores) / total
         top3 = scores[:3]
         medailles = ["🥇", "🥈", "🥉"]
 
@@ -323,16 +383,19 @@ class SimulationService:
         for i, (_, user, score) in enumerate(top3):
             classement_msg += f"{medailles[i]} {user.name or 'Élève'} — {score}/100\n"
 
-        # Envoie le classement à tous
+        corr_url = None
+        if simulation.correction_pdf_path:
+            corr_path = Path(simulation.correction_pdf_path)
+            if corr_path.exists():
+                corr_url = f"{SIMULATIONS_BASE_URL}/corrections/{corr_path.name}"
+
+        from app.services.queue_service import send_or_queue
         for participation, user, score in scores:
             try:
-                # Feedback individuel
                 feedback = participation.feedback or {}
                 feedback_msg = copy_analyzer_service.format_feedback(
                     feedback, user.name or "élève"
                 )
-
-                # Classement personnel
                 rang_msg = (
                     f"\n\n🎯 *Ton classement : {participation.classement}/{total}*\n"
                     f"Score : *{score}/100*\n"
@@ -346,30 +409,23 @@ class SimulationService:
                 else:
                     rang_msg += "\n📚 Tu peux progresser, ne lâche pas !"
 
-                await whatsapp_sender.send_text(
-                    user.phone_number,
-                    feedback_msg + rang_msg
-                )
+                await send_or_queue(db, user, feedback_msg + rang_msg)
 
-                # Envoie la correction PDF si disponible
-                if simulation.correction_pdf_path:
-                    corr_path = Path(simulation.correction_pdf_path)
-                    if corr_path.exists():
-                        corr_url = f"http://72.62.4.97/simulations/corrections/{corr_path.name}"
-                        await whatsapp_sender._send({
-                            "to": user.phone_number,
-                            "documentUrl": corr_url,
-                            "fileName": corr_path.name,
-                            "text": "📄 Correction officielle",
-                        })
+                if corr_url:
+                    await whatsapp_sender._send({
+                        "to": user.phone_number,
+                        "documentUrl": corr_url,
+                        "fileName": Path(simulation.correction_pdf_path).name,
+                        "text": "📄 Correction officielle",
+                    })
 
             except Exception as e:
                 print(f"Erreur envoi résultats à {user.phone_number}: {e}")
 
-        # Envoie le classement général à tous
+        # Classement général
         for _, user, _ in scores:
             try:
-                await whatsapp_sender.send_text(user.phone_number, classement_msg)
+                await send_or_queue(db, user, classement_msg)
             except Exception:
                 pass
 

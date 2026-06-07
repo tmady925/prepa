@@ -1298,12 +1298,16 @@ async def create_simulation(
 
     data = await request.json()
 
+    from app.core.settings import get_settings as _get_settings
+    _settings = _get_settings()
+    _sim_base = Path(_settings.simulations_dir)
+
     # Sauvegarde le sujet PDF si fourni en base64
     sujet_path = None
     if data.get("sujet_b64"):
         try:
             sujet_bytes = base64.b64decode(data["sujet_b64"])
-            sim_dir = Path("/home/prepa/app/simulations/sujets")
+            sim_dir = _sim_base / "sujets"
             sim_dir.mkdir(parents=True, exist_ok=True)
             filename = f"sujet_{data.get('titre','sim').replace(' ','_')}_{uuid.uuid4().hex[:6]}.pdf"
             p = sim_dir / filename
@@ -1318,7 +1322,7 @@ async def create_simulation(
     if data.get("correction_b64"):
         try:
             corr_bytes = base64.b64decode(data["correction_b64"])
-            corr_dir = Path("/home/prepa/app/simulations/corrections")
+            corr_dir = _sim_base / "corrections"
             corr_dir.mkdir(parents=True, exist_ok=True)
             filename = f"correction_{data.get('titre','sim').replace(' ','_')}_{uuid.uuid4().hex[:6]}.pdf"
             p = corr_dir / filename
@@ -1380,13 +1384,49 @@ async def delete_simulation(
     _: bool = Depends(verify_admin),
 ):
     from app.models.simulation import Simulation
+    from pathlib import Path as _Path
     result = await db.execute(sa_select(Simulation).where(Simulation.id == uuid.UUID(simulation_id)))
     sim = result.scalar_one_or_none()
     if not sim:
         raise HTTPException(status_code=404, detail="Simulation non trouvée")
+    # Supprime les fichiers PDF associés
+    for pdf_path in [sim.sujet_pdf_path, sim.correction_pdf_path]:
+        if pdf_path:
+            try:
+                p = _Path(pdf_path)
+                if p.exists():
+                    p.unlink()
+            except Exception as e:
+                print(f"Erreur suppression PDF {pdf_path}: {e}")
     await db.delete(sim)
     await db.commit()
     return {"success": True}
+
+
+@router.post("/admin/simulations/{simulation_id}/notifier")
+async def notifier_simulation(
+    simulation_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    _: bool = Depends(verify_admin),
+):
+    """
+    Envoie une notification aux utilisateurs Pro éligibles à tout moment.
+    Corps JSON optionnel : { "message": "texte personnalisé" }
+    """
+    from app.models.simulation import Simulation
+    from app.services.simulation_service import simulation_service
+    result = await db.execute(sa_select(Simulation).where(Simulation.id == uuid.UUID(simulation_id)))
+    sim = result.scalar_one_or_none()
+    if not sim:
+        raise HTTPException(status_code=404, detail="Simulation non trouvée")
+    try:
+        body = await request.json()
+        message_custom = body.get("message")
+    except Exception:
+        message_custom = None
+    nb = await simulation_service.envoyer_notification_manuelle(db, sim, message_custom)
+    return {"success": True, "notifies": nb, "message": f"Notification envoyée à {nb} utilisateurs Pro"}
 
 
 @router.post("/admin/simulations/{simulation_id}/lancer")
@@ -1395,7 +1435,7 @@ async def lancer_simulation_now(
     db: AsyncSession = Depends(get_db),
     _: bool = Depends(verify_admin),
 ):
-    """Force le lancement immédiat d'une simulation (hors scheduler)."""
+    """Lance immédiatement la simulation (envoie le sujet à tous les inscrits Pro)."""
     from app.models.simulation import Simulation
     from app.services.simulation_service import simulation_service
     result = await db.execute(sa_select(Simulation).where(Simulation.id == uuid.UUID(simulation_id)))

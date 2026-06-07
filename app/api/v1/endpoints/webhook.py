@@ -277,6 +277,8 @@ async def _do_free_correction(
 
     user.conversation_state = {}
     await db.flush()
+    from app.services.queue_service import flush_queue
+    await flush_queue(db, user)
 
 
 async def handle_command(command: str, phone: str, user, db: AsyncSession):
@@ -431,6 +433,8 @@ async def handle_command(command: str, phone: str, user, db: AsyncSession):
             )
             user.conversation_state = {}
             await db.flush()
+            from app.services.queue_service import flush_queue
+            await flush_queue(db, user)
             return
 
         from pathlib import Path as _PNext
@@ -1336,52 +1340,76 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession, msg_t
                 import uuid as uuid_module
 
                 sim_id = conv_state.get("simulation_id")
-                heure_fin_str = conv_state.get("heure_fin", "")
                 simulation_titre = conv_state.get("simulation_titre", "")
+
+                # ── Pro gating : seuls les Pro peuvent soumettre une copie ──
+                if user.plan != "pro":
+                    await whatsapp_sender.send_text(
+                        phone,
+                        "⭐ Les simulations d'examen sont réservées aux abonnés *Prepa Pro*.\n\n"
+                        "Passe en Pro pour y participer ! Tape */plan* pour voir les offres."
+                    )
+                    user.conversation_state = {}
+                    await db.flush()
+                    return
 
                 await whatsapp_sender.send_text(phone, "📸 Copie reçue ! Analyse en cours... ⏳")
 
-                # Décrypte l'image
-                image_url = await copy_analyzer_service.decrypt_media(image_data)
-                if not image_url:
-                    await whatsapp_sender.send_text(phone, "❌ Impossible de lire l'image. Réessaie.")
-                    return
+                try:
+                    image_url = await copy_analyzer_service.decrypt_media(image_data)
+                    if not image_url:
+                        await whatsapp_sender.send_text(phone, "❌ Impossible de lire l'image. Réessaie.")
+                        return
 
-                image_bytes = await copy_analyzer_service.download_image(image_url)
-                if not image_bytes:
-                    await whatsapp_sender.send_text(phone, "❌ Erreur téléchargement. Réessaie.")
-                    return
+                    image_bytes = await copy_analyzer_service.download_image(image_url)
+                    if not image_bytes:
+                        await whatsapp_sender.send_text(phone, "❌ Erreur téléchargement. Réessaie.")
+                        return
 
-                # Soumet la copie
-                result = await simulation_service.soumettre_copie(
-                    db=db,
-                    simulation_id=uuid_module.UUID(sim_id),
-                    user_id=user.id,
-                    image_bytes=image_bytes,
-                )
-
-                if result.get("success"):
-                    await whatsapp_sender.send_text(
-                        phone,
-                        f"✅ Ta copie pour *{simulation_titre}* a été soumise !\n\n"
-                        f"Les résultats seront envoyés après la correction de toutes les copies. 📊\n\n"
-                        f"_Tu seras notifié(e) dès que ton score est prêt._"
+                    result = await simulation_service.soumettre_copie(
+                        db=db,
+                        simulation_id=uuid_module.UUID(sim_id),
+                        user_id=user.id,
+                        image_bytes=image_bytes,
                     )
-                    # Réinitialise l'état
-                    user.conversation_state = {}
-                    await db.flush()
-                else:
-                    error = result.get("error", "Erreur inconnue")
-                    if "Délai dépassé" in error:
+
+                    if result.get("success"):
                         await whatsapp_sender.send_text(
                             phone,
-                            f"⏰ Désolé, le délai de soumission est dépassé.\n\n"
-                            f"La correction sera quand même envoyée à tous les participants. 📄"
+                            f"✅ Ta copie pour *{simulation_titre}* a été soumise !\n\n"
+                            f"Les résultats seront envoyés après la correction de toutes les copies. 📊\n\n"
+                            f"_Tu seras notifié(e) dès que ton score est prêt._"
                         )
                         user.conversation_state = {}
                         await db.flush()
+                        from app.services.queue_service import flush_queue
+                        await flush_queue(db, user)
                     else:
-                        await whatsapp_sender.send_text(phone, f"❌ {error}")
+                        error = result.get("error", "Erreur inconnue")
+                        if "Délai dépassé" in error:
+                            await whatsapp_sender.send_text(
+                                phone,
+                                f"⏰ Désolé, le délai de soumission est dépassé.\n\n"
+                                f"La correction sera quand même envoyée à tous les participants. 📄"
+                            )
+                        else:
+                            await whatsapp_sender.send_text(phone, f"❌ {error}")
+                        # Nettoie l'état dans tous les cas d'erreur
+                        user.conversation_state = {}
+                        await db.flush()
+                        from app.services.queue_service import flush_queue
+                        await flush_queue(db, user)
+
+                except Exception as e:
+                    print(f"Erreur soumission copie simulation {phone}: {e}")
+                    await whatsapp_sender.send_text(
+                        phone, "❌ Une erreur est survenue. Réessaie dans quelques instants."
+                    )
+                    # ── finally : nettoie toujours le conversation_state ──
+                    user.conversation_state = {}
+                    await db.flush()
+                    from app.services.queue_service import flush_queue
+                    await flush_queue(db, user)
 
                 print(f"Simulation copie soumise -> {phone}: sim={sim_id}")
                 return
@@ -1630,12 +1658,16 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession, msg_t
                     else:
                         user.conversation_state = {}
                         await db.flush()
+                        from app.services.queue_service import flush_queue
+                        await flush_queue(db, user)
                         await whatsapp_sender.send_text(phone, messages.all_exercises_done(
                             user.name or "élève", matiere_copie, chapitre_copie
                         ))
                 else:
                     user.conversation_state = {}
                     await db.flush()
+                    from app.services.queue_service import flush_queue
+                    await flush_queue(db, user)
                     await whatsapp_sender.send_text(phone, messages.all_exercises_done(
                         user.name or "élève", matiere_copie, chapitre_copie
                     ))
@@ -1813,6 +1845,8 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession, msg_t
             if text.lower().strip() in ("skip", "passer", "/skip"):
                 user.conversation_state = {}
                 await db.flush()
+                from app.services.queue_service import flush_queue
+                await flush_queue(db, user)
                 await whatsapp_sender.send_text(
                     phone,
                     "✅ Exercice annulé. Pose-moi une nouvelle question ou demande un autre exercice !"
@@ -1856,6 +1890,8 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession, msg_t
                 await whatsapp_sender.send_text(phone, "❌ Ta copie a expiré. Renvoie-la.")
                 user.conversation_state = {}
                 await db.flush()
+                from app.services.queue_service import flush_queue
+                await flush_queue(db, user)
                 return
 
             copie_bytes = base64.b64decode(copie_b64)

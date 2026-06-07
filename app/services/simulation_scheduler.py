@@ -3,6 +3,11 @@ Scheduler pour les simulations — vérifie toutes les minutes :
 - J-1 : envoie les notifications
 - Heure H : lance la simulation
 - Après la durée : ferme et corrige
+
+Corrections appliquées :
+- Statut "correcting" évite les retries infinis du scheduler
+- Statut "error" arrête les tentatives sur simulation en échec
+- Protection contre les appels concurrents via _en_cours
 """
 import asyncio
 from datetime import datetime, timezone, timedelta
@@ -11,6 +16,9 @@ from app.db.database import AsyncSessionLocal
 from app.models.simulation import Simulation
 from app.services.simulation_service import simulation_service
 
+# ── Set des IDs en cours de traitement (anti-concurrence en mémoire) ──
+_en_cours: set[str] = set()
+
 
 async def check_simulations():
     """Vérifie et lance les actions nécessaires pour chaque simulation."""
@@ -18,7 +26,6 @@ async def check_simulations():
         try:
             now = datetime.now(timezone.utc)
 
-            # Récupère toutes les simulations actives ou programmées
             result = await db.execute(
                 select(Simulation).where(
                     Simulation.statut.in_(["scheduled", "active"])
@@ -27,27 +34,35 @@ async def check_simulations():
             simulations = result.scalars().all()
 
             for sim in simulations:
+                sim_key = str(sim.id)
+
+                # Ignore les simulations déjà en traitement dans cette instance
+                if sim_key in _en_cours:
+                    continue
+
                 date_debut = sim.date_debut
                 if date_debut.tzinfo is None:
                     date_debut = date_debut.replace(tzinfo=timezone.utc)
 
-                date_j1 = date_debut - timedelta(days=1)
                 heure_fin = date_debut + timedelta(minutes=sim.duree_minutes)
 
-                # Notif J-1
-                if not sim.notif_j1_sent and now >= date_j1 and now < date_debut:
-                    print(f"Scheduler: notif J-1 → {sim.titre}")
-                    await simulation_service.envoyer_notif_j1(db, sim)
-
-                # Lancement heure H
+                # Lancement automatique à l'heure H
                 if not sim.notif_debut_sent and now >= date_debut and sim.statut == "scheduled":
                     print(f"Scheduler: lancement → {sim.titre}")
-                    await simulation_service.lancer_simulation(db, sim)
+                    _en_cours.add(sim_key)
+                    try:
+                        await simulation_service.lancer_simulation(db, sim)
+                    finally:
+                        _en_cours.discard(sim_key)
 
-                # Fermeture et correction
-                if sim.statut == "active" and now >= heure_fin and not sim.resultats_envoyes:
+                # Correction automatique après la durée
+                elif sim.statut == "active" and now >= heure_fin and not sim.resultats_envoyes:
                     print(f"Scheduler: correction → {sim.titre}")
-                    await simulation_service.corriger_toutes_copies(db, sim)
+                    _en_cours.add(sim_key)
+                    try:
+                        await simulation_service.corriger_toutes_copies(db, sim)
+                    finally:
+                        _en_cours.discard(sim_key)
 
         except Exception as e:
             print(f"Scheduler error: {e}")

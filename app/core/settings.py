@@ -52,6 +52,10 @@ class Settings(BaseSettings):
     cloudinary_api_key: str = ""
     cloudinary_api_secret: str = ""
 
+    # Simulations
+    simulations_dir: str = "/home/prepa/app/simulations"
+    simulations_base_url: str = "http://72.62.4.97/simulations"
+
     # LLM routing
     llm_default_free_provider: str = "mistral"
     llm_default_pro_provider: str = "openai"

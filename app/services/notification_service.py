@@ -76,6 +76,7 @@ class NotificationService:
         sent = 0
         failed = 0
 
+        from app.services.queue_service import send_or_queue
         for user in users:
             try:
                 if custom_message:
@@ -83,7 +84,7 @@ class NotificationService:
                 else:
                     msg = await self._build_message(user, message_type)
 
-                await whatsapp_sender.send_text(user.phone_number, msg)
+                await send_or_queue(db, user, msg)
                 sent += 1
             except Exception as e:
                 print(f"Erreur notification {user.phone_number}: {e}")

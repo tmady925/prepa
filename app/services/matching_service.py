@@ -98,7 +98,7 @@ class MatchingService:
             top = results[:max_to_send]
 
         for match in top:
-            await self._notify_candidate(user, match)
+            await self._notify_candidate(db, user, match)
             await self._upsert_jobmatch(db, user_id, match["job"].id, match["score"])
 
         if top:
@@ -113,7 +113,7 @@ class MatchingService:
             try:
                 from app.services.whatsapp.messages import messages
                 from app.services.payment_service import payment_service
-                from app.services.whatsapp.sender import whatsapp_sender
+                from app.services.queue_service import send_or_queue
                 payment_url = None
                 try:
                     inv = await payment_service.create_invoice(user=user, plan="pro")
@@ -127,7 +127,7 @@ class MatchingService:
                     "dès qu'elles sont disponibles — sans attendre.\n\n"
                     + messages.pro_upsell(user.name or "toi", "emploi", payment_url)
                 )
-                await whatsapp_sender.send_text(user.phone_number, upsell_msg)
+                await send_or_queue(db, user, upsell_msg)
             except Exception as e:
                 print(f"  ⚠️ upsell post-offre error: {e}")
 
@@ -175,7 +175,7 @@ class MatchingService:
                 "conditions_check": conditions_check,
                 "conseils_lettre": llm_result.get("conseils", []),
             }
-            await self._notify_candidate(user, match)
+            await self._notify_candidate(db, user, match)
             await self._upsert_jobmatch(db, user.id, job.id, final_score)
             await self._update_quota(db, candidate, 1)
             notified += 1
@@ -378,7 +378,7 @@ class MatchingService:
     # Notification WhatsApp
     # ═══════════════════════════════════════════════════════════════
 
-    async def _notify_candidate(self, user, match: dict):
+    async def _notify_candidate(self, db: AsyncSession, user, match: dict):
         job = match["job"]
         score = match["score"]
         raison = match.get("raison", "")
@@ -423,12 +423,12 @@ class MatchingService:
             for c in conseils[:3]:
                 msg += f"• {c}\n"
 
-        from app.services.whatsapp.sender import whatsapp_sender
-        try:
-            await whatsapp_sender.send_text(user.phone_number, msg)
+        from app.services.queue_service import send_or_queue
+        sent = await send_or_queue(db, user, msg)
+        if sent:
             print(f"  → Notif emploi → {user.phone_number}: {job.titre} ({score}%)")
-        except Exception as e:
-            print(f"  ⚠️ Notif WhatsApp échouée {user.phone_number}: {e}")
+        else:
+            print(f"  📬 Offre emploi mise en queue → {user.phone_number}: {job.titre} ({score}%)")
 
 
 matching_service = MatchingService()

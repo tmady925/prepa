@@ -950,8 +950,9 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession, msg_t
         _editing_cv = _conv_cv.get("editing_only", False)
 
         async def _finish_emploi():
-            """Clôture la section emploi : édition → done+matching, sinon → met à jour le step plan.
-            N'envoie PAS le message plan — c'est l'appelant qui l'envoie en dernier pour garantir l'ordre."""
+            """Clôture la section emploi.
+            Édition → done + matching.
+            Nouveau → complete_onboarding direct (sans passer par le step plan) + message + matching."""
             if _editing_cv:
                 _conv = user.conversation_state or {}
                 _conv.pop("editing_only", None)
@@ -961,21 +962,27 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession, msg_t
                 await whatsapp_sender.send_text(
                     phone, f"✅ Profil emploi mis à jour *{user.name}* !"
                 )
-                # Lance le matching pour notifier les offres compatibles
-                try:
-                    from app.services.matching_service import matching_service
-                    matches = await matching_service.match_candidate(db, user.id)
-                    if not matches:
-                        await whatsapp_sender.send_text(
-                            phone,
-                            "🔍 Je cherche des offres correspondant à ton profil. "
-                            "Tu seras notifié dès qu'une opportunité apparaît ! 💼"
-                        )
-                except Exception as e:
-                    print(f"Matching emploi (edit) error: {e}")
             else:
-                user.onboarding_step = "plan"
-                await db.flush()
+                await user_service.complete_onboarding(db, user)
+                await whatsapp_sender.send_text(
+                    phone,
+                    f"✅ Tout est prêt *{user.name}* !\n\n"
+                    f"Tu peux maintenant :\n"
+                    f"• Recevoir des offres d'emploi adaptées 💼\n\n"
+                    f"Merci de patienter pendant le matching !"
+                )
+            # Lance le matching dans tous les cas
+            try:
+                from app.services.matching_service import matching_service
+                matches = await matching_service.match_candidate(db, user.id)
+                if not matches:
+                    await whatsapp_sender.send_text(
+                        phone,
+                        "🔍 Je cherche des offres correspondant à ton profil. "
+                        "Tu seras notifié dès qu'une opportunité apparaît ! 💼"
+                    )
+            except Exception as e:
+                print(f"Matching emploi error: {e}")
 
         if text.lower().strip() in ("passer", "skip", "plus tard"):
             # Crée un profil minimal depuis les infos onboarding pour permettre le matching
@@ -995,10 +1002,6 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession, msg_t
                 db.add(_min_profile)
                 await db.flush()
             await _finish_emploi()
-            if not _editing_cv:
-                await whatsapp_sender.send_buttons(
-                    phone, messages.ask_plan(user.name), messages.PLAN_ONBOARDING_BUTTONS
-                )
             return
 
         if msg_type in ("document", "image") and (image_data or message):
@@ -1033,13 +1036,8 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession, msg_t
                     await whatsapp_sender.send_text(
                         phone, "⚠️ CV reçu mais difficile à lire. Je ferai de mon mieux !"
                     )
-            # _finish_emploi met à jour le step, puis on envoie le plan EN DERNIER
-            # pour garantir que les messages CV arrivent avant la question plan
+            # Les messages CV sont envoyés avant _finish_emploi pour garantir l'ordre
             await _finish_emploi()
-            if not _editing_cv:
-                await whatsapp_sender.send_buttons(
-                    phone, messages.ask_plan(user.name), messages.PLAN_ONBOARDING_BUTTONS
-                )
             return
 
         await whatsapp_sender.send_text(

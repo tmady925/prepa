@@ -469,25 +469,40 @@ async def handle_command(command: str, phone: str, user, db: AsyncSession):
 
     elif command == "plan":
         if user.plan == "pro":
-            await whatsapp_sender.send_text(phone, messages.plan_message(user))
+            await whatsapp_sender.send_text(phone, messages.plan_message_pro(user))
         else:
-            from app.services.payment_service import payment_service
-            invoice = await payment_service.create_invoice(user=user, plan="pro")
-            if invoice.get("success"):
-                await whatsapp_sender.send_text(
-                    phone,
-                    f"💳 *Passe Prepa Pro maintenant !*\n\n"
-                    f"✅ Messages illimités\n"
-                    f"✅ Corrections détaillées\n\n"
-                    f"💰 *3000 FCFA/mois*\n\n"
-                    f"👉 Clique ici pour payer :\n{invoice['payment_url']}\n\n"
-                    f"_Paiement sécurisé via Wave, Orange Money ou Free Money 🔒_"
-                )
-            else:
-                await whatsapp_sender.send_text(
-                    phone,
-                    "❌ Impossible de créer le lien de paiement. Réessaie dans quelques instants."
-                )
+            await _send_pro_offer(phone, user, _usage_context(user))
+
+
+def _usage_context(user) -> str:
+    """Déduit le contexte d'upsell depuis user.usage : emploi/etudes/concours/tout."""
+    usage = user.usage or []
+    if isinstance(usage, str):
+        usage = [usage]
+    s = set(usage)
+    if s == {"emploi"}:
+        return "emploi"
+    if s == {"etudes"}:
+        return "etudes"
+    if s == {"concours"}:
+        return "concours"
+    return "tout"
+
+
+async def _send_pro_offer(phone: str, user, context: str = "tout") -> None:
+    """
+    Envoie l'offre Pro adaptée au contexte.
+    Tente PayDunya ; si le lien échoue → fallback Wave (paiement manuel, activation 24h).
+    """
+    from app.services.payment_service import payment_service
+    payment_url = None
+    try:
+        invoice = await payment_service.create_invoice(user=user, plan="pro")
+        if invoice.get("success") and invoice.get("payment_url"):
+            payment_url = invoice["payment_url"]
+    except Exception as e:
+        print(f"_send_pro_offer PayDunya error: {e}")
+    await whatsapp_sender.send_text(phone, messages.pro_upsell(user.name or "toi", context, payment_url))
 
 
 async def process_message(message: dict, db: AsyncSession):
@@ -566,10 +581,12 @@ async def process_message(message: dict, db: AsyncSession):
             if _cmd_over_quota in ("profil", "progression", "aide", "inviter"):
                 await handle_command(_cmd_over_quota, phone, user, db)
                 return
-            # Affiche le message quota avec options
+            # Affiche le message quota avec options (contexte études/concours)
+            _ctx = _usage_context(user)
+            _ctx_quota = "concours" if _ctx == "concours" else "etudes"
             await whatsapp_sender.send_buttons(
                 phone,
-                messages.quota_reached(user.name or "ami"),
+                messages.quota_reached(user.name or "ami", _ctx_quota),
                 messages.QUOTA_BUTTONS,
             )
             return
@@ -1239,14 +1256,7 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession, msg_t
             messages.onboarding_complete(user.name, days_left, user.usage)
         )
         if text in ("onboarding_pro", "action_pro"):
-            from app.services.payment_service import payment_service
-            invoice = await payment_service.create_invoice(user=user, plan="pro")
-            if invoice.get("success"):
-                await whatsapp_sender.send_text(
-                    phone,
-                    f"💳 Voici ton lien de paiement :\n\n{invoice['payment_url']}\n\n"
-                    "Paiement sécurisé via Wave, Orange Money ou Free Money 🔒"
-                )
+            await _send_pro_offer(phone, user, _usage_context(user))
 
         # ── Matching emploi après onboarding ─────────────────────────
         # match_candidate envoie lui-même les notifications WhatsApp (3 couches + quota)

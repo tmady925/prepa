@@ -290,14 +290,78 @@ class Messages:
             "Exemple : 15/06/2026"
         )
 
-    def ask_plan(self, name: str) -> str:
+    def ask_plan(self, name: str, usage=None) -> str:
+        usage = usage or ["etudes"]
+        if isinstance(usage, str):
+            usage = [usage]
+        s = set(usage)
+        # Ligne "gratuit" adaptée au contexte
+        if s == {"emploi"}:
+            gratuit = "🆓 *Gratuit* — 1 offre d'emploi par semaine"
+        elif s in ({"etudes"}, {"concours"}):
+            gratuit = "🆓 *Gratuit* — 10 messages par jour"
+        else:
+            gratuit = "🆓 *Gratuit* — 10 messages/jour + 1 offre d'emploi/semaine"
         return (
             f"Presque fini *{name}* ! 🎉\n\n"
             "Comment veux-tu utiliser Prepa ?\n\n"
-            "🆓 *Gratuit* — 10 messages par jour\n"
-            "⭐ *Pro* — messages illimités, 500 FCFA/mois\n\n"
+            f"{gratuit}\n"
+            "⭐ *Pro* — *tout en illimité* (études · concours · emploi), 500 FCFA/mois\n\n"
             "_Tu peux toujours changer plus tard avec /plan_"
         )
+
+    # ── Pro / Paiement ─────────────────────────────────────────────
+
+    WAVE_PAY_LINK = "https://pay.wave.com/m/M_sn_CRUaBBWCzDPq/c/sn/?amount=500"
+
+    def _pro_benefits_intro(self, context: str) -> str:
+        if context == "emploi":
+            return (
+                "💼 *En gratuit* : 1 offre d'emploi par semaine.\n"
+                "⭐ *En Pro* : offres d'emploi *illimitées*, dès qu'une correspond à ton profil."
+            )
+        if context == "concours":
+            return (
+                "🏆 *En gratuit* : 10 messages par jour pour ta prépa concours.\n"
+                "⭐ *En Pro* : messages *illimités* + corrections détaillées."
+            )
+        if context == "etudes":
+            return (
+                "📚 *En gratuit* : 10 messages par jour.\n"
+                "⭐ *En Pro* : messages *illimités* + corrections détaillées."
+            )
+        return (
+            "🆓 *En gratuit* : 10 messages/jour (études & concours) + 1 offre d'emploi/semaine.\n"
+            "⭐ *En Pro* : tout en illimité."
+        )
+
+    def wave_fallback_block(self) -> str:
+        return (
+            f"👉 *Paie 500F avec Wave* en cliquant sur ce lien :\n{self.WAVE_PAY_LINK}\n\n"
+            "⚠️ *Important* :\n"
+            "• Paie avec le *numéro WhatsApp que tu utilises ici sur Prepa* 📱\n"
+            "• Ajoute cet expéditeur à tes contacts pour rendre le lien cliquable\n"
+            "• L'activation Pro se fait *sous 24h* ⏳\n"
+            "• Tu recevras une *notification* dès que c'est activé ✅"
+        )
+
+    def pro_upsell(self, name: str, context: str = "tout", payment_url: str | None = None) -> str:
+        """
+        Message Pro adapté au contexte (emploi/etudes/concours/tout).
+        Si payment_url fourni → lien PayDunya, sinon → fallback Wave.
+        """
+        msg = f"⭐ *Passe Prepa Pro, {name} !*\n\n"
+        msg += self._pro_benefits_intro(context) + "\n\n"
+        msg += (
+            "✨ *500 FCFA/mois* débloquent l'accès *illimité à TOUT* :\n"
+            "📚 Études · 🏆 Concours · 💼 Emploi\n\n"
+        )
+        if payment_url:
+            msg += f"👉 Paie en ligne ici :\n{payment_url}\n\n"
+            msg += "_Paiement sécurisé via Wave, Orange Money ou Free Money 🔒_"
+        else:
+            msg += self.wave_fallback_block()
+        return msg
 
     PLAN_ONBOARDING_BUTTONS = [
         {"id": "onboarding_free", "title": "Gratuit 🆓"},
@@ -328,12 +392,16 @@ class Messages:
 
     # ── Quota ─────────────────────────────────────────────────────
 
-    def quota_reached(self, name: str) -> str:
+    def quota_reached(self, name: str, context: str = "etudes") -> str:
+        if context == "concours":
+            intro = f"Tu as utilisé tes 10 messages du jour pour ta prépa concours *{name}* 🏆"
+        else:
+            intro = f"Tu as utilisé tous tes messages du jour *{name}* 🎯"
         return (
-            f"Tu as utilisé tous tes messages du jour *{name}* 🎯\n\n"
-            "Pour continuer :\n\n"
+            f"{intro}\n\n"
+            "Pour continuer aujourd'hui :\n\n"
             "📤 *Inviter des amis* → gagne 20 messages par ami actif\n"
-            "⭐ *Passer Pro* → révise sans limite pour 3000 FCFA/mois"
+            "⭐ *Passer Pro* → *tout en illimité* (études · concours · emploi) pour *500 FCFA/mois*"
         )
 
     QUOTA_BUTTONS = [
@@ -435,21 +503,13 @@ class Messages:
             f"Ton code : *{code}*"
         )
 
-    def plan_message(self, user) -> str:
-        if user.plan == "pro":
-            return (
-                f"⭐ Tu es déjà *Prepa Pro* !\n\n"
-                f"Tu révises sans limite jusqu'à la fin de ton abonnement.\n\n"
-                f"Tape */progression* pour voir tes stats."
-            )
+    def plan_message_pro(self, user) -> str:
+        """Message quand l'utilisateur est déjà Pro."""
         return (
-            f"💡 *Passe Prepa Pro et révise sans limite !*\n\n"
-            f"✅ Messages illimités\n"
-            f"✅ LLM plus puissant\n"
-            f"✅ Corrections détaillées\n"
-            f"✅ Priorité de réponse\n\n"
-            f"💰 Seulement *500 FCFA/mois*\n\n"
-            f"Paiement via Wave, Orange Money ou Free Money 🔒"
+            f"⭐ Tu es déjà *Prepa Pro* !\n\n"
+            f"Tu profites de *tout en illimité* (études · concours · emploi) "
+            f"jusqu'à la fin de ton abonnement.\n\n"
+            f"Tape */progression* pour voir tes stats."
         )
 
     # ── Erreurs ───────────────────────────────────────────────────

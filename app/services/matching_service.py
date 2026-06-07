@@ -40,6 +40,26 @@ class MatchingService:
 
         if not self._check_quota(candidate, user):
             print(f"  → Quota notifs atteint pour {user_id}")
+            # Upsell : l'utilisateur gratuit a déjà reçu son offre de la semaine
+            if getattr(user, "plan", "free") != "pro" and user.phone_number:
+                try:
+                    from app.services.whatsapp.messages import messages
+                    from app.services.payment_service import payment_service
+                    from app.services.whatsapp.sender import whatsapp_sender
+                    payment_url = None
+                    try:
+                        inv = await payment_service.create_invoice(user=user, plan="pro")
+                        if inv.get("success") and inv.get("payment_url"):
+                            payment_url = inv["payment_url"]
+                    except Exception:
+                        pass
+                    await whatsapp_sender.send_text(
+                        user.phone_number,
+                        "💼 Tu as déjà reçu ton offre gratuite de la semaine !\n\n"
+                        + messages.pro_upsell(user.name or "toi", "emploi", payment_url)
+                    )
+                except Exception as e:
+                    print(f"  ⚠️ upsell emploi error: {e}")
             return []
 
         jobs = await self._load_active_jobs(db)

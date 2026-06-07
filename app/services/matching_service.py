@@ -104,8 +104,12 @@ class MatchingService:
         if top:
             await self._update_quota(db, candidate, len(top))
 
-        # Upsell post-offre pour les utilisateurs gratuits
-        if top and plan != "pro" and getattr(user, "phone_number", None):
+        # Upsell post-offre pour les utilisateurs gratuits ayant l'usage emploi
+        _usage = getattr(user, "usage", None) or []
+        if isinstance(_usage, str):
+            _usage = [_usage]
+        _has_emploi = "emploi" in _usage or "tout" in _usage
+        if top and plan != "pro" and _has_emploi and getattr(user, "phone_number", None):
             try:
                 from app.services.whatsapp.messages import messages
                 from app.services.payment_service import payment_service

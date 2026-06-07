@@ -1248,10 +1248,15 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession, msg_t
             )
             await whatsapp_sender.send_text(phone, messages.ask_secteur_emploi(user.name))
         else:
-            await whatsapp_sender.send_buttons(
+            # Études uniquement : complete directement sans passer par le step plan
+            user = await user_service.complete_onboarding(db, user)
+            days_left = 0
+            if user.exam_date:
+                exam_date = user.exam_date.replace(tzinfo=None)
+                days_left = max(0, (exam_date - datetime.now()).days)
+            await whatsapp_sender.send_text(
                 phone,
-                messages.ask_plan(user.name),
-                messages.PLAN_ONBOARDING_BUTTONS,
+                messages.onboarding_complete(user.name, days_left, user.usage)
             )
 
     elif step == "plan":

@@ -950,7 +950,8 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession, msg_t
         _editing_cv = _conv_cv.get("editing_only", False)
 
         async def _finish_emploi():
-            """Clôture la section emploi : édition → done+matching, sinon → plan."""
+            """Clôture la section emploi : édition → done+matching, sinon → met à jour le step plan.
+            N'envoie PAS le message plan — c'est l'appelant qui l'envoie en dernier pour garantir l'ordre."""
             if _editing_cv:
                 _conv = user.conversation_state or {}
                 _conv.pop("editing_only", None)
@@ -975,9 +976,6 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession, msg_t
             else:
                 user.onboarding_step = "plan"
                 await db.flush()
-                await whatsapp_sender.send_buttons(
-                    phone, messages.ask_plan(user.name), messages.PLAN_ONBOARDING_BUTTONS
-                )
 
         if text.lower().strip() in ("passer", "skip", "plus tard"):
             # Crée un profil minimal depuis les infos onboarding pour permettre le matching
@@ -997,6 +995,10 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession, msg_t
                 db.add(_min_profile)
                 await db.flush()
             await _finish_emploi()
+            if not _editing_cv:
+                await whatsapp_sender.send_buttons(
+                    phone, messages.ask_plan(user.name), messages.PLAN_ONBOARDING_BUTTONS
+                )
             return
 
         if msg_type in ("document", "image") and (image_data or message):
@@ -1031,7 +1033,13 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession, msg_t
                     await whatsapp_sender.send_text(
                         phone, "⚠️ CV reçu mais difficile à lire. Je ferai de mon mieux !"
                     )
+            # _finish_emploi met à jour le step, puis on envoie le plan EN DERNIER
+            # pour garantir que les messages CV arrivent avant la question plan
             await _finish_emploi()
+            if not _editing_cv:
+                await whatsapp_sender.send_buttons(
+                    phone, messages.ask_plan(user.name), messages.PLAN_ONBOARDING_BUTTONS
+                )
             return
 
         await whatsapp_sender.send_text(

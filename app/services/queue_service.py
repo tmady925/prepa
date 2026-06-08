@@ -33,14 +33,24 @@ def is_busy(user: User) -> bool:
 
 async def send_or_queue(db: AsyncSession, user: User, message: str) -> bool:
     """
-    Envoie le message immédiatement si le user est libre.
-    Sinon le place dans notification_queue pour envoi différé.
+    Envoie le message immédiatement si :
+    - Le bloqueur de notifications est désactivé (config), OU
+    - Le user n'est pas dans un processus actif.
+    Sinon place le message dans notification_queue (JSONB) pour envoi différé.
     Retourne True si envoyé, False si mis en queue.
     """
     if not getattr(user, "phone_number", None):
         return False
 
-    if not is_busy(user):
+    # Vérifie si le bloqueur est activé en config
+    blocker_enabled = True
+    try:
+        from app.services.config_service import config_service
+        blocker_enabled = await config_service.get_bool("notification_blocker_enabled")
+    except Exception:
+        pass  # par défaut : activé
+
+    if not blocker_enabled or not is_busy(user):
         try:
             await whatsapp_sender.send_text(user.phone_number, message)
             return True
@@ -48,7 +58,7 @@ async def send_or_queue(db: AsyncSession, user: User, message: str) -> bool:
             print(f"  ⚠️ send_or_queue erreur envoi {user.phone_number}: {e}")
             return False
 
-    # User occupé → mise en queue
+    # User occupé + bloqueur actif → mise en queue
     queue = list(user.notification_queue or [])
     queue.append({
         "message": message,

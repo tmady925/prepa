@@ -1121,6 +1121,20 @@ tr:hover td { background: rgba(255,255,255,0.02); }
         </div>
       </div>
 
+      <!-- Bloc toggles rapides -->
+      <div class="card" style="margin-bottom:16px">
+        <div class="card-title" style="margin-bottom:12px">🔔 Contrôles notifications</div>
+        <div style="display:flex;flex-wrap:wrap;gap:20px;align-items:center">
+          <div style="display:flex;align-items:center;gap:10px">
+            <div id="toggle-notif-blocker" class="toggle" onclick="toggleNotifBlocker()" title="Active/désactive la mise en queue des notifications pendant les exercices"></div>
+            <div>
+              <div style="font-size:13px;font-weight:600">Bloqueur de notifications</div>
+              <div style="font-size:11px;color:var(--text2)" id="notif-blocker-desc">Chargement...</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <div class="grid-2">
         <div class="card">
           <div class="card-header">
@@ -2150,6 +2164,7 @@ function showPage(name) {
   if (name === 'jobs') loadJobs();
   if (name === 'recruiters') loadRecruiters();
   if (name === 'candidates') loadCandidates();
+  if (name === 'config') loadNotifBlockerState();
   // scraping: statique, pas de chargement auto
 }
 
@@ -2757,6 +2772,55 @@ function renderAnalytics(stats, users) {
   document.getElementById('series-stats').innerHTML = Object.entries(seriesMap).map(([k,v]) => `
     <div class="stat-row"><span class="stat-label">${k}</span><span class="stat-val">${v} élèves</span></div>
   `).join('') || '<div style="color:var(--text3);padding:10px;font-size:12px">Aucune donnée</div>';
+}
+
+// ════════════════════════════════════════════════════════════
+// NOTIFICATION BLOCKER TOGGLE
+// ════════════════════════════════════════════════════════════
+let _notifBlockerState = true;
+
+async function loadNotifBlockerState() {
+  try {
+    const configs = await api('/admin/config');
+    const entry = configs.find(c => c.key === 'notification_blocker_enabled');
+    // Si la clé n'existe pas encore en base, on prend le défaut = true
+    _notifBlockerState = entry ? !!entry.value : true;
+    _renderNotifBlocker();
+  } catch(e) {
+    console.error('loadNotifBlockerState error:', e);
+  }
+}
+
+function _renderNotifBlocker() {
+  const toggle = document.getElementById('toggle-notif-blocker');
+  const desc   = document.getElementById('notif-blocker-desc');
+  if (!toggle || !desc) return;
+  if (_notifBlockerState) {
+    toggle.classList.add('on');
+    desc.textContent = 'Activé — les notifs sont mises en attente pendant les exercices/simulations';
+    desc.style.color = 'var(--green)';
+  } else {
+    toggle.classList.remove('on');
+    desc.textContent = 'Désactivé — toutes les notifs sont envoyées immédiatement, peu importe l\'état du user';
+    desc.style.color = 'var(--yellow)';
+  }
+}
+
+async function toggleNotifBlocker() {
+  _notifBlockerState = !_notifBlockerState;
+  _renderNotifBlocker();
+  try {
+    await api('/admin/config', 'POST', {
+      key: 'notification_blocker_enabled',
+      value: _notifBlockerState,
+    });
+    toast(_notifBlockerState ? '🔔 Bloqueur activé' : '🔕 Bloqueur désactivé');
+  } catch(e) {
+    // Rollback visuel si erreur
+    _notifBlockerState = !_notifBlockerState;
+    _renderNotifBlocker();
+    toast('❌ Erreur lors de la mise à jour', 'error');
+  }
 }
 
 // ════════════════════════════════════════════════════════════

@@ -42,6 +42,9 @@ DEFAULTS = {
 
     # Mode
     "fascicule_mode": True,
+
+    # Notifications
+    "notification_blocker_enabled": True,  # Si False, toutes les notifs sont envoyées directement (queue ignorée)
 }
 
 

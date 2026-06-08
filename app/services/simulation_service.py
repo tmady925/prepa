@@ -231,15 +231,14 @@ class SimulationService:
         date_str = simulation.date_debut.strftime("%d/%m/%Y à %Hh%M")
         heures = simulation.duree_minutes // 60
 
-        from app.services.queue_service import send_or_queue
         notified = 0
         for user in users:
             try:
                 if message_custom:
-                    # Message custom : envoi simple sans bouton
-                    await send_or_queue(db, user, message_custom)
+                    # Message custom : envoi direct (bypass queue — annonce importante)
+                    await whatsapp_sender.send_text(user.phone_number, message_custom)
                 else:
-                    # Message avec bouton d'inscription
+                    # Message avec bouton d'inscription — toujours envoyé directement
                     msg = (
                         f"🎯 *Simulation — {simulation.titre}*\n\n"
                         f"📅 Date : *{date_str}*\n"
@@ -248,16 +247,11 @@ class SimulationService:
                         f"Prépare ton matériel : stylo, feuilles, calculatrice 📐\n\n"
                         f"Appuie sur le bouton pour t'inscrire et recevoir le sujet à l'heure H !"
                     )
-                    # Envoie avec bouton d'inscription (id = sim_inscrire_{simulation_id})
-                    if not self._is_busy_user(user):
-                        await whatsapp_sender.send_buttons(
-                            user.phone_number,
-                            msg,
-                            [{"id": f"sim_inscrire_{simulation.id}", "title": "Je m'inscris ✅"}],
-                        )
-                    else:
-                        # User occupé : enfile le message texte simple (sans bouton)
-                        await send_or_queue(db, user, msg + "\n\n_Réponds *Je m'inscris* pour t'inscrire._")
+                    await whatsapp_sender.send_buttons(
+                        user.phone_number,
+                        msg,
+                        [{"id": f"sim_inscrire_{simulation.id}", "title": "Je m'inscris ✅"}],
+                    )
                 notified += 1
             except Exception as e:
                 print(f"Erreur notification à {user.phone_number}: {e}")

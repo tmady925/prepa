@@ -2362,6 +2362,96 @@ async def rematch_candidate(
         raise HTTPException(status_code=500, detail=f"Erreur matching: {e}")
 
 
+@router.post("/admin/users/{user_id}/flush-queue")
+async def flush_user_queue(
+    user_id: str,
+    db: AsyncSession = Depends(get_db),
+    _: bool = Depends(verify_admin),
+):
+    """
+    Force l'envoi immédiat des messages en queue d'un user
+    et nettoie son conversation_state si bloqué.
+    """
+    from app.models.user import User
+    from app.services.queue_service import flush_queue
+
+    try:
+        uid = uuid.UUID(user_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="user_id invalide")
+
+    result = await db.execute(select(User).where(User.id == uid))
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=404, detail="User introuvable")
+
+    queue_size = len(user.notification_queue or [])
+    conv_state = user.conversation_state or {}
+    was_busy = bool(
+        conv_state.get("awaiting_simulation_copy") or
+        conv_state.get("awaiting_copy") or
+        conv_state.get("exercise_path") or
+        conv_state.get("awaiting_copy_for_free_correction")
+    )
+
+    # Nettoie l'état bloqué
+    if was_busy:
+        user.conversation_state = {}
+        await db.flush()
+
+    # Flush la queue
+    sent = await flush_queue(db, user)
+    await db.commit()
+
+    return {
+        "success": True,
+        "queue_size": queue_size,
+        "sent": sent,
+        "state_cleared": was_busy,
+    }
+
+
+@router.post("/admin/users/flush-all-queues")
+async def flush_all_queues(
+    db: AsyncSession = Depends(get_db),
+    _: bool = Depends(verify_admin),
+):
+    """
+    Flush les queues de tous les users ayant des messages en attente.
+    Nettoie aussi les conversation_state bloqués.
+    """
+    from app.models.user import User
+    from app.services.queue_service import flush_queue
+    from sqlalchemy import func as sqlfunc
+
+    result = await db.execute(
+        select(User).where(
+            User.notification_queue.isnot(None),
+            func.jsonb_array_length(User.notification_queue) > 0,
+        )
+    )
+    users = result.scalars().all()
+
+    total_sent = 0
+    cleared = 0
+    for user in users:
+        conv = user.conversation_state or {}
+        if any(conv.get(k) for k in ["awaiting_simulation_copy", "awaiting_copy", "exercise_path", "awaiting_copy_for_free_correction"]):
+            user.conversation_state = {}
+            await db.flush()
+            cleared += 1
+        sent = await flush_queue(db, user)
+        total_sent += sent
+
+    await db.commit()
+    return {
+        "success": True,
+        "users_processed": len(users),
+        "messages_sent": total_sent,
+        "states_cleared": cleared,
+    }
+
+
 # ── SCRAPING ──────────────────────────────────────────────────────────
 
 @router.post("/admin/scraping/run")

@@ -1351,6 +1351,18 @@ tr:hover td { background: rgba(255,255,255,0.02); }
             <label style="font-size:12px;color:var(--text2)">Source URL (optionnel)</label>
             <input id="m-source-url" class="filter-select" style="width:100%;margin-top:4px" placeholder="https://...">
           </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px">
+            <div>
+              <label style="font-size:12px;color:var(--text2)">Date d'expiration</label>
+              <input id="m-expires-at" type="date" class="filter-select" style="width:100%;margin-top:4px">
+              <div style="font-size:11px;color:var(--text2);margin-top:3px">Laisser vide = 60 jours par défaut</div>
+            </div>
+            <div>
+              <label style="font-size:12px;color:var(--text2)">Date limite candidature</label>
+              <input id="m-date-limite" type="date" class="filter-select" style="width:100%;margin-top:4px">
+              <div style="font-size:11px;color:var(--text2);margin-top:3px">Optionnel — affichée dans l'offre</div>
+            </div>
+          </div>
           <button class="btn btn-primary" style="margin-top:12px;font-size:12px" onclick="submitManualJob()">
             Publier l'offre →
           </button>
@@ -3746,6 +3758,8 @@ async function submitManualJob() {
   if (!titre || !entreprise || !localisation || !description) {
     return toast('⚠️ Remplissez les champs obligatoires (*)');
   }
+  const expiresVal = document.getElementById('m-expires-at').value;
+  const dateLimiteVal = document.getElementById('m-date-limite').value;
   const body = {
     titre, entreprise, localisation, description,
     secteur: document.getElementById('m-secteur').value || null,
@@ -3754,6 +3768,8 @@ async function submitManualJob() {
     niveau_etudes: document.getElementById('m-niveau').value || null,
     experience_min_annees: parseInt(document.getElementById('m-experience').value) || 0,
     source_url: document.getElementById('m-source-url').value || null,
+    expires_at: expiresVal ? new Date(expiresVal).toISOString() : null,
+    date_limite: dateLimiteVal ? new Date(dateLimiteVal).toISOString() : null,
     source: 'admin',
     annee_publication: new Date().getFullYear(),
   };
@@ -3770,7 +3786,7 @@ async function submitManualJob() {
   } else if (r.success) {
     resultEl.style.color = 'var(--green)';
     resultEl.textContent = '✅ Offre publiée !';
-    ['m-titre','m-entreprise','m-localisation','m-description','m-email','m-source-url','m-experience'].forEach(id => {
+    ['m-titre','m-entreprise','m-localisation','m-description','m-email','m-source-url','m-experience','m-expires-at','m-date-limite'].forEach(id => {
       document.getElementById(id).value = '';
     });
     loadJobs();

@@ -1956,6 +1956,28 @@ async def create_job_admin(
             "message": duplicate["message"],
         }
 
+    # Traitement des dates optionnelles
+    from datetime import timezone as _tz, timedelta as _td
+    _now = datetime.now(_tz.utc)
+
+    expires_at = None
+    if data.get("expires_at"):
+        try:
+            from datetime import datetime as _dt
+            expires_at = _dt.fromisoformat(data["expires_at"].replace("Z", "+00:00"))
+        except Exception:
+            pass
+    if not expires_at:
+        expires_at = _now + _td(days=60)  # défaut 60 jours
+
+    date_limite = None
+    if data.get("date_limite"):
+        try:
+            from datetime import datetime as _dt
+            date_limite = _dt.fromisoformat(data["date_limite"].replace("Z", "+00:00"))
+        except Exception:
+            pass
+
     job = JobOpportunity(
         titre=titre,
         entreprise=(data.get("entreprise") or "").strip(),
@@ -1969,6 +1991,10 @@ async def create_job_admin(
         source="admin",
         statut="active",
         is_featured=bool(data.get("is_featured", False)),
+        expires_at=expires_at,
+        date_limite=date_limite,
+        source_url=data.get("source_url"),
+        annee_publication=data.get("annee_publication") or datetime.now().year,
     )
     db.add(job)
 

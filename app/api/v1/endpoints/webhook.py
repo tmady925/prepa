@@ -614,29 +614,37 @@ async def process_message(message: dict, db: AsyncSession):
             text.strip().isdigit() or text.lower().strip() in menu_options
         )
 
-        if not quota["allowed"] and not is_menu_nav:
-            # Ici aucun menu profil n'est en attente → "1"/"2" réfèrent au mur de quota
+        if not quota["allowed"]:
             text_lower = text.lower().strip()
+
+            # Les choix quota (1/2 + IDs boutons) ont TOUJOURS la priorité,
+            # même si un menu profil est en attente (is_menu_nav ne compte pas ici).
             if text_lower in ("action_invite", "1", "inviter des amis", "inviter", "/inviter"):
                 await handle_command("inviter", phone, user, db)
                 return
             if text_lower in ("action_pro", "2", "passer pro", "pro", "/plan"):
                 await handle_command("plan", phone, user, db)
                 return
+
             # Les commandes de consultation restent accessibles (pas de LLM)
             _cmd_over_quota = detect_command(text)
             if _cmd_over_quota in ("profil", "progression", "aide", "inviter"):
                 await handle_command(_cmd_over_quota, phone, user, db)
                 return
-            # Affiche le message quota avec options (contexte études/concours)
-            _ctx = _usage_context(user)
-            _ctx_quota = "concours" if _ctx == "concours" else "etudes"
-            await whatsapp_sender.send_buttons(
-                phone,
-                messages.quota_reached(user.name or "ami", _ctx_quota),
-                messages.QUOTA_BUTTONS,
-            )
-            return
+
+            # Navigation menu légitme (ex: /profil puis choix 3) → autorisée
+            if is_menu_nav:
+                pass  # laisse passer vers handle_onboarding
+            else:
+                # Affiche le message quota avec options
+                _ctx = _usage_context(user)
+                _ctx_quota = "concours" if _ctx == "concours" else "etudes"
+                await whatsapp_sender.send_buttons(
+                    phone,
+                    messages.quota_reached(user.name or "ami", _ctx_quota),
+                    messages.QUOTA_BUTTONS,
+                )
+                return
 
     await handle_onboarding(phone, text, user, db, msg_type=msg_type, image_data=image_data, message=message)
     await user_service.increment_message_count(db, user)
@@ -1428,6 +1436,14 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession, msg_t
     elif step == "done":
         quota = await user_service.check_quota(user)
         if not quota["allowed"]:
+            # Gère les choix quota ici aussi (sécurité si le premier bloc a laissé passer)
+            _tq = (text or "").lower().strip()
+            if _tq in ("action_invite", "1", "inviter des amis", "inviter", "/inviter"):
+                await handle_command("inviter", phone, user, db)
+                return
+            if _tq in ("action_pro", "2", "passer pro", "pro", "/plan"):
+                await handle_command("plan", phone, user, db)
+                return
             await whatsapp_sender.send_buttons(
                 phone,
                 messages.quota_reached(user.name or "ami"),

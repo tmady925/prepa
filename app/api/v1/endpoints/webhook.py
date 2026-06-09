@@ -477,6 +477,47 @@ async def handle_command(command: str, phone: str, user, db: AsyncSession):
         else:
             await _send_pro_offer(phone, user, _usage_context(user))
 
+    elif command == "mes_offres":
+        # Affiche les offres d'emploi matchées pour ce user
+        try:
+            from sqlalchemy import select as _sel_off
+            from app.models.job_match import JobMatch as _JM
+            from app.models.job_opportunity import JobOpportunity as _JO
+            _rows = (await db.execute(
+                _sel_off(_JM, _JO)
+                .join(_JO, _JM.job_id == _JO.id)
+                .where(_JM.user_id == user.id, _JO.statut == "active")
+                .order_by(_JM.score.desc())
+                .limit(5)
+            )).all()
+
+            if not _rows:
+                await whatsapp_sender.send_text(
+                    phone,
+                    f"🔍 Aucune offre d'emploi disponible pour toi pour l'instant, {user.name} !\n\n"
+                    "Je te notifie dès qu'une opportunité correspondant à ton profil apparaît. 💼"
+                )
+            else:
+                _msg = f"💼 *Tes offres d'emploi, {user.name}* :\n\n"
+                for _match, _job in _rows:
+                    _deadline = ""
+                    if _job.date_limite:
+                        try:
+                            _deadline = f"\n  📅 Deadline : {_job.date_limite.strftime('%d/%m/%Y')}"
+                        except Exception:
+                            pass
+                    _score = f"{_match.score:.0f}%" if _match.score else "N/A"
+                    _msg += (
+                        f"*{_job.titre}*\n"
+                        f"  🏢 {_job.entreprise or 'N/A'}{_deadline}\n"
+                        f"  🎯 Score matching : {_score}\n\n"
+                    )
+                _msg += "_Pour postuler, contacte directement l'entreprise ou tape /profil pour voir ton profil complet._"
+                await whatsapp_sender.send_text(phone, _msg)
+        except Exception as _off_err:
+            print(f"  [mes_offres] erreur: {_off_err}")
+            await whatsapp_sender.send_text(phone, "❌ Impossible de charger tes offres. Réessaie.")
+
 
 def _usage_context(user) -> str:
     """Déduit le contexte d'upsell depuis user.usage : emploi/etudes/concours/tout."""
@@ -658,6 +699,49 @@ async def _ask_exam(phone: str, user, db: AsyncSession):
 
 async def handle_onboarding(phone: str, text: str, user, db: AsyncSession, msg_type: str = "text", image_data: dict = None, message: dict = None):
     step = user.onboarding_step
+
+    # ── Couche LLM intelligente ───────────────────────────────────────────────
+    # Avant chaque étape, on laisse le LLM analyser le message pour :
+    #   - Extraire une valeur propre (ex: "moi c'est khady" → "Khady")
+    #   - Détecter les cas particuliers (pas de CV, date passée...)
+    #   - Répondre aux questions hors flow sans casser l'étape
+    # En cas d'erreur LLM, le comportement original est préservé (fallback sécurisé).
+    _llm_result = None
+    if step not in ("start", "plan", "emploi_cv") and msg_type == "text":
+        try:
+            from app.services.onboarding_llm import analyze as _llm_analyze, should_analyze as _should_analyze
+            if _should_analyze(step, text):
+                _user_ctx = {
+                    "nom": user.name,
+                    "pays": getattr(user, "pays", None),
+                    "usage": getattr(user, "usage", None),
+                    "exam_type": getattr(user, "exam_type", None),
+                    "plan": getattr(user, "plan", None),
+                    "niveau_etudes": getattr(user, "niveau_etudes", None),
+                }
+                _llm_result = await _llm_analyze(
+                    step=step,
+                    text=text,
+                    user_name=user.name or "",
+                    user_context=_user_ctx,
+                )
+                print(f"  [onboarding_llm] step={step} text={text!r} → {_llm_result}")
+
+                # Si le LLM veut guider, répondre ou clarifier → envoyer message et stopper
+                if _llm_result and _llm_result.get("action") in ("guide", "answer", "clarify"):
+                    msg_to_send = _llm_result.get("message")
+                    if msg_to_send:
+                        await whatsapp_sender.send_text(phone, msg_to_send)
+                    return  # On reste sur la même étape, le webhook ne va pas plus loin
+
+                # Si le LLM a extrait une valeur propre → remplacer text pour la suite
+                if _llm_result and _llm_result.get("action") == "proceed" and _llm_result.get("value"):
+                    text = _llm_result["value"]
+
+        except Exception as _llm_err:
+            print(f"  [onboarding_llm] erreur ignorée: {_llm_err}")
+            _llm_result = None
+    # ─────────────────────────────────────────────────────────────────────────
 
     if step == "start":
         await whatsapp_sender.send_text(phone, messages.WELCOME)
@@ -987,6 +1071,25 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession, msg_t
                     )
             except Exception as e:
                 print(f"Matching emploi error: {e}")
+
+        # ── LLM pour emploi_cv (texte uniquement, pas les fichiers) ──────────
+        if msg_type == "text":
+            try:
+                from app.services.onboarding_llm import analyze as _cv_analyze, should_analyze as _cv_should
+                if _cv_should("emploi_cv", text):
+                    _cv_ctx = {"nom": user.name, "niveau_etudes": getattr(user, "niveau_etudes", None)}
+                    _cv_llm = await _cv_analyze("emploi_cv", text, user.name or "", _cv_ctx)
+                    print(f"  [onboarding_llm] step=emploi_cv → {_cv_llm}")
+                    if _cv_llm and _cv_llm.get("action") in ("guide", "answer", "clarify"):
+                        msg_cv = _cv_llm.get("message")
+                        if msg_cv:
+                            await whatsapp_sender.send_text(phone, msg_cv)
+                        return
+                    if _cv_llm and _cv_llm.get("action") == "proceed" and _cv_llm.get("value"):
+                        text = _cv_llm["value"]
+            except Exception as _cv_err:
+                print(f"  [onboarding_llm] emploi_cv error ignorée: {_cv_err}")
+        # ─────────────────────────────────────────────────────────────────────
 
         if text.lower().strip() in ("passer", "skip", "plus tard"):
             # Crée un profil minimal depuis les infos onboarding pour permettre le matching
@@ -2046,6 +2149,63 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession, msg_t
             await handle_command(command, phone, user, db)
             await user_service.increment_message_count(db, user)
             return
+
+        # ── Intelligence LLM universelle ──────────────────────────────
+        # Analyse le message avec contexte complet (profil, offres, simulations, règles)
+        # avant tout traitement rigide. N'intervient que si le message est ambigu
+        # ou nécessite des données de la plateforme pour être traité intelligemment.
+        if msg_type == "text" and text and len(text.strip()) > 2:
+            try:
+                from app.services.bot_intelligence import analyze_message as _bot_analyze, should_analyze as _bot_should
+                if _bot_should(text, user):
+                    _hist = await message_repo.get_history(db, user.id, limit=6)
+                    _decision = await _bot_analyze(text=text, user=user, db=db, history=_hist)
+                    if _decision:
+                        _action = _decision.get("action", "passthrough")
+                        _msg = _decision.get("message")
+
+                        if _action == "answer" and _msg:
+                            await whatsapp_sender.send_text(phone, _msg)
+                            await user_service.increment_message_count(db, user)
+                            await message_repo.save(db=db, user_id=user.id, direction="inbound", content=text, intent="question")
+                            await message_repo.save(db=db, user_id=user.id, direction="outbound", content=_msg, intent="answer")
+                            return
+
+                        elif _action == "show_jobs":
+                            # Déclenche l'affichage des offres via commande interne
+                            await handle_command("mes_offres", phone, user, db)
+                            await user_service.increment_message_count(db, user)
+                            return
+
+                        elif _action == "show_profile":
+                            await handle_command("profil", phone, user, db)
+                            await user_service.increment_message_count(db, user)
+                            return
+
+                        elif _action == "show_plan":
+                            await handle_command("plan", phone, user, db)
+                            await user_service.increment_message_count(db, user)
+                            return
+
+                        elif _action == "show_sim" and _msg:
+                            await whatsapp_sender.send_text(phone, _msg)
+                            await user_service.increment_message_count(db, user)
+                            return
+
+                        elif _action == "guide_emploi" and _msg:
+                            await whatsapp_sender.send_text(phone, _msg)
+                            await user_service.increment_message_count(db, user)
+                            return
+
+                        elif _action == "guide_concours" and _msg:
+                            await whatsapp_sender.send_text(phone, _msg)
+                            await user_service.increment_message_count(db, user)
+                            return
+
+                        # "exercise" et "passthrough" → continuent vers le flow normal
+            except Exception as _bi_err:
+                print(f"  [bot_intelligence] erreur ignorée: {_bi_err}")
+        # ─────────────────────────────────────────────────────────────
 
         # ── Détection intelligente nouveau besoin (LLM) ───────────────
         if text and len(text) > 5:

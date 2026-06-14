@@ -16,6 +16,14 @@ class Messages:
         "Pour commencer — *comment tu t'appelles ?*"
     )
 
+    WELCOME_EMPLOI = (
+        "👋 Bienvenue sur *Prepa* !\n\n"
+        "Ton assistant personnel pour ta *recherche d'emploi* et ta carrière. "
+        "Je vais t'aider à trouver des offres adaptées à ton profil, "
+        "à préparer ton CV et tes entretiens.\n\n"
+        "Pour commencer — *comment tu t'appelles ?*"
+    )
+
     def ask_series_bac(self, name: str) -> str:
         return f"Super {name} ! Tu es en quelle série ?"
 

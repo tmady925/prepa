@@ -651,7 +651,17 @@ async def process_message(message: dict, db: AsyncSession):
 
 
 async def _ask_usage(phone: str, user, db: AsyncSession):
-    """Demande l'usage après confirmation du pays."""
+    """Demande l'usage après confirmation du pays.
+    En mode emploi uniquement : saute la question usage et va directement
+    au profil emploi (plus d'études ni de concours)."""
+    from app.services.platform_mode import is_emploi_only
+    if await is_emploi_only():
+        user.usage = ["emploi"]
+        user.onboarding_step = "emploi_secteur"
+        await db.flush()
+        await whatsapp_sender.send_text(phone, messages.ask_secteur_emploi(user.name))
+        return
+
     user.onboarding_step = "usage"
     await db.flush()
     await whatsapp_sender.send_buttons(
@@ -752,7 +762,9 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession, msg_t
     # ─────────────────────────────────────────────────────────────────────────
 
     if step == "start":
-        await whatsapp_sender.send_text(phone, messages.WELCOME)
+        from app.services.platform_mode import is_emploi_only
+        _welcome = messages.WELCOME_EMPLOI if await is_emploi_only() else messages.WELCOME
+        await whatsapp_sender.send_text(phone, _welcome)
         user.onboarding_step = "name"
         await db.flush()
 
@@ -843,6 +855,14 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession, msg_t
 
     elif step == "usage":
         from app.services.choice_detector import detect_choice
+        from app.services.platform_mode import is_emploi_only
+        # Mode emploi uniquement : force emploi quoi que tape l'utilisateur
+        if await is_emploi_only():
+            user.usage = ["emploi"]
+            user.onboarding_step = "emploi_secteur"
+            await db.flush()
+            await whatsapp_sender.send_text(phone, messages.ask_secteur_emploi(user.name))
+            return
         choices = [
             {"id": "usage_etudes",   "title": "Études",   "value": "etudes"},
             {"id": "usage_concours", "title": "Concours", "value": "concours"},
@@ -2221,6 +2241,40 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession, msg_t
                         # "exercise" et "passthrough" → continuent vers le flow normal
             except Exception as _bi_err:
                 print(f"  [bot_intelligence] erreur ignorée: {_bi_err}")
+        # ─────────────────────────────────────────────────────────────
+
+        # ── Garde mode EMPLOI uniquement ──────────────────────────────
+        # Si la plateforme est en mode emploi only, on ne fait JAMAIS de
+        # traitement études/concours/exercices. bot_intelligence a déjà géré
+        # offres/profil/plan ci-dessus ; tout le reste reçoit une réponse
+        # emploi via le LLM (jamais d'examen ni de concours).
+        if msg_type == "text" and text:
+            try:
+                from app.services.platform_mode import is_emploi_only as _is_emploi_only
+                if await _is_emploi_only():
+                    from app.services.bot_intelligence import answer_emploi as _answer_emploi
+                    _hist2 = await message_repo.get_history(db, user.id, limit=6)
+                    _reply = None
+                    try:
+                        _reply = await _answer_emploi(text=text, user=user, db=db, history=_hist2)
+                    except Exception as _e_emp:
+                        print(f"  [emploi_only] answer_emploi erreur: {_e_emp}")
+                    if not _reply:
+                        _reply = (
+                            f"💼 Je suis ton assistant emploi *{user.name or ''}* !\n\n"
+                            "Je peux t'aider à :\n"
+                            "→ Trouver des offres adaptées à ton profil\n"
+                            "→ Améliorer ton CV et ta lettre de motivation\n"
+                            "→ Préparer tes entretiens d'embauche\n\n"
+                            "Que puis-je faire pour toi ? 🚀"
+                        )
+                    await whatsapp_sender.send_text(phone, _reply)
+                    await message_repo.save(db=db, user_id=user.id, direction="inbound", content=text, intent="emploi")
+                    await message_repo.save(db=db, user_id=user.id, direction="outbound", content=_reply, intent="emploi")
+                    await user_service.increment_message_count(db, user)
+                    return
+            except Exception as _emp_guard_err:
+                print(f"  [emploi_only] garde erreur ignorée: {_emp_guard_err}")
         # ─────────────────────────────────────────────────────────────
 
         # ── Détection intelligente nouveau besoin (LLM) ───────────────

@@ -42,6 +42,7 @@ DEFAULTS = {
 
     # Mode
     "fascicule_mode": True,
+    "emploi_only_mode": False,  # Si True, plateforme EMPLOI uniquement (plus d'études ni concours nulle part)
 
     # Notifications
     "notification_blocker_enabled": True,  # Si False, toutes les notifs sont envoyées directement (queue ignorée)

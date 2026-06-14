@@ -71,6 +71,65 @@ EXERCICES :
 - Correction PDF disponible après soumission
 """
 
+# ─── Variante EMPLOI UNIQUEMENT ──────────────────────────────────────────────
+
+PLATFORM_RULES_EMPLOI = """
+RÈGLES DE LA PLATEFORME PREPA (MODE EMPLOI) :
+
+Prepa est une plateforme dédiée à l'EMPLOI et à la carrière.
+
+PLANS :
+- Plan Gratuit : accès limité aux offres
+- Plan Pro (500 FCFA/mois) : offres prioritaires, accompagnement complet
+
+SERVICES EMPLOI :
+- Matching avec des offres d'emploi selon le profil (secteur, niveau, localisation, contrat)
+- Conseils CV et lettre de motivation
+- Préparation aux entretiens d'embauche
+- Orientation professionnelle
+
+COMMANDES DISPONIBLES :
+- /profil → voir et modifier son profil emploi
+- /plan → voir/changer son plan
+- /aide → liste des commandes
+- mes offres → voir les offres matchées
+
+IMPORTANT : Cette plateforme ne traite PAS les études, examens scolaires (BAC, BFEM)
+ni les concours. Tu n'en parles jamais. Si l'utilisateur évoque ces sujets,
+tu le recentres avec bienveillance sur sa recherche d'emploi.
+"""
+
+SYSTEM_PROMPT_EMPLOI = """Tu es Prepa, un assistant emploi intelligent pour les jeunes en Afrique.
+Tu accompagnes les utilisateurs UNIQUEMENT sur leur recherche d'emploi et leur carrière.
+
+Tu dois analyser le message de l'utilisateur et retourner un JSON de décision.
+Tu réponds TOUJOURS en JSON valide et rien d'autre.
+
+FORMAT DE RÉPONSE :
+{
+  "action": "<action>",
+  "message": "<message WhatsApp formaté ou null>",
+  "confidence": 0.0
+}
+
+ACTIONS DISPONIBLES :
+- "answer"        → Tu peux répondre directement (conseil emploi, CV, entretien, carrière)
+- "show_jobs"     → L'utilisateur veut voir ses offres d'emploi
+- "show_profile"  → L'utilisateur veut voir son profil
+- "show_plan"     → L'utilisateur veut des infos sur son plan/abonnement
+- "guide_emploi"  → Conseiller sur l'emploi/CV/entretien
+- "passthrough"   → Cas très ambigu uniquement
+
+RÈGLES :
+- Tu ne proposes JAMAIS d'exercice, d'examen ou de concours (action "exercise" interdite)
+- Si l'utilisateur parle d'études/examens/concours → "answer" en le recentrant gentiment sur l'emploi
+- Si l'utilisateur demande ses offres → "show_jobs"
+- Pour tout conseil carrière/CV/entretien → "answer" avec une réponse complète et utile
+- Ton message doit être formaté pour WhatsApp (gras avec *, listes avec -)
+- Sois bienveillant, chaleureux, concret, adapté à un jeune africain
+- confidence entre 0.0 et 1.0
+"""
+
 # ─── System prompt ────────────────────────────────────────────────────────────
 
 SYSTEM_PROMPT = """Tu es Prepa, un assistant intelligent pour les jeunes en Afrique.
@@ -118,13 +177,32 @@ async def build_user_context(user, db=None) -> str:
     """
     ctx_parts = []
 
+    # Mode plateforme : en emploi uniquement, on masque tout ce qui touche
+    # aux études/examens/concours du contexte transmis au LLM.
+    emploi_only = False
+    try:
+        from app.services.platform_mode import is_emploi_only
+        emploi_only = await is_emploi_only()
+    except Exception:
+        pass
+
     # ── Profil de base ────────────────────────────────────────────────────────
     try:
         usage = user.usage or []
         if isinstance(usage, str):
             usage = [usage]
 
-        ctx_parts.append(f"""PROFIL UTILISATEUR :
+        if emploi_only:
+            ctx_parts.append(f"""PROFIL UTILISATEUR :
+- Prénom : {user.name or 'inconnu'}
+- Pays : {getattr(user, 'pays', None) or 'non renseigné'}
+- Plan : {user.plan or 'free'}
+- Niveau d'études : {getattr(user, 'niveau_etudes', None) or 'non défini'}
+- Secteur visé : {', '.join(getattr(user, 'secteur_emploi', None) or []) or 'non défini'}
+- Localisation : {getattr(user, 'localisation_emploi', None) or 'non définie'}
+- Type de contrat : {getattr(user, 'type_contrat_souhaite', None) or 'non défini'}""")
+        else:
+            ctx_parts.append(f"""PROFIL UTILISATEUR :
 - Prénom : {user.name or 'inconnu'}
 - Pays : {getattr(user, 'pays', None) or 'non renseigné'}
 - Plan : {user.plan or 'free'} {'(messages illimités)' if user.plan == 'pro' else '(10 messages/jour)'}
@@ -186,8 +264,8 @@ async def build_user_context(user, db=None) -> str:
         except Exception as e:
             print(f"  [bot_intelligence] jobs context error: {e}")
 
-    # ── Simulations à venir ──────────────────────────────────────────────────
-    if db:
+    # ── Simulations à venir (masquées en mode emploi uniquement) ──────────────
+    if db and not emploi_only:
         try:
             from sqlalchemy import select
             from app.models.simulation import Simulation, SimulationParticipation
@@ -306,6 +384,17 @@ async def analyze_message(
         return None
 
     try:
+        # Détecte le mode plateforme (emploi uniquement ou complet)
+        emploi_only = False
+        try:
+            from app.services.platform_mode import is_emploi_only
+            emploi_only = await is_emploi_only()
+        except Exception:
+            pass
+
+        _rules = PLATFORM_RULES_EMPLOI if emploi_only else PLATFORM_RULES
+        _system = SYSTEM_PROMPT_EMPLOI if emploi_only else SYSTEM_PROMPT
+
         # Contexte utilisateur enrichi
         user_context = await build_user_context(user, db)
 
@@ -319,8 +408,21 @@ async def analyze_message(
                 lines.append(f"{role}: {msg.get('content', '')[:200]}")
             history_str = "\nHISTORIQUE RÉCENT :\n" + "\n".join(lines)
 
+        if emploi_only:
+            _instructions = """Analyse ce message et retourne la décision JSON appropriée.
+Si l'utilisateur demande ses offres d'emploi → action="show_jobs".
+Pour tout conseil emploi/CV/entretien/carrière → action="answer" avec une réponse complète.
+Si l'utilisateur parle d'études/examens/concours → action="answer" en le recentrant gentiment sur l'emploi.
+Ne propose JAMAIS d'exercice ni d'examen."""
+        else:
+            _instructions = """Analyse ce message et retourne la décision JSON appropriée.
+Si l'utilisateur demande des infos sur ses offres d'emploi, utilise les données ci-dessus pour répondre directement.
+Si l'utilisateur demande un exercice, retourne action="exercise".
+Si c'est une question de cours ou d'explication → action="passthrough" pour que le système pédagogique prenne le relais.
+Si c'est une question sur la plateforme ou les règles → action="answer" avec une réponse complète."""
+
         # Prompt complet
-        prompt = f"""{PLATFORM_RULES}
+        prompt = f"""{_rules}
 
 {user_context}
 {history_str}
@@ -329,13 +431,9 @@ DATE ACTUELLE : {datetime.now().strftime('%d/%m/%Y %H:%M')}
 
 MESSAGE REÇU : "{text}"
 
-Analyse ce message et retourne la décision JSON appropriée.
-Si l'utilisateur demande des infos sur ses offres d'emploi, utilise les données ci-dessus pour répondre directement.
-Si l'utilisateur demande un exercice, retourne action="exercise".
-Si c'est une question de cours ou d'explication → action="passthrough" pour que le système pédagogique prenne le relais.
-Si c'est une question sur la plateforme ou les règles → action="answer" avec une réponse complète."""
+{_instructions}"""
 
-        result = await _call_llm_json(SYSTEM_PROMPT, prompt)
+        result = await _call_llm_json(_system, prompt)
 
         if not result or "action" not in result:
             return None
@@ -355,6 +453,84 @@ Si c'est une question sur la plateforme ou les règles → action="answer" avec 
 
     except Exception as e:
         print(f"  [bot_intelligence] analyze_message error: {e}")
+        return None
+
+
+# ─── Réponse emploi en texte libre (mode emploi uniquement) ──────────────────
+
+async def _call_llm_text(system: str, user_message: str) -> str | None:
+    """Appel LLM pour obtenir une réponse texte (pas JSON)."""
+    messages = [
+        {"role": "system", "content": system},
+        {"role": "user", "content": user_message},
+    ]
+    providers = []
+    if getattr(settings, "groq_api_key", None):
+        providers.append(("groq", "https://api.groq.com/openai/v1/chat/completions",
+                          "llama-3.3-70b-versatile", settings.groq_api_key))
+    if getattr(settings, "mistral_api_key", None):
+        providers.append(("mistral", "https://api.mistral.ai/v1/chat/completions",
+                          "mistral-large-latest", settings.mistral_api_key))
+
+    for name, url, model, key in providers:
+        try:
+            async with httpx.AsyncClient(timeout=20.0) as client:
+                resp = await client.post(
+                    url,
+                    headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+                    json={"model": model, "messages": messages, "max_tokens": 500, "temperature": 0.6},
+                )
+                if resp.status_code != 200:
+                    continue
+                return resp.json()["choices"][0]["message"]["content"].strip()
+        except Exception as e:
+            print(f"  [bot_intelligence] text provider {name} error: {e}")
+            continue
+    return None
+
+
+EMPLOI_ASSISTANT_PROMPT = """Tu es Prepa, un assistant emploi chaleureux pour les jeunes en Afrique.
+Tu aides UNIQUEMENT sur la recherche d'emploi et la carrière :
+- Trouver et comprendre des offres d'emploi
+- Conseils CV, lettre de motivation
+- Préparation aux entretiens
+- Orientation professionnelle, développement de carrière
+
+RÈGLES STRICTES :
+- Tu ne parles JAMAIS d'études, d'examens scolaires (BAC, BFEM) ni de concours.
+- Si l'utilisateur aborde ces sujets, recentre avec bienveillance sur son projet professionnel.
+- Réponds en français, format WhatsApp (gras avec *, listes avec -, emojis avec parcimonie).
+- Sois concret, utile et encourageant. Réponses courtes et claires."""
+
+
+async def answer_emploi(text: str, user, db=None, history: list = None) -> str | None:
+    """
+    Génère une réponse emploi en texte libre.
+    Utilisé en mode emploi uniquement pour tout message qui n'a pas été
+    capté par les actions structurées (offres, profil, plan...).
+    """
+    try:
+        user_context = await build_user_context(user, db)
+
+        history_str = ""
+        if history:
+            recent = history[-6:] if len(history) > 6 else history
+            lines = []
+            for msg in recent:
+                role = "Utilisateur" if msg.get("role") == "user" else "Prepa"
+                lines.append(f"{role}: {msg.get('content', '')[:200]}")
+            history_str = "\nHISTORIQUE RÉCENT :\n" + "\n".join(lines)
+
+        prompt = f"""{user_context}
+{history_str}
+
+MESSAGE DE L'UTILISATEUR : "{text}"
+
+Réponds de manière utile et bienveillante, uniquement sur l'emploi et la carrière."""
+
+        return await _call_llm_text(EMPLOI_ASSISTANT_PROMPT, prompt)
+    except Exception as e:
+        print(f"  [bot_intelligence] answer_emploi error: {e}")
         return None
 
 

@@ -1135,6 +1135,20 @@ tr:hover td { background: rgba(255,255,255,0.02); }
         </div>
       </div>
 
+      <!-- Bloc mode plateforme -->
+      <div class="card" style="margin-bottom:16px">
+        <div class="card-title" style="margin-bottom:12px">🎯 Mode de la plateforme</div>
+        <div style="display:flex;flex-wrap:wrap;gap:20px;align-items:center">
+          <div style="display:flex;align-items:center;gap:10px">
+            <div id="toggle-emploi-only" class="toggle" onclick="toggleEmploiOnly()" title="Active le mode emploi uniquement : plus d'études ni de concours nulle part"></div>
+            <div>
+              <div style="font-size:13px;font-weight:600">Mode emploi uniquement</div>
+              <div style="font-size:11px;color:var(--text2)" id="emploi-only-desc">Chargement...</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <div class="grid-2">
         <div class="card">
           <div class="card-header">
@@ -2164,7 +2178,7 @@ function showPage(name) {
   if (name === 'jobs') loadJobs();
   if (name === 'recruiters') loadRecruiters();
   if (name === 'candidates') loadCandidates();
-  if (name === 'config') loadNotifBlockerState();
+  if (name === 'config') { loadNotifBlockerState(); loadEmploiOnlyState(); }
   // scraping: statique, pas de chargement auto
 }
 
@@ -2819,6 +2833,55 @@ async function toggleNotifBlocker() {
     // Rollback visuel si erreur
     _notifBlockerState = !_notifBlockerState;
     _renderNotifBlocker();
+    toast('❌ Erreur lors de la mise à jour', 'error');
+  }
+}
+
+// ── Mode emploi uniquement ──────────────────────────────────────
+let _emploiOnlyState = false;
+
+async function loadEmploiOnlyState() {
+  try {
+    const configs = await api('/admin/config');
+    const entry = configs.find(c => c.key === 'emploi_only_mode');
+    _emploiOnlyState = entry ? !!entry.value : false;
+    _renderEmploiOnly();
+  } catch(e) {
+    console.error('loadEmploiOnlyState error:', e);
+  }
+}
+
+function _renderEmploiOnly() {
+  const toggle = document.getElementById('toggle-emploi-only');
+  const desc   = document.getElementById('emploi-only-desc');
+  if (!toggle || !desc) return;
+  if (_emploiOnlyState) {
+    toggle.classList.add('on');
+    desc.textContent = 'Activé — plateforme EMPLOI uniquement (plus d\'études ni de concours nulle part)';
+    desc.style.color = 'var(--green)';
+  } else {
+    toggle.classList.remove('on');
+    desc.textContent = 'Désactivé — plateforme complète (études · concours · emploi)';
+    desc.style.color = 'var(--text2)';
+  }
+}
+
+async function toggleEmploiOnly() {
+  const goingOn = !_emploiOnlyState;
+  if (goingOn && !confirm('Activer le mode EMPLOI uniquement ?\n\nLes études et concours disparaîtront de TOUT le projet (onboarding, bot, réponses LLM).\n\nLes utilisateurs déjà inscrits basculeront aussi en mode emploi.')) {
+    return;
+  }
+  _emploiOnlyState = goingOn;
+  _renderEmploiOnly();
+  try {
+    await api('/admin/config', 'POST', {
+      key: 'emploi_only_mode',
+      value: _emploiOnlyState,
+    });
+    toast(_emploiOnlyState ? '💼 Mode emploi uniquement activé' : '🎯 Mode complet rétabli');
+  } catch(e) {
+    _emploiOnlyState = !_emploiOnlyState;
+    _renderEmploiOnly();
     toast('❌ Erreur lors de la mise à jour', 'error');
   }
 }

@@ -232,12 +232,24 @@ STEP_SPECS = {
 
 # ─── Prompt système ──────────────────────────────────────────────────────────
 
-SYSTEM_PROMPT = """Tu es l'assistant intelligent de Prepa, une plateforme WhatsApp d'accompagnement pour les jeunes en Afrique.
+_SYSTEM_PROMPT_HEAD_FULL = """Tu es l'assistant intelligent de Prepa, une plateforme WhatsApp d'accompagnement pour les jeunes en Afrique.
 
 Prepa couvre 3 domaines :
 1. ÉTUDES : révisions BAC/BFEM, exercices, corrections, matières scolaires
 2. CONCOURS : préparation aux concours (fonction publique, grandes écoles, privé)
-3. EMPLOI : matching offres d'emploi, conseils CV, orientation professionnelle
+3. EMPLOI : matching offres d'emploi, conseils CV, orientation professionnelle"""
+
+_SYSTEM_PROMPT_HEAD_EMPLOI = """Tu es l'assistant emploi de Prepa, une plateforme WhatsApp dédiée à la recherche d'emploi pour les jeunes en Afrique.
+
+Prepa accompagne UNIQUEMENT sur l'emploi :
+- Matching avec des offres d'emploi adaptées au profil
+- Conseils CV, lettre de motivation, entretiens
+- Orientation professionnelle
+
+IMPORTANT : Tu ne parles JAMAIS d'études, d'examens scolaires (BAC, BFEM) ni de concours.
+Si l'utilisateur en parle, recentre poliment sur sa recherche d'emploi."""
+
+_SYSTEM_PROMPT_BODY = """
 
 Tu guides l'utilisateur pendant son inscription (onboarding).
 Tu dois comprendre ses réponses de manière intelligente, même si elles sont informelles, en wolof mélangé, abrégées ou hors du format attendu.
@@ -264,13 +276,17 @@ FORMAT DE RÉPONSE (JSON strict) :
 - "clarify" → demander clarification et rester sur l'étape
 """
 
+# Compose les deux variantes du prompt système
+SYSTEM_PROMPT = _SYSTEM_PROMPT_HEAD_FULL + _SYSTEM_PROMPT_BODY
+SYSTEM_PROMPT_EMPLOI = _SYSTEM_PROMPT_HEAD_EMPLOI + _SYSTEM_PROMPT_BODY
+
 
 # ─── Appel LLM léger ─────────────────────────────────────────────────────────
 
-async def _call_llm_json(prompt: str) -> dict | None:
+async def _call_llm_json(prompt: str, system: str = None) -> dict | None:
     """Appel LLM minimal pour obtenir un JSON. Essaie Groq puis Mistral."""
     messages = [
-        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "system", "content": system or SYSTEM_PROMPT},
         {"role": "user", "content": prompt},
     ]
 
@@ -361,7 +377,16 @@ Sois intelligent et bienveillant. Si le message est clair, extrais la valeur et 
 """
 
     try:
-        result = await _call_llm_json(prompt)
+        # Sélectionne le prompt système selon le mode plateforme
+        _system = SYSTEM_PROMPT
+        try:
+            from app.services.platform_mode import is_emploi_only
+            if await is_emploi_only():
+                _system = SYSTEM_PROMPT_EMPLOI
+        except Exception:
+            pass
+
+        result = await _call_llm_json(prompt, system=_system)
         if not result or "action" not in result:
             return _fallback()
 

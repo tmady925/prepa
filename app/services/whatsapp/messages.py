@@ -83,7 +83,129 @@ class Messages:
             "_Tape *passer* si tu ne connais pas encore la date._"
         )
 
-    # ── Emploi ─────────────────────────────────────────────────────
+    # ── Emploi — onboarding structuré (4 étapes fixes) ────────────
+
+    # Étape 1 : type de travail
+    def ask_emploi_type(self, name: str) -> str:
+        return f"{name}, tu cherches quel type de travail ?"
+
+    EMPLOI_TYPE_BUTTONS = [
+        {"id": "et_petit_job",  "title": "⚡ Petit job"},
+        {"id": "et_entreprise", "title": "💼 Emploi entreprise"},
+        {"id": "et_les_deux",   "title": "🔁 Les deux"},
+    ]
+
+    # Étape 2a : secteur petit job
+    def ask_secteur_petit_job(self, name: str) -> str:
+        return f"Quel type de boulot tu cherches *{name}* ?"
+
+    SECTEUR_PJ_ROWS = [
+        {"id": "spj_livraison",    "title": "📦 Livraison / Courses"},
+        {"id": "spj_vente",        "title": "🛒 Vente / Commerce"},
+        {"id": "spj_nettoyage",    "title": "🧹 Nettoyage / Entretien"},
+        {"id": "spj_manutention",  "title": "🏗 Manutention / Déménag."},
+        {"id": "spj_gardiennage",  "title": "🔒 Gardiennage / Sécurité"},
+        {"id": "spj_restauration", "title": "🍽 Restauration / Cuisine"},
+        {"id": "spj_bricolage",    "title": "🔧 Bricolage / Réparation"},
+        {"id": "spj_autre",        "title": "✏️ Autre"},
+    ]
+
+    SECTEUR_PJ_SECTIONS = [{"title": "Type de boulot", "rows": SECTEUR_PJ_ROWS}]
+
+    # Étape 2b : secteur entreprise
+    def ask_secteur_entreprise(self, name: str) -> str:
+        return f"Dans quel domaine tu cherches *{name}* ?"
+
+    SECTEUR_ENT_ROWS = [
+        {"id": "se_info",      "title": "💻 Informatique / Tech"},
+        {"id": "se_finance",   "title": "💰 Finance / Comptabilité"},
+        {"id": "se_marketing", "title": "📣 Commerce / Marketing"},
+        {"id": "se_sante",     "title": "🏥 Santé"},
+        {"id": "se_btp",       "title": "🏗 BTP / Génie civil"},
+        {"id": "se_education", "title": "📚 Éducation / Formation"},
+        {"id": "se_droit",     "title": "⚖️ Droit / Juridique"},
+        {"id": "se_rh",        "title": "👥 RH / Administration"},
+        {"id": "se_autre",     "title": "✏️ Autre"},
+    ]
+
+    SECTEUR_ENT_SECTIONS = [{"title": "Domaine", "rows": SECTEUR_ENT_ROWS}]
+
+    # Étape 2c : les_deux → liste à deux sections
+    def ask_secteur_les_deux(self, name: str) -> str:
+        return f"Quel type de travail tu cherches *{name}* ?"
+
+    SECTEUR_LES_DEUX_SECTIONS = [
+        {
+            "title": "⚡ Petits jobs",
+            "rows": [
+                {"id": "spj_livraison",    "title": "Livraison / Courses"},
+                {"id": "spj_vente",        "title": "Vente / Commerce"},
+                {"id": "spj_nettoyage",    "title": "Nettoyage / Entretien"},
+                {"id": "spj_manutention",  "title": "Manutention"},
+                {"id": "spj_gardiennage",  "title": "Gardiennage"},
+                {"id": "spj_restauration", "title": "Restauration"},
+            ],
+        },
+        {
+            "title": "💼 Emplois entreprise",
+            "rows": [
+                {"id": "se_info",      "title": "Informatique / Tech"},
+                {"id": "se_finance",   "title": "Finance / Comptabilité"},
+                {"id": "se_marketing", "title": "Commerce / Marketing"},
+                {"id": "se_sante",     "title": "Santé"},
+                {"id": "se_btp",       "title": "BTP / Génie civil"},
+                {"id": "se_education", "title": "Éducation"},
+                {"id": "se_droit",     "title": "Droit"},
+                {"id": "se_autre",     "title": "Autre domaine"},
+            ],
+        },
+    ]
+
+    # Étape 3 : niveau d'études (uniquement entreprise / les_deux)
+    def ask_niveau_emploi(self, name: str) -> str:
+        return f"T'as quel niveau d'études *{name}* ?"
+
+    NIVEAU_EMPLOI_ROWS = [
+        {"id": "niv_aucun", "title": "Aucun diplôme / BFEM"},
+        {"id": "niv_bac",   "title": "🎓 Bac"},
+        {"id": "niv_bac2",  "title": "📘 Bac+2 (BTS, DUT)"},
+        {"id": "niv_bac3",  "title": "📗 Licence / Bac+3"},
+        {"id": "niv_bac5",  "title": "📙 Master / Bac+5"},
+        {"id": "niv_doc",   "title": "🔬 Doctorat"},
+    ]
+
+    NIVEAU_EMPLOI_SECTIONS = [{"title": "Niveau d'études", "rows": NIVEAU_EMPLOI_ROWS}]
+
+    # Étape 4 : localisation (texte libre)
+    def ask_localisation_onboarding(self, name: str) -> str:
+        return (
+            f"T'es dans quelle ville ou quartier *{name}* ? 📍\n\n"
+            f"_Ex : Dakar, Thiès, Grand Yoff, Partout..._"
+        )
+
+    # Message de clôture codé en dur
+    def emploi_done_msg(self, name: str, emploi_type: str) -> str:
+        if emploi_type == "petit_job":
+            return (
+                f"✅ Profil enregistré *{name}* ! 🎉\n\n"
+                f"Je cherche des *petits jobs* près de chez toi 📍\n"
+                f"Tu seras notifié dès qu'une mission correspond !\n\n"
+                f"_Tape *petits jobs* pour voir les offres disponibles._"
+            )
+        if emploi_type == "entreprise":
+            return (
+                f"✅ Profil enregistré *{name}* ! 🎉\n\n"
+                f"Je vais te matcher avec des *offres d'entreprise* adaptées 💼\n"
+                f"Tu seras notifié dès qu'une offre correspond !"
+            )
+        return (
+            f"✅ Profil enregistré *{name}* ! 🎉\n\n"
+            f"Je te propose les deux types :\n"
+            f"💼 Offres d'entreprise  •  ⚡ Petits jobs\n\n"
+            f"Tu seras notifié selon les offres qui te correspondent !"
+        )
+
+    # ── Emploi — anciens helpers (conservés pour compatibilité) ───
 
     def ask_secteur_emploi(self, name: str) -> str:
         return (

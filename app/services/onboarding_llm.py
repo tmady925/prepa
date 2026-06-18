@@ -509,23 +509,49 @@ Adapte-toi à sa langue (français, wolof mélangé, abréviations — tout est 
 - Ne promets JAMAIS un emploi, un salaire, un délai, un résultat. Tu connectes, tu ne garantis rien.
 - Reste TOUJOURS sur le sujet emploi. Ne réponds à rien d'autre.
 
-━━━ DÉTECTION DU RÔLE (dès le 1er message) ━━━
-→ "demandeur" : cherche du travail
-→ "offreur"   : veut recruter / propose un job
-→ "les_deux"  : les deux
-→ null        : pas clair → pose une question directe pour trancher
+━━━ ORDRE DES QUESTIONS (demandeurs) ━━━
+1. Quel type de travail cherche-t-il ? (secteur_emploi) — 1ère question TOUJOURS
+2. Quel est son niveau d'études ? — sert à déduire emploi_type intelligemment
+3. Dans quelle ville/quartier ? (localisation)
+4. Durée souhaitée si ambigu (pour affiner emploi_type)
 
-Si "offreur" → confirme en UNE phrase courte → done=true.
+NE jamais demander frontalement "tu veux un petit job ou un poste en entreprise ?" → déduis-le.
+
+━━━ DÉDUCTION emploi_type INTELLIGENTE ━━━
+Basée sur le secteur + niveau_etudes + indices dans le message :
+
+  niveau aucun / bac  + secteur physique (livraison, manutention, vente, nettoyage, gardiennage,
+                         bricolage, déménagement, restauration, sécurité...)
+  → "petit_job"
+
+  niveau bac+2 et plus + secteur qualifié (informatique, finance, marketing, santé, droit,
+                          ingénierie, comptabilité, éducation, communication, RH...)
+  → "entreprise"
+
+  niveau bac+2 et plus + secteur physique, OU niveau bac/aucun + secteur qualifié,
+  OU l'user dit "les deux" / est ouvert aux deux types
+  → "les_deux"
+
+  indices "mission courte" / "journalier" / "vite" / "dépanner" → pousse vers "petit_job"
+  indices "CDI" / "poste" / "carrière" / "long terme" → pousse vers "entreprise"
+
+━━━ DÉTECTION DU RÔLE (en parallèle, depuis le contexte) ━━━
+→ "demandeur" : cherche du travail pour lui-même
+→ "offreur"   : veut recruter / propose un job à quelqu'un
+→ "les_deux"  : les deux
+→ null        : déduit du contexte — si clairement un chercheur d'emploi, mets "demandeur" sans demander
+
+Si "offreur" détecté → confirme en UNE phrase courte → done=true.
 
 ━━━ GESTION DE L'INATTENDU ━━━
-- Hors-sujet ("tu fais quoi ce soir ?") → recadre gentiment en 1 phrase, reviens à la question. N'extrais rien.
+- Hors-sujet → recadre gentiment en 1 phrase, reviens à la question. N'extrais rien.
 - Flou ("je sais pas") → propose 2 pistes simples sans forcer.
 - Message vide/non informatif ("ok", "hm", "bonjour") → relance la dernière question. N'extrais rien.
-- Multi-infos en une phrase → extrais tous les champs d'un coup, saute les questions déjà répondues.
+- Multi-infos → extrais tous les champs d'un coup, saute les questions déjà répondues.
 - Contradiction → garde la DERNIÈRE valeur donnée.
 
 ━━━ CHAMPS À EXTRAIRE (schéma STRICT) ━━━
-Mets null si l'info n'est pas donnée. N'invente jamais.
+Mets null si l'info n'est pas donnée dans CE message. N'invente jamais.
 {
   "role": "demandeur" | "offreur" | "les_deux" | null,
   "secteur_emploi": string | null,
@@ -535,12 +561,7 @@ Mets null si l'info n'est pas donnée. N'invente jamais.
   "emploi_type": "petit_job" | "entreprise" | "les_deux" | null
 }
 
-RÈGLE emploi_type (déduis-le, ne le demande pas frontalement) :
-- mission courte / journalier / "vite" / "dépanner" → "petit_job"
-- poste / CDI / carrière / long terme → "entreprise"
-- les deux ou ambigu → "les_deux"
-
-MINIMUM pour terminer (demandeur) : role + secteur_emploi + localisation + emploi_type.
+MINIMUM pour terminer (demandeur) : role + secteur_emploi + niveau_etudes + localisation + emploi_type.
 
 ━━━ FIN DE CONVERSATION ━━━
 done=true quand : minimum atteint, OU offreur confirmé, OU tours restants = 0.
@@ -555,10 +576,13 @@ Prénom : {name} | Pays : {pays} | Tours dispo : {max_turns}
 Génère le PREMIER message. RÈGLES ABSOLUES :
 - INTERDIT : toute salutation (Bonjour, Salut, Bonsoir, Hello...).
 - Commence par le prénom ou directement par la question.
-- UNE seule question, ouverte, courte, qui sert à détecter le rôle.
+- Demande ce qu'il cherche comme travail — c'est la 1ère question, toujours.
+- Ne demande PAS "tu cherches ou tu recrutes" — déduis le rôle depuis la réponse.
 - Ne promets rien.
 
-Exemple de ton : "{name}, tu cherches du travail ou tu veux recruter quelqu'un ?"
+Exemples de ton :
+  "{name}, t'es à la recherche de quel type de travail ?"
+  "{name}, tu cherches quoi comme boulot ?"
 
 FORMAT (JSON STRICT) :
 {{ "message": "...", "extracted": {{}}, "done": false }}"""
@@ -738,9 +762,14 @@ async def converse_emploi(
     if intent_confirmed:
         collected["intent_confirmed"] = True
 
-    # needs_cv : déduit en code depuis emploi_type, jamais depuis LLM
+    # needs_cv : déduit depuis emploi_type ; si emploi_type encore inconnu,
+    # on l'estime depuis niveau_etudes (bac+2 et plus → probablement entreprise)
     _et = collected.get("emploi_type")
-    needs_cv = _et in ("entreprise", "les_deux")
+    if _et:
+        needs_cv = _et in ("entreprise", "les_deux")
+    else:
+        _niv = (collected.get("niveau_etudes") or "").lower()
+        needs_cv = any(_niv.startswith(n) for n in ("bac+2", "bac+3", "bac+5", "doc"))
 
     turns += 1
     if turns >= MAX_TURNS:
@@ -754,6 +783,79 @@ async def converse_emploi(
         "intent": intent,
         "intent_confirmed": intent_confirmed,
         "turns": turns,
+    }
+
+
+# ─── Interpréteur LLM pour les étapes fixes emploi ──────────────────────────
+
+_INTERP_PROMPTS = {
+    "emploi_type": (
+        'Analyse ce message et détermine l\'intention emploi.\n\n'
+        'Message : "{text}"\n\n'
+        'Réponds UNIQUEMENT avec ce JSON :\n'
+        '{{"mapped_value": "petit_job"|"entreprise"|"les_deux"|"offreur"|null, '
+        '"guide_message": "..."|null}}\n\n'
+        'Règles :\n'
+        '- "petit_job" : missions courtes, journalier, livraison, manutention, vente, nettoyage...\n'
+        '- "entreprise" : poste, CDI, CDD, stage, bureau, carrière...\n'
+        '- "les_deux" : ouvert aux deux types\n'
+        '- "offreur" : c\'est LUI qui veut recruter quelqu\'un\n'
+        '- null : pas clair → guide_message = relance en 1 phrase sans salutation\n'
+        'guide_message = null si mapped_value trouvé, sinon une relance courte.'
+    ),
+    "secteur_petit_job": (
+        'Identifie le secteur petit job dans ce message.\n\n'
+        'Message : "{text}"\n\n'
+        'Secteurs valides : livraison, vente, nettoyage, manutention, gardiennage, restauration, bricolage\n\n'
+        'Réponds UNIQUEMENT avec ce JSON :\n'
+        '{{"mapped_value": "<secteur>"|null, "guide_message": "..."|null}}\n\n'
+        'Si clair → mapped_value = secteur exact. Si proche → secteur le plus logique.\n'
+        'Si vraiment trop flou → null + guide_message (1 phrase).'
+    ),
+    "secteur_entreprise": (
+        'Identifie le secteur entreprise dans ce message.\n\n'
+        'Message : "{text}"\n\n'
+        'Secteurs valides : informatique, finance, marketing, santé, btp, éducation, droit, rh\n\n'
+        'Réponds UNIQUEMENT avec ce JSON :\n'
+        '{{"mapped_value": "<secteur>"|null, "guide_message": "..."|null}}\n\n'
+        'Si clair → mapped_value = secteur exact. Si proche → secteur le plus logique.\n'
+        'Si trop flou → null + guide_message (1 phrase).'
+    ),
+    "niveau_etudes": (
+        'Identifie le niveau d\'études dans ce message.\n\n'
+        'Message : "{text}"\n\n'
+        'Valeurs valides : aucun, bac, bac+2, bac+3, bac+5, doctorat\n\n'
+        'Réponds UNIQUEMENT avec ce JSON :\n'
+        '{{"mapped_value": "<niveau>"|null, "guide_message": "..."|null}}'
+    ),
+    "localisation": (
+        'Normalise cette localisation pour l\'Afrique de l\'Ouest.\n\n'
+        'Message : "{text}"\n\n'
+        'Extrait juste la ville ou le quartier (ex: "dkr" → "Dakar", "Grand Yoff" → "Grand Yoff").\n'
+        'Si "partout" ou équivalent → "partout".\n'
+        'Si c\'est un secteur ou mot générique, pas une ville → null.\n\n'
+        'Réponds UNIQUEMENT avec ce JSON :\n'
+        '{{"mapped_value": "<ville_normalisée>"|null, "guide_message": "..."|null}}'
+    ),
+}
+
+
+async def interpret_emploi_step(step: str, text: str) -> dict:
+    """
+    Interprète un texte libre pour une étape fixe de l'onboarding emploi.
+    Retourne {"mapped_value": str|None, "guide_message": str|None}.
+    En cas d'échec LLM → mapped_value=None, guide_message=None (l'appelant gère le fallback).
+    """
+    prompt_tpl = _INTERP_PROMPTS.get(step)
+    if not prompt_tpl:
+        return {"mapped_value": None, "guide_message": None}
+    prompt = prompt_tpl.format(text=text)
+    result = await _call_llm_json(prompt)
+    if not result:
+        return {"mapped_value": None, "guide_message": None}
+    return {
+        "mapped_value": result.get("mapped_value"),
+        "guide_message": result.get("guide_message"),
     }
 
 

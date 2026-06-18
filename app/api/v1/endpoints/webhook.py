@@ -1184,20 +1184,36 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession, msg_t
         await db.flush()
 
         if not _result["done"]:
-            # Conversation en cours → envoyer la réponse du LLM et attendre
             await whatsapp_sender.send_text(phone, _result["message"])
             return
 
-        # ── Conversation terminée → passer au CV si nécessaire ──────────────
+        # ── Conversation terminée ────────────────────────────────────────────
         await whatsapp_sender.send_text(phone, _result["message"])
 
+        _intent = _result.get("intent")
+        _intent_confirmed = _result.get("intent_confirmed", False)
+
+        # Offreur confirmé → bypass profil candidat, lancer directement le post job
+        if _intent == "offreur" and _intent_confirmed:
+            user.usage = list(set((user.usage or []) + ["emploi"]))
+            user.onboarding_step = "done"
+            _conv_state["awaiting_petit_job_offer"] = True
+            user.conversation_state = _conv_state
+            await db.flush()
+            await whatsapp_sender.send_text(
+                phone,
+                "Décris le job que tu proposes en quelques mots :\n"
+                "_(type de travail, lieu, durée, rémunération...)_"
+            )
+            return
+
+        # Demandeur ou les_deux → compléter le profil candidat
         _needs_cv = _result["needs_cv"] or (_col.get("emploi_type") in ("entreprise", "les_deux"))
         if _needs_cv:
             user.onboarding_step = "emploi_cv"
             await db.flush()
             await whatsapp_sender.send_text(phone, messages.ask_cv_upload(user.name or "toi"))
         else:
-            # Petit job pur → pas besoin de CV, on finalise directement
             await _finalise_emploi(phone, user, db, editing=_editing, emploi_type_hint=_col.get("emploi_type"))
 
     elif step == "emploi_cv":
@@ -2267,6 +2283,33 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession, msg_t
 
             exercise_text = conv_state.get("exercise_text", "")
             await _do_free_correction(phone, user, db, image_bytes, exercise_text)
+            return
+
+        # ── Offreur en onboarding : réception de la description du job ──────────
+        conv_state = user.conversation_state or {}
+        if conv_state.get("awaiting_petit_job_offer") and msg_type == "text":
+            conv_state.pop("awaiting_petit_job_offer", None)
+            user.conversation_state = conv_state
+            await db.flush()
+            # Réutilise le même flow que post_job via bot_intelligence
+            from app.services.petit_job_service import petit_job_service as _pjs_ob
+            _draft_ob = await _pjs_ob.extract_from_text(text, user)
+            if _draft_ob:
+                conv_state["awaiting_petit_job_confirm"] = True
+                conv_state["petit_job_draft"] = _draft_ob
+                user.conversation_state = conv_state
+                await db.flush()
+                await whatsapp_sender.send_buttons(
+                    phone,
+                    messages.petit_job_confirm(_draft_ob, user.name or ""),
+                    messages.PETIT_JOB_CONFIRM_BUTTONS,
+                )
+            else:
+                await whatsapp_sender.send_text(
+                    phone,
+                    "Je n'ai pas bien compris. Décris le job : type de travail, lieu, durée et paie."
+                )
+            await user_service.increment_message_count(db, user)
             return
 
         # ── Confirmation petit job (état awaiting_petit_job_confirm) ──────────

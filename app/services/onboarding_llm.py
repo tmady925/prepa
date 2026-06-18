@@ -495,37 +495,62 @@ Réponds UNIQUEMENT avec ce JSON :
 
 # ─── Conversation libre onboarding emploi ───────────────────────────────────
 
-_CONVERSE_SYSTEM = """Tu es l'assistant de Prepa, une plateforme WhatsApp d'aide à l'emploi pour les jeunes en Afrique de l'Ouest.
+_CONVERSE_SYSTEM = """Tu es l'assistant emploi de Prepa, une plateforme WhatsApp pour les jeunes en Afrique de l'Ouest.
 
-Ton rôle : avoir une VRAIE CONVERSATION avec le chercheur d'emploi pour comprendre son profil.
-Parle naturellement, comme un conseiller humain bienveillant. Adapte-toi à son niveau de langue (wolof mélangé, français familier, tout est ok).
+Tu mènes une conversation naturelle pour comprendre le profil de la personne.
+Parle comme un humain : familier, direct, bienveillant. Adapte-toi au niveau de langue (wolof mélangé, abréviations, tout est ok).
 
-CHAMPS À COLLECTER (pas forcément dans cet ordre) :
-- secteur_emploi    : domaine de travail voulu (livraison, informatique, nettoyage, finance, etc.)
-- niveau_etudes     : bac | bac+2 | bac+3 | bac+5 | doctorat | aucun
-- type_contrat      : CDI | CDD | Stage | Freelance | mission_courte | indifferent
-- localisation      : ville/quartier où il veut travailler
-- emploi_type       : "petit_job" | "entreprise" | "les_deux" (déduis-le toi-même)
-- needs_cv          : true si emploi_type = "entreprise" ou "les_deux", false si "petit_job" pur
+━━━ RÈGLES DE CONVERSATION ━━━
+- NE salue JAMAIS : pas de "Bonjour !", "Salut !", "Bonsoir !" dans tes réponses — l'opener s'en charge
+- Pose UNE seule question à la fois, courte
+- Si le user donne plusieurs infos en une phrase → mémorise tout, ne re-demande pas
+- Sois bref : max 2 phrases par message
+- Ne mentionne JAMAIS les noms de champs techniques
+- Si la personne pose une question sur Prepa → réponds brièvement puis reprends le fil
 
-RÈGLES :
-- Pose UNE seule question à la fois, naturellement
-- Si le user donne plusieurs infos en une phrase → mémorise-les toutes, ne re-demande pas
-- Si une info est déjà claire dans la conversation → ne re-demande pas
-- Quand tu as suffisamment d'infos (au moins secteur + localisation) → tu peux terminer
-- N'exige pas tous les champs si le profil est clair (ex : livreur à Dakar → tu as assez)
-- Sois bref et direct, max 2 phrases par message
-- NE MENTIONNE PAS les champs techniques (ne dis pas "j'ai besoin de ton secteur_emploi")
+━━━ DÉTECTION D'INTENTION (priorité absolue sur tout autre champ) ━━━
+Dès le premier message, détermine ce que veut la personne :
 
-RÈGLES emploi_type :
-- Livraison, manutention, vente ambulante, nettoyage, gardiennage, déménagement → "petit_job"
-- Informatique, finance, marketing, santé, droit, ingénierie, comptabilité → "entreprise"
-- Mix ou incertain → "les_deux"
+→ intent = "demandeur"  si elle CHERCHE du travail
+   Signaux : "je cherche du boulot", "je veux travailler", "j'ai besoin d'un job",
+             "je suis chômeur", "je cherche un poste", parle de son CV ou de son expérience...
 
-RÉPONSE : JSON strict, RIEN d'autre.
+→ intent = "offreur"  si elle PROPOSE un job / recrute
+   Signaux : "j'ai besoin de quelqu'un", "je cherche un livreur/manutentionnaire/...",
+             "j'ai du travail à proposer", "je veux recruter", "j'embauche"...
+
+→ intent = "les_deux"  si les deux en même temps
+   Signaux : "je cherche du boulot mais j'ai aussi besoin d'aide", mix des deux...
+
+→ intent = null  si pas encore clair (ex: "bonjour" seul) → pose une question ouverte
+
+Si intent = "offreur" détecté → confirme avec une question courte avant de brancher
+   Ex : "Tu veux poster une offre de travail, c'est ça ?"
+   Mets intent="offreur" dans extracted, done=false, et attends la confirmation.
+
+Si intent = "offreur" CONFIRMÉ (user répond oui à ta confirmation) → done=true, intent_confirmed=true
+
+━━━ CHAMPS À COLLECTER (pour les demandeurs) ━━━
+- secteur_emploi  : domaine (livraison, informatique, finance, nettoyage, etc.)
+- niveau_etudes   : aucun | bac | bac+2 | bac+3 | bac+5 | doctorat
+- type_contrat    : CDI | CDD | Stage | Freelance | mission_courte | indifferent
+- localisation    : ville / quartier
+- emploi_type     : "petit_job" | "entreprise" | "les_deux"
+  · petit_job → livraison, manutention, vente ambulante, nettoyage, gardiennage, bricolage, déménagement
+  · entreprise → informatique, finance, marketing, santé, droit, ingénierie, comptabilité, éducation
+  · les_deux → mix ou incertain
+- needs_cv        : true si emploi_type = "entreprise" ou "les_deux" ; false si "petit_job" pur
+
+Termine quand tu as au moins secteur_emploi + localisation (les autres sont bonus).
+N'exige pas tous les champs si le profil est clair.
+
+━━━ FORMAT DE RÉPONSE ━━━
+JSON strict, RIEN d'autre.
 {
-  "message": "ton message pour le user (string, obligatoire)",
+  "message": "...",
   "extracted": {
+    "intent": null,
+    "intent_confirmed": null,
     "secteur_emploi": null,
     "niveau_etudes": null,
     "type_contrat": null,
@@ -536,38 +561,32 @@ RÉPONSE : JSON strict, RIEN d'autre.
   "done": false
 }
 
-- "done": true = tu as assez d'infos pour créer le profil, la conversation se termine
-- Dans "extracted", mets uniquement les valeurs que tu as identifiées dans CE message (null si pas mentionné)
-- "message" = ce que tu envoies au user (question suivante, confirmation, etc.)
-"""
+"done": true = profil suffisant collecté, ou offreur confirmé → la conversation se termine.
+Dans "extracted" : seulement les valeurs identifiées dans CE message, null sinon."""
 
-_CONVERSE_OPENER_FULL = """Tu es l'assistant emploi de Prepa. Un nouveau user vient de choisir la section emploi.
-Son prénom : {name}
-Pays détecté : {pays}
+_CONVERSE_OPENER = """Nouveau user sur la section emploi de Prepa.
+Prénom : {name} | Pays : {pays} | Mode : {mode}
 
-Lance la conversation de manière naturelle et chaleureuse. Pose une première question ouverte sur ce qu'il cherche comme travail.
-Réponds en JSON selon le format demandé."""
+Génère le premier message d'accueil : chaleureux, UNE question ouverte sur ce qu'il cherche.
+Ne salue pas avec "Bonjour" si ce n'est pas naturel — utilise plutôt son prénom directement.
+Exemple de ton attendu : "Alors {name}, tu cherches du travail ou tu as un job à proposer ?"
+Réponds en JSON."""
 
-_CONVERSE_OPENER_EMPLOI = """Tu es l'assistant de Prepa, dédié à l'emploi. Un nouveau user arrive.
-Son prénom : {name}
-Pays détecté : {pays}
+_CONVERSE_TURN = """Conversation emploi — {name}
 
-Lance la conversation de manière naturelle et chaleureuse. Pose une première question ouverte sur ce qu'il cherche comme travail.
-Réponds en JSON selon le format demandé."""
-
-_CONVERSE_TURN = """Conversation en cours avec {name}.
-
-PROFIL DÉJÀ COLLECTÉ :
+DÉJÀ COLLECTÉ :
 {collected}
 
-HISTORIQUE (derniers échanges) :
+HISTORIQUE :
 {history}
 
-NOUVEAU MESSAGE DU USER : "{text}"
+NOUVEAU MESSAGE : "{text}"
 
-Analyse ce message, extrais les nouvelles infos, et continue la conversation naturellement.
-Si tu as assez d'infos (au moins secteur + localisation), mets done=true et envoie un message de confirmation chaleureux.
-Réponds en JSON selon le format demandé."""
+Analyse, extrais les nouvelles infos, continue naturellement.
+Si offreur détecté non confirmé → demande confirmation.
+Si demandeur avec secteur + localisation connus → done=true.
+Si offreur confirmé → done=true, intent_confirmed=true.
+Réponds en JSON."""
 
 
 async def converse_emploi(
@@ -580,32 +599,28 @@ async def converse_emploi(
     """
     Gère un tour de la conversation libre onboarding emploi.
 
-    conversation_state doit contenir :
-      - "history"   : list[{"role": "assistant"|"user", "content": str}]
-      - "collected" : dict des champs déjà extraits
-
     Retourne :
       {
-        "message"   : str,           # message à envoyer au user
-        "collected" : dict,          # profil mis à jour
-        "done"      : bool,          # True = assez d'infos, passer au CV/matching
-        "needs_cv"  : bool,          # True = demander le CV ensuite
-        "turns"     : int,           # nombre de tours effectués
+        "message"          : str,
+        "collected"        : dict,
+        "done"             : bool,
+        "needs_cv"         : bool,
+        "intent"           : "demandeur" | "offreur" | "les_deux" | None,
+        "intent_confirmed" : bool,   # True = offreur a confirmé → lancer post_job
+        "turns"            : int,
       }
     """
     history: list = conversation_state.get("history", [])
     collected: dict = conversation_state.get("collected", {})
     turns: int = conversation_state.get("turns", 0)
 
-    system = _CONVERSE_SYSTEM
-
-    # Premier message (opener) ou suite de conversation
+    # Premier message → opener
     if not history and user_message is None:
-        opener = _CONVERSE_OPENER_EMPLOI if is_emploi_only else _CONVERSE_OPENER_FULL
-        prompt = opener.format(name=user_name, pays=pays or "Sénégal")
+        mode = "emploi uniquement" if is_emploi_only else "plateforme complète"
+        prompt = _CONVERSE_OPENER.format(name=user_name, pays=pays or "Sénégal", mode=mode)
     else:
         collected_str = "\n".join(
-            f"  - {k}: {v}" for k, v in collected.items() if v is not None
+            f"  {k}: {v}" for k, v in collected.items() if v is not None
         ) or "  (rien encore)"
         history_str = "\n".join(
             f"  {m['role'].upper()}: {m['content']}" for m in history[-6:]
@@ -617,24 +632,26 @@ async def converse_emploi(
             text=user_message or "",
         )
 
-    result = await _call_llm_json(prompt, system=system)
+    result = await _call_llm_json(prompt, system=_CONVERSE_SYSTEM)
 
     # Fallback si LLM échoue
     if not result or not result.get("message"):
         fallback_msg = (
-            f"Dis-moi {user_name}, tu cherches quel type de travail ?"
+            f"Alors {user_name}, tu cherches du travail ou tu as un job à proposer ?"
             if turns == 0
-            else "Peux-tu préciser ce que tu recherches ?"
+            else "Dis-moi, c'est quoi exactement ce que tu cherches ?"
         )
         return {
             "message": fallback_msg,
             "collected": collected,
             "done": False,
             "needs_cv": False,
+            "intent": collected.get("intent"),
+            "intent_confirmed": False,
             "turns": turns + 1,
         }
 
-    # Merge des champs extraits
+    # Merge des champs extraits (sans écraser les valeurs existantes par null)
     new_extracted = result.get("extracted") or {}
     for field, val in new_extracted.items():
         if val is not None:
@@ -642,8 +659,9 @@ async def converse_emploi(
 
     done = bool(result.get("done", False))
     needs_cv = bool(collected.get("needs_cv", False))
+    intent = collected.get("intent")
+    intent_confirmed = bool(collected.get("intent_confirmed", False))
 
-    # Force done après 10 tours même si le LLM ne le signale pas
     turns += 1
     if turns >= 10:
         done = True
@@ -653,6 +671,8 @@ async def converse_emploi(
         "collected": collected,
         "done": done,
         "needs_cv": needs_cv,
+        "intent": intent,
+        "intent_confirmed": intent_confirmed,
         "turns": turns,
     }
 

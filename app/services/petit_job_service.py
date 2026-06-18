@@ -131,44 +131,121 @@ class PetitJobService:
 
         return jobs
 
-    async def notify_candidates(self, db: AsyncSession, job: PetitJob) -> int:
-        """Notifie les candidats emploi dont la localisation correspond."""
-        from app.services.whatsapp.sender import whatsapp_sender
-        from app.services.queue_service import send_or_queue
+    # ── Scoring ────────────────────────────────────────────────────────────────
 
-        stmt = select(User).where(
-            User.status == "active",
-            User.onboarding_step == "done",
-            User.id != job.employeur_user_id,
-        )
-        result = await db.execute(stmt)
-        candidates = result.scalars().all()
+    # Correspondances type_travail → secteurs emploi (pour le score type)
+    _TYPE_TO_SECTEURS: dict[str, list[str]] = {
+        "livraison":      ["Informatique/Tech", "Marketing/Communication"],
+        "manutention":    ["BTP/Ingénierie"],
+        "vente":          ["Marketing/Communication", "Finance/Comptabilité"],
+        "événementiel":   ["Marketing/Communication"],
+        "nettoyage":      [],
+        "gardiennage":    [],
+        "autre":          [],
+    }
 
-        # Filtre par localisation si disponible
-        if job.lieu:
-            job_lieu = job.lieu.lower()
-            matched = [
-                u for u in candidates
-                if getattr(u, "localisation_emploi", None)
-                and (job_lieu in u.localisation_emploi.lower()
-                     or u.localisation_emploi.lower() in job_lieu)
-            ]
-            # Si aucun match géo → notifie tous (première itération)
-            targets = matched if matched else candidates
+    def _score_candidate(
+        self,
+        job: "PetitJob",
+        user: User,
+        emploi_type: str | None,
+    ) -> float:
+        """
+        Score 0–100 d'un candidat pour un petit job.
+        Pondération :
+          - emploi_type preference : 30 pts
+          - correspondance géographique  : 40 pts
+          - correspondance type_travail  : 30 pts
+        """
+        score = 0.0
+
+        # ── 1. emploi_type preference (30 pts) ──────────────────────────────
+        if emploi_type == "petit_job":
+            score += 30
+        elif emploi_type == "les_deux":
+            score += 20
+        elif emploi_type == "entreprise":
+            return 0.0  # exclusion stricte — candidat orienté entreprise
         else:
-            targets = candidates
+            score += 10  # pas encore déterminé → partiel
 
-        # Filtre sur usage emploi
-        def _has_emploi(u) -> bool:
-            usage = u.usage or []
+        # ── 2. Géolocalisation (40 pts) ─────────────────────────────────────
+        user_loc = (getattr(user, "localisation_emploi", None) or "").lower().strip()
+        job_loc = (job.lieu or "").lower().strip()
+
+        if not user_loc or not job_loc:
+            score += 15  # info manquante → partiel
+        elif user_loc in job_loc or job_loc in user_loc:
+            score += 40  # match exact
+        else:
+            # Essaie une correspondance partielle (ex: "Dakar" dans "Dakar Plateau")
+            user_words = set(user_loc.split())
+            job_words = set(job_loc.split())
+            if user_words & job_words:
+                score += 25
+            else:
+                return 0.0  # villes différentes → n'envoie pas
+
+        # ── 3. Type de travail vs secteur (30 pts) ──────────────────────────
+        job_type = (job.type_travail or "").lower()
+        user_secteurs = getattr(user, "secteur_emploi", None) or []
+        if isinstance(user_secteurs, str):
+            user_secteurs = [user_secteurs]
+        user_secteurs_lower = [s.lower() for s in user_secteurs]
+
+        # Match direct : si le user travaille dans un secteur lié à ce type de job
+        related_sectors = [s.lower() for s in self._TYPE_TO_SECTEURS.get(job_type, [])]
+        if related_sectors:
+            if any(s in " ".join(user_secteurs_lower) for s in related_sectors):
+                score += 30
+            else:
+                score += 10
+        else:
+            # Pas d'info secteur ou type inconnu → partiel
+            score += 15
+
+        return score
+
+    async def notify_candidates(self, db: AsyncSession, job: PetitJob) -> int:
+        """
+        Notifie les candidats par score décroissant.
+        Score = géo (40%) + emploi_type (30%) + type_travail (30%).
+        Les candidats 'entreprise' stricts sont exclus.
+        """
+        from app.services.queue_service import send_or_queue
+        from app.models.candidate_profile import CandidateProfile
+
+        # Charge candidats + leurs profils en une seule requête
+        stmt = (
+            select(User, CandidateProfile)
+            .outerjoin(CandidateProfile, User.id == CandidateProfile.user_id)
+            .where(
+                User.status == "active",
+                User.onboarding_step == "done",
+                User.id != job.employeur_user_id,
+            )
+        )
+        rows = (await db.execute(stmt)).all()
+
+        # Filtre usage emploi + calcule le score
+        scored: list[tuple[float, User]] = []
+        for user, profile in rows:
+            usage = user.usage or []
             if isinstance(usage, str):
                 usage = [usage]
-            return "emploi" in usage or "tout" in usage
+            if "emploi" not in usage and "tout" not in usage:
+                continue
 
-        targets = [u for u in targets if _has_emploi(u)]
+            emploi_type = getattr(profile, "emploi_type", None) if profile else None
+            s = self._score_candidate(job, user, emploi_type)
+            if s > 0:
+                scored.append((s, user))
+
+        # Tri par score décroissant
+        scored.sort(key=lambda x: x[0], reverse=True)
 
         nb_sent = 0
-        for candidate in targets[:200]:  # cap sécurité
+        for s, candidate in scored[:200]:
             try:
                 msg = self._build_notification(job, candidate)
                 await send_or_queue(db, candidate, msg)
@@ -176,10 +253,9 @@ class PetitJobService:
             except Exception as e:
                 print(f"  [petit_job] notify {candidate.phone_number}: {e}")
 
-        # Met à jour le compteur
         job.nb_candidats_notifies = nb_sent
         await db.flush()
-
+        print(f"  [petit_job] {nb_sent} candidats notifiés pour '{job.titre}'")
         return nb_sent
 
     def _build_notification(self, job: PetitJob, user: User) -> str:

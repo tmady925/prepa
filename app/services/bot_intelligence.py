@@ -132,6 +132,13 @@ RÈGLES :
 - Ton message doit être formaté pour WhatsApp (gras avec *, listes avec -)
 - Sois bienveillant, chaleureux, concret, adapté à un jeune africain
 - confidence entre 0.0 et 1.0
+
+ROUTING EMPLOI INTELLIGENT (utilise PRÉFÉRENCE EMPLOI si disponible dans le contexte) :
+- PRÉFÉRENCE "Petits jobs"         → orienter d'abord vers show_petit_jobs avant show_jobs
+- PRÉFÉRENCE "Offres d'entreprise" → orienter vers show_jobs ; ne pas proposer show_petit_jobs sauf si demande explicite
+- PRÉFÉRENCE "Les deux"            → proposer selon la nature de la demande
+- Signaux urgence ("vite", "urgent", "disponible maintenant") → show_petit_jobs
+- Signaux carrière ("CDI", "poste", "long terme") → show_jobs
 """
 
 # ─── System prompt ────────────────────────────────────────────────────────────
@@ -172,6 +179,13 @@ RÈGLES :
 - Ton message doit être formaté pour WhatsApp (gras avec *, listes avec -)
 - Sois bienveillant, chaleureux, adapté à un jeune africain
 - confidence entre 0.0 et 1.0 selon ta certitude
+
+ROUTING EMPLOI INTELLIGENT (utilise PRÉFÉRENCE EMPLOI si disponible dans le contexte) :
+- PRÉFÉRENCE "Petits jobs"         → orienter d'abord vers show_petit_jobs avant show_jobs
+- PRÉFÉRENCE "Offres d'entreprise" → orienter vers show_jobs ; ne pas proposer show_petit_jobs sauf si demande explicite
+- PRÉFÉRENCE "Les deux"            → proposer les deux selon la nature de la demande
+- Signaux urgence ("besoin vite", "urgent", "disponible maintenant") → show_petit_jobs
+- Signaux carrière ("CDI", "poste", "long terme", "salaire mensuel") → show_jobs
 """
 
 
@@ -234,6 +248,25 @@ async def build_user_context(user, db=None) -> str:
             ctx_parts.append(f"QUOTA : Plan Pro — pas de limite journalière")
     except Exception:
         pass
+
+    # ── Type d'emploi préféré ─────────────────────────────────────────────────
+    if db:
+        try:
+            from sqlalchemy import select as _sel_cp
+            from app.models.candidate_profile import CandidateProfile as _CP
+            _cp_res = await db.execute(
+                _sel_cp(_CP).where(_CP.user_id == user.id)
+            )
+            _cp = _cp_res.scalar_one_or_none()
+            if _cp and _cp.emploi_type:
+                _label = {
+                    "petit_job":  "Petits jobs / missions ponctuelles",
+                    "entreprise": "Offres d'entreprise (CDI/CDD/Stage)",
+                    "les_deux":   "Les deux (petits jobs et offres d'entreprise)",
+                }.get(_cp.emploi_type, _cp.emploi_type)
+                ctx_parts.append(f"PRÉFÉRENCE EMPLOI : {_label}")
+        except Exception as e:
+            print(f"  [bot_intelligence] emploi_type context error: {e}")
 
     # ── Offres d'emploi matchées ──────────────────────────────────────────────
     if db:

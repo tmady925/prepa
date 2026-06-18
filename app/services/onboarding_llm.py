@@ -412,6 +412,82 @@ def _fallback() -> dict:
     return {"action": "proceed", "value": None, "message": None, "stay": False}
 
 
+# ─── Déduction emploi_type ────────────────────────────────────────────────────
+
+_EMPLOI_TYPE_SIGNALS = {
+    "petit_job": [
+        "manutention", "nettoyage", "gardiennage", "livraison", "vente ambulante",
+        "agent de sécurité", "bricolage", "déménagement", "plomberie",
+        "électricité", "peinture", "restauration rapide",
+    ],
+    "entreprise": [
+        "informatique", "finance", "comptabilité", "marketing", "communication",
+        "droit", "juridique", "ingénierie", "btp", "santé", "éducation",
+    ],
+}
+
+_NIVEAU_TO_TYPE = {
+    "bac": "les_deux",
+    "bac+2": "les_deux",
+    "bac+3": "entreprise",
+    "bac+5": "entreprise",
+    "doctorat": "entreprise",
+}
+
+
+async def infer_emploi_type(user) -> str:
+    """
+    Déduit le type d'emploi préféré depuis le profil collecté.
+    Retourne : "petit_job" | "entreprise" | "les_deux"
+
+    Appel LLM avec fallback heuristique si LLM échoue.
+    """
+    niveau = (getattr(user, "niveau_etudes", None) or "").lower()
+    secteurs = getattr(user, "secteur_emploi", None) or []
+    if isinstance(secteurs, str):
+        secteurs = [secteurs]
+    contrat = (getattr(user, "type_contrat_souhaite", None) or "").lower()
+    localisation = getattr(user, "localisation_emploi", None) or ""
+
+    secteurs_str = ", ".join(secteurs).lower() if secteurs else "non défini"
+
+    prompt = f"""Profil d'un chercheur d'emploi en Afrique de l'Ouest :
+- Niveau d'études : {niveau or 'non défini'}
+- Secteurs d'intérêt : {secteurs_str}
+- Type de contrat souhaité : {contrat or 'non défini'}
+- Localisation : {localisation or 'non définie'}
+
+Ce chercheur correspond-il mieux à :
+- "petit_job"   : missions courtes, travail ponctuel, revenus rapides (livraison, gardiennage, manutention…)
+- "entreprise"  : poste salarié structuré (CDI/CDD/Stage dans une entreprise)
+- "les_deux"    : profil mixte ou pas d'indication claire
+
+Réponds UNIQUEMENT avec ce JSON :
+{{"emploi_type": "petit_job" | "entreprise" | "les_deux"}}"""
+
+    try:
+        result = await _call_llm_json(prompt)
+        if result and result.get("emploi_type") in ("petit_job", "entreprise", "les_deux"):
+            return result["emploi_type"]
+    except Exception as e:
+        print(f"  [infer_emploi_type] LLM error: {e}")
+
+    # Heuristique de secours
+    secteurs_concat = secteurs_str
+    has_petit_signal = any(s in secteurs_concat for s in _EMPLOI_TYPE_SIGNALS["petit_job"])
+    has_entreprise_signal = any(s in secteurs_concat for s in _EMPLOI_TYPE_SIGNALS["entreprise"])
+
+    if has_petit_signal and not has_entreprise_signal:
+        return "petit_job"
+    if has_entreprise_signal and not has_petit_signal:
+        if contrat in ("cdi", "cdd", "stage"):
+            return "entreprise"
+    if niveau in _NIVEAU_TO_TYPE:
+        return _NIVEAU_TO_TYPE[niveau]
+
+    return "les_deux"
+
+
 # ─── Helper : faut-il activer le LLM pour cette étape ? ──────────────────────
 
 def should_analyze(step: str, text: str) -> bool:

@@ -42,6 +42,10 @@ class CandidateProfile(Base, TimestampMixin):
     nb_notifs_semaine: Mapped[int] = mapped_column(Integer, default=0)
     last_notif_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
+    # Type d'emploi préféré — déduit par LLM à la fin de l'onboarding
+    # "petit_job" | "entreprise" | "les_deux"
+    emploi_type: Mapped[str | None] = mapped_column(String(20), nullable=True, index=True)
+
 
 class JobMatch(Base):
     __tablename__ = "job_matches"

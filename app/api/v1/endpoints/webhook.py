@@ -1155,6 +1155,22 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession, msg_t
                     f"• Recevoir des offres d'emploi adaptées 💼\n\n"
                     f"Merci de patienter pendant le matching !"
                 )
+            # ── Déduction intelligente du type d'emploi préféré ──────────────
+            try:
+                from app.services.onboarding_llm import infer_emploi_type as _infer_et
+                from app.models.candidate_profile import CandidateProfile as _CP_et
+                from sqlalchemy import select as _sel_et
+                _et = await _infer_et(user)
+                _cp_et = (await db.execute(
+                    _sel_et(_CP_et).where(_CP_et.user_id == user.id)
+                )).scalar_one_or_none()
+                if _cp_et:
+                    _cp_et.emploi_type = _et
+                    await db.flush()
+                print(f"  [emploi_type] user={user.id} → {_et}")
+            except Exception as _et_err:
+                print(f"  [emploi_type] erreur ignorée: {_et_err}")
+
             # Lance le matching dans tous les cas
             try:
                 from app.services.matching_service import matching_service

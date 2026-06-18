@@ -11,8 +11,9 @@ class Messages:
 
     WELCOME = (
         "👋 Bienvenue sur *Prepa* !\n\n"
-        "Ton assistant personnel pour réussir tes études et ta carrière. "
-        "Je vais t'accompagner dans tes révisions, tes concours et ta recherche d'emploi.\n\n"
+        "Ton assistant personnel pour ta *recherche d'emploi* et ta carrière. "
+        "Je vais t'aider à trouver des offres adaptées à ton profil, "
+        "à préparer ton CV et tes entretiens.\n\n"
         "Pour commencer — *comment tu t'appelles ?*"
     )
 
@@ -50,12 +51,8 @@ class Messages:
         )
 
     USAGE_BUTTONS = [
-        {"id": "usage_etudes", "title": "🎓 Préparer mon examen"},
-        {"id": "usage_concours", "title": "🏆 Préparer un concours"},
         {"id": "usage_emploi", "title": "💼 Trouver un emploi"},
     ]
-
-    USAGE_TOUT_BUTTON = {"id": "usage_tout", "title": "🎯 Tout à la fois"}
 
     # ── Concours ───────────────────────────────────────────────────
 
@@ -279,47 +276,20 @@ class Messages:
     # ── Profil complet ──────────────────────────────────────────────
 
     def profil_complet(self, user) -> str:
-        usage = user.usage or []
-        if isinstance(usage, str):
-            usage = [usage]
-
         msg = f"📊 *Ton profil, {user.name}*\n\n"
-
-        if "etudes" in usage or "tout" in usage:
-            msg += "🎓 *ÉTUDES*\n"
-            msg += f"Examen : {user.exam_type or 'Non défini'}"
-            if user.series:
-                msg += f" — {user.series}"
-            msg += "\n"
-            if user.subjects:
-                msg += f"Matières : {', '.join(user.subjects)}\n"
-            if user.exam_date:
-                msg += f"Date : {user.exam_date.strftime('%d/%m/%Y')}\n"
-            msg += "\n"
-
-        if "concours" in usage or "tout" in usage:
-            conv = user.conversation_state or {}
-            msg += "🏆 *CONCOURS*\n"
-            concours = conv.get("concours_cible") or "Non défini"
-            msg += f"Concours : {concours}\n\n"
-
-        if "emploi" in usage or "tout" in usage:
-            msg += "💼 *EMPLOI*\n"
-            if user.secteur_emploi:
-                msg += f"Secteur : {', '.join(user.secteur_emploi)}\n"
-            if user.niveau_etudes:
-                msg += f"Niveau : {user.niveau_etudes}\n"
-            if user.type_contrat_souhaite:
-                msg += f"Contrat : {user.type_contrat_souhaite}\n"
-            if user.localisation_emploi:
-                msg += f"Localisation : {user.localisation_emploi}\n"
-            msg += "\n"
-
-        msg += "*Que veux-tu modifier ?*\n"
+        msg += "💼 *EMPLOI*\n"
+        if user.secteur_emploi:
+            msg += f"Secteur : {', '.join(user.secteur_emploi)}\n"
+        if user.niveau_etudes:
+            msg += f"Niveau : {user.niveau_etudes}\n"
+        if user.type_contrat_souhaite:
+            msg += f"Contrat : {user.type_contrat_souhaite}\n"
+        if user.localisation_emploi:
+            msg += f"Localisation : {user.localisation_emploi}\n"
+        msg += "\n*Que veux-tu modifier ?*\n"
         return msg
 
     PROFIL_EDIT_BUTTONS = [
-        {"id": "edit_etudes", "title": "✏️ Mes infos études"},
         {"id": "edit_emploi", "title": "💼 Mon profil emploi"},
     ]
 

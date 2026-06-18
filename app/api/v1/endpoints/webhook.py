@@ -10,8 +10,6 @@ from app.services.whatsapp.sender import whatsapp_sender
 from app.services.whatsapp.messages import messages
 from app.services.llm.service import call_llm
 from app.repositories.message_repository import message_repo
-from app.services.media_processor import media_processor
-from app.services.storage_service import storage_service
 from app.services.config_service import config_service
 from app.db.redis import get_redis
 from app.models.user import User as UserModel

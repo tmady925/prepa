@@ -360,10 +360,13 @@ class Messages:
         """
         msg = f"⭐ *Passe Prepa Pro, {name} !*\n\n"
         msg += self._pro_benefits_intro(context) + "\n\n"
-        msg += (
-            "✨ *500 FCFA/mois* débloquent l'accès *illimité à TOUT* :\n"
-            "📚 Études · 🏆 Concours · 💼 Emploi\n\n"
-        )
+        if context == "emploi":
+            msg += "✨ *500 FCFA/mois* pour des offres d'emploi *illimitées* 💼\n\n"
+        else:
+            msg += (
+                "✨ *500 FCFA/mois* débloquent l'accès *illimité à TOUT* :\n"
+                "📚 Études · 🏆 Concours · 💼 Emploi\n\n"
+            )
         if payment_url:
             msg += f"👉 Paie en ligne ici :\n{payment_url}\n\n"
             msg += "_Paiement sécurisé via Wave, Orange Money ou Free Money 🔒_"
@@ -401,15 +404,20 @@ class Messages:
     # ── Quota ─────────────────────────────────────────────────────
 
     def quota_reached(self, name: str, context: str = "etudes") -> str:
-        if context == "concours":
+        if context == "emploi":
+            intro = f"Tu as atteint ta limite d'offres de la semaine *{name}* 💼"
+            pro_line = "⭐ *Passer Pro* → offres d'emploi *illimitées* pour *500 FCFA/mois*"
+        elif context == "concours":
             intro = f"Tu as utilisé tes 10 messages du jour pour ta prépa concours *{name}* 🏆"
+            pro_line = "⭐ *Passer Pro* → *tout en illimité* (études · concours · emploi) pour *500 FCFA/mois*"
         else:
             intro = f"Tu as utilisé tous tes messages du jour *{name}* 🎯"
+            pro_line = "⭐ *Passer Pro* → *tout en illimité* (études · concours · emploi) pour *500 FCFA/mois*"
         return (
             f"{intro}\n\n"
             "Pour continuer aujourd'hui :\n\n"
             "📤 *Inviter des amis* → +20 messages & +1 offre emploi/semaine par ami actif\n"
-            "⭐ *Passer Pro* → *tout en illimité* (études · concours · emploi) pour *500 FCFA/mois*"
+            f"{pro_line}"
         )
 
     QUOTA_BUTTONS = [
@@ -522,6 +530,63 @@ class Messages:
             f"jusqu'à la fin de ton abonnement.\n\n"
             f"Tape */progression* pour voir tes stats."
         )
+
+    # ── Petit Job ─────────────────────────────────────────────────
+
+    PETIT_JOB_CONFIRM_BUTTONS = [
+        {"id": "petit_job_oui", "title": "✅ Confirmer"},
+        {"id": "petit_job_non", "title": "❌ Annuler"},
+    ]
+
+    def petit_job_confirm(self, draft: dict, name: str) -> str:
+        lines = [f"📝 *Confirme ton annonce, {name}* :\n"]
+        lines.append(f"*{draft.get('titre', 'Petit job')}*")
+        if draft.get("type_travail"):
+            lines.append(f"📋 Type : {draft['type_travail'].title()}")
+        if draft.get("lieu"):
+            lines.append(f"📍 Lieu : {draft['lieu']}")
+        if draft.get("date_debut_str"):
+            lines.append(f"📅 Quand : {draft['date_debut_str']}")
+        if draft.get("duree"):
+            lines.append(f"⏱ Durée : {draft['duree']}")
+        if draft.get("remuneration"):
+            lines.append(f"💰 Paie : {draft['remuneration']}")
+        nb = int(draft.get("nb_postes") or 1)
+        if nb > 1:
+            lines.append(f"👥 Postes : {nb}")
+        lines.append("\nJe vais notifier les candidats disponibles !")
+        return "\n".join(lines)
+
+    def petit_job_posted(self, titre: str, nb_notified: int) -> str:
+        notif = f"*{nb_notified} candidat(s)* notifié(s)" if nb_notified else "les candidats seront notifiés"
+        return (
+            f"✅ *Annonce publiée !*\n\n"
+            f"*{titre}*\n\n"
+            f"{notif} dans ta zone.\n\n"
+            f"_L'annonce expire dans 72h. Tape *petits jobs* pour voir tes annonces._"
+        )
+
+    def petit_job_cancelled(self, name: str) -> str:
+        return f"❌ Annonce annulée *{name}*. Tape *j'ai besoin de quelqu'un* quand tu veux réessayer."
+
+    def petit_job_list(self, jobs: list, name: str) -> str:
+        if not jobs:
+            return (
+                f"🔍 Aucun petit job disponible près de toi pour l'instant *{name}* !\n\n"
+                "_Je te notifie dès qu'une opportunité apparaît dans ta zone. 💼_"
+            )
+        msg = f"💼 *Petits jobs disponibles, {name}* :\n\n"
+        for job in jobs[:5]:
+            msg += f"*{job.titre}*\n"
+            if job.lieu:
+                msg += f"  📍 {job.lieu}\n"
+            if job.date_debut_str:
+                msg += f"  📅 {job.date_debut_str}\n"
+            if job.remuneration:
+                msg += f"  💰 {job.remuneration}\n"
+            msg += "\n"
+        msg += "_Tape *je suis intéressé* sous l'annonce qui t'intéresse pour être mis en contact._"
+        return msg
 
     # ── Erreurs ───────────────────────────────────────────────────
 

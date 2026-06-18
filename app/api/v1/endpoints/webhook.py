@@ -174,6 +174,13 @@ def detect_command(text: str) -> str | None:
         "add_concours": "add_concours",
         "confirm_new_service": "confirm_new_service",
         "ignore_service": "ignore_service",
+        "petits jobs": "petits_jobs",
+        "petit job": "petits_jobs",
+        "mes petits jobs": "petits_jobs",
+        "les petits jobs": "petits_jobs",
+        "petits_jobs": "petits_jobs",
+        "petit_job_oui": "petit_job_oui",
+        "petit_job_non": "petit_job_non",
     }
     return commands.get(text.lower().strip())
 
@@ -307,15 +314,27 @@ async def handle_command(command: str, phone: str, user, db: AsyncSession):
         if usage:
             msg = messages.profil_complet(user)
             has = lambda k: (k in usage) or ("tout" in usage)
-            # Menu dynamique : "Modifier" si déjà actif, "Ajouter" sinon
-            buttons = [
-                {"id": "edit_etudes",  "title": "✏️ Mes études"} if has("etudes")
-                else {"id": "add_etudes",  "title": "🎓 Ajouter études"},
-                {"id": "edit_emploi",  "title": "💼 Mon profil emploi"} if has("emploi")
-                else {"id": "add_emploi",  "title": "💼 Ajouter emploi"},
-                {"id": "edit_concours", "title": "🏆 Mon concours"} if has("concours")
-                else {"id": "add_concours", "title": "🏆 Ajouter concours"},
-            ]
+            # En mode emploi-only, seul le profil emploi est modifiable
+            _eo_profil = False
+            try:
+                from app.services.platform_mode import is_emploi_only as _eo_p
+                _eo_profil = await _eo_p()
+            except Exception:
+                pass
+            if _eo_profil:
+                buttons = [
+                    {"id": "edit_emploi", "title": "💼 Mon profil emploi"},
+                ]
+            else:
+                # Menu dynamique : "Modifier" si déjà actif, "Ajouter" sinon
+                buttons = [
+                    {"id": "edit_etudes",  "title": "✏️ Mes études"} if has("etudes")
+                    else {"id": "add_etudes",  "title": "🎓 Ajouter études"},
+                    {"id": "edit_emploi",  "title": "💼 Mon profil emploi"} if has("emploi")
+                    else {"id": "add_emploi",  "title": "💼 Ajouter emploi"},
+                    {"id": "edit_concours", "title": "🏆 Mon concours"} if has("concours")
+                    else {"id": "add_concours", "title": "🏆 Ajouter concours"},
+                ]
             # Mémorise le menu pour interpréter les réponses "1/2/3"
             conv = user.conversation_state or {}
             conv["pending_menu"] = "profil"
@@ -353,6 +372,15 @@ async def handle_command(command: str, phone: str, user, db: AsyncSession):
                 await whatsapp_sender.send_text(phone, msg)
 
     elif command in ("edit_etudes", "add_etudes"):
+        try:
+            from app.services.platform_mode import is_emploi_only as _eo_et
+            if await _eo_et():
+                await whatsapp_sender.send_text(
+                    phone, "💼 Cette option n'est pas disponible en mode emploi."
+                )
+                return
+        except Exception:
+            pass
         _set_editing(user, "etudes")
         user.onboarding_step = "exam"
         await db.flush()
@@ -365,6 +393,15 @@ async def handle_command(command: str, phone: str, user, db: AsyncSession):
         await whatsapp_sender.send_text(phone, messages.ask_secteur_emploi(user.name or "toi"))
 
     elif command in ("add_concours", "edit_concours"):
+        try:
+            from app.services.platform_mode import is_emploi_only as _eo_co
+            if await _eo_co():
+                await whatsapp_sender.send_text(
+                    phone, "💼 Cette option n'est pas disponible en mode emploi."
+                )
+                return
+        except Exception:
+            pass
         _set_editing(user, "concours")
         user.onboarding_step = "type_concours"
         await db.flush()
@@ -476,6 +513,37 @@ async def handle_command(command: str, phone: str, user, db: AsyncSession):
             await whatsapp_sender.send_text(phone, messages.plan_message_pro(user))
         else:
             await _send_pro_offer(phone, user, _usage_context(user))
+
+    elif command == "petits_jobs":
+        try:
+            from app.services.petit_job_service import petit_job_service as _pjs
+            _jobs = await _pjs.list_active(db, lieu=getattr(user, "localisation_emploi", None))
+            await whatsapp_sender.send_text(phone, messages.petit_job_list(_jobs, user.name or ""))
+        except Exception as _e:
+            print(f"  [petits_jobs] erreur: {_e}")
+            await whatsapp_sender.send_text(phone, "❌ Impossible de charger les petits jobs. Réessaie.")
+
+    elif command == "petit_job_oui":
+        conv = user.conversation_state or {}
+        if not conv.get("awaiting_petit_job_confirm"):
+            return
+        draft = conv.get("petit_job_draft", {})
+        try:
+            from app.services.petit_job_service import petit_job_service as _pjs
+            _job = await _pjs.create(db, user.id, draft)
+            _nb = await _pjs.notify_candidates(db, _job)
+            await db.commit()
+            user.conversation_state = {}
+            await db.flush()
+            await whatsapp_sender.send_text(phone, messages.petit_job_posted(_job.titre, _nb))
+        except Exception as _e:
+            print(f"  [petit_job_oui] erreur: {_e}")
+            await whatsapp_sender.send_text(phone, "❌ Erreur lors de la publication. Réessaie.")
+
+    elif command == "petit_job_non":
+        user.conversation_state = {}
+        await db.flush()
+        await whatsapp_sender.send_text(phone, messages.petit_job_cancelled(user.name or ""))
 
     elif command == "mes_offres":
         # Affiche les offres d'emploi matchées pour ce user
@@ -638,7 +706,7 @@ async def process_message(message: dict, db: AsyncSession):
             else:
                 # Affiche le message quota avec options
                 _ctx = _usage_context(user)
-                _ctx_quota = "concours" if _ctx == "concours" else "etudes"
+                _ctx_quota = _ctx if _ctx in ("emploi", "concours") else "etudes"
                 await whatsapp_sender.send_buttons(
                     phone,
                     messages.quota_reached(user.name or "ami", _ctx_quota),
@@ -1466,7 +1534,7 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession, msg_t
                 return
             await whatsapp_sender.send_buttons(
                 phone,
-                messages.quota_reached(user.name or "ami"),
+                messages.quota_reached(user.name or "ami", _usage_context(user)),
                 messages.QUOTA_BUTTONS,
             )
             return
@@ -1546,6 +1614,21 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession, msg_t
                 print(f"Erreur inscription simulation {phone}: {e}")
                 await whatsapp_sender.send_text(phone, "❌ Erreur lors de l'inscription. Réessaie.")
             return
+
+        # ── Guard emploi-only : images et documents ignorés ─────────────────
+        if msg_type in ("image", "document"):
+            try:
+                from app.services.platform_mode import is_emploi_only as _eo_img
+                if await _eo_img():
+                    await whatsapp_sender.send_text(
+                        phone,
+                        f"💼 Je suis ton assistant emploi *{user.name or ''}* !\n\n"
+                        "Je ne traite pas les photos ou documents.\n\n"
+                        "Tape *mes offres* pour voir tes offres d'emploi 💼"
+                    )
+                    return
+            except Exception:
+                pass
 
         # Traitement copie simulation (priorité sur copie exercice)
         if msg_type == "image" and image_data:
@@ -2150,6 +2233,29 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession, msg_t
             await _do_free_correction(phone, user, db, image_bytes, exercise_text)
             return
 
+        # ── Confirmation petit job (état awaiting_petit_job_confirm) ──────────
+        conv_state = user.conversation_state or {}
+        if conv_state.get("awaiting_petit_job_confirm"):
+            _tj = (text or "").lower().strip()
+            _yes = {"petit_job_oui", "oui", "confirme", "confirmer", "1", "yes", "ok", "c'est bon"}
+            _no  = {"petit_job_non", "non", "annule", "annuler", "2", "no", "cancel"}
+            if _tj in _yes:
+                await handle_command("petit_job_oui", phone, user, db)
+                await user_service.increment_message_count(db, user)
+                return
+            elif _tj in _no:
+                await handle_command("petit_job_non", phone, user, db)
+                await user_service.increment_message_count(db, user)
+                return
+            else:
+                draft = conv_state.get("petit_job_draft", {})
+                await whatsapp_sender.send_buttons(
+                    phone,
+                    messages.petit_job_confirm(draft, user.name or ""),
+                    messages.PETIT_JOB_CONFIRM_BUTTONS,
+                )
+                return
+
         # Réponse à un menu en attente (ex: /profil) — interprète "1/2/3"
         conv_state = user.conversation_state or {}
         if conv_state.get("pending_menu") == "profil":
@@ -2176,15 +2282,27 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession, msg_t
         # Détecte les commandes spéciales
         command = detect_command(text)
         if command:
-            # Toute commande explicite annule un menu en attente
-            if conv_state.get("pending_menu"):
-                conv_state["pending_menu"] = None
-                conv_state["menu_options"] = None
-                user.conversation_state = conv_state
-                await db.flush()
-            await handle_command(command, phone, user, db)
-            await user_service.increment_message_count(db, user)
-            return
+            # En mode emploi-only, bloque les commandes pédagogiques
+            _eo_block = False
+            try:
+                from app.services.platform_mode import is_emploi_only as _eo_cmd_check
+                if await _eo_cmd_check():
+                    _eo_block = command in (
+                        "next_exercise", "edit_etudes", "add_etudes",
+                        "edit_concours", "add_concours",
+                    )
+            except Exception:
+                pass
+            if not _eo_block:
+                # Toute commande explicite annule un menu en attente
+                if conv_state.get("pending_menu"):
+                    conv_state["pending_menu"] = None
+                    conv_state["menu_options"] = None
+                    user.conversation_state = conv_state
+                    await db.flush()
+                await handle_command(command, phone, user, db)
+                await user_service.increment_message_count(db, user)
+                return
 
         # ── Intelligence LLM universelle ──────────────────────────────
         # Analyse le message avec contexte complet (profil, offres, simulations, règles)
@@ -2235,6 +2353,36 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession, msg_t
 
                         elif _action == "guide_concours" and _msg:
                             await whatsapp_sender.send_text(phone, _msg)
+                            await user_service.increment_message_count(db, user)
+                            return
+
+                        elif _action == "show_petit_jobs":
+                            from app.services.petit_job_service import petit_job_service as _pjs
+                            _jobs = await _pjs.list_active(db, lieu=getattr(user, "localisation_emploi", None))
+                            await whatsapp_sender.send_text(phone, messages.petit_job_list(_jobs, user.name or ""))
+                            await user_service.increment_message_count(db, user)
+                            return
+
+                        elif _action == "post_job":
+                            from app.services.petit_job_service import petit_job_service as _pjs
+                            _draft = await _pjs.extract_from_text(text, user)
+                            if _draft:
+                                _conv = user.conversation_state or {}
+                                _conv["awaiting_petit_job_confirm"] = True
+                                _conv["petit_job_draft"] = _draft
+                                user.conversation_state = _conv
+                                await db.flush()
+                                await whatsapp_sender.send_buttons(
+                                    phone,
+                                    messages.petit_job_confirm(_draft, user.name or ""),
+                                    messages.PETIT_JOB_CONFIRM_BUTTONS,
+                                )
+                            else:
+                                await whatsapp_sender.send_text(
+                                    phone,
+                                    f"📝 Décris le travail que tu proposes *{user.name or ''}* !\n\n"
+                                    "_Exemple : J'ai besoin de 2 livreurs à moto demain à Dakar Plateau, 5000F la journée_"
+                                )
                             await user_service.increment_message_count(db, user)
                             return
 

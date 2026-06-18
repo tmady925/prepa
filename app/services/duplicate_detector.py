@@ -6,7 +6,6 @@ Détection de doublons par hash SHA-256.
 import hashlib
 import re
 import unicodedata
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 
@@ -47,40 +46,7 @@ async def check_duplicate_document(
     file_hash: str,
     content_hash: str | None = None,
 ) -> dict | None:
-    """Vérifie si un document existe déjà (fichier exact ou contenu identique)."""
-    from app.models.document import Document
-
-    # Niveau 1 — hash fichier exact
-    result = await db.execute(
-        select(Document).where(Document.file_hash == file_hash)
-    )
-    doc = result.scalar_one_or_none()
-    if doc:
-        return {
-            "id": str(doc.id),
-            "title": doc.title,
-            "matiere": doc.matiere,
-            "doc_type": doc.doc_type,
-            "created_at": doc.created_at.isoformat(),
-            "type": "exact",
-        }
-
-    # Niveau 2 — hash contenu texte
-    if content_hash:
-        result = await db.execute(
-            select(Document).where(Document.content_hash == content_hash)
-        )
-        doc = result.scalar_one_or_none()
-        if doc:
-            return {
-                "id": str(doc.id),
-                "title": doc.title,
-                "matiere": doc.matiere,
-                "doc_type": doc.doc_type,
-                "created_at": doc.created_at.isoformat(),
-                "type": "content",
-            }
-
+    """Désactivé — module documents supprimé (plateforme emploi uniquement)."""
     return None
 
 
@@ -89,42 +55,5 @@ async def check_duplicate_exercise(
     file_hash: str,
     content_hash: str | None = None,
 ) -> dict | None:
-    """Vérifie si un exercice existe déjà (fichier exact ou contenu identique)."""
-    from app.models.exercise import Exercise
-
-    # Niveau 1 — hash fichier exact
-    result = await db.execute(
-        select(Exercise).where(Exercise.file_hash == file_hash)
-    )
-    ex = result.scalar_one_or_none()
-    if ex:
-        return {
-            "id": str(ex.id),
-            "title": ex.title,
-            "matiere": ex.matiere,
-            "exam_type": ex.exam_type,
-            "serie": ex.serie,
-            "niveau": ex.niveau,
-            "created_at": ex.created_at.isoformat(),
-            "type": "exact",
-        }
-
-    # Niveau 2 — hash contenu texte
-    if content_hash:
-        result = await db.execute(
-            select(Exercise).where(Exercise.content_hash == content_hash)
-        )
-        ex = result.scalar_one_or_none()
-        if ex:
-            return {
-                "id": str(ex.id),
-                "title": ex.title,
-                "matiere": ex.matiere,
-                "exam_type": ex.exam_type,
-                "serie": ex.serie,
-                "niveau": ex.niveau,
-                "created_at": ex.created_at.isoformat(),
-                "type": "content",
-            }
-
+    """Désactivé — module exercices supprimé (plateforme emploi uniquement)."""
     return None

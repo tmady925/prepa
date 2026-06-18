@@ -129,13 +129,17 @@ STEP_SPECS = {
         "objective": "Secteur(s) d'activité recherché(s)",
         "expected": "Numéros ou noms de secteurs",
         "rules": [
-            "Mapper vers : Informatique/Tech, Finance/Comptabilité, Marketing/Communication, Santé, Éducation, BTP/Ingénierie, Droit/Juridique",
-            "Accepter langage naturel : 'banque' → Finance, 'développeur' → Informatique/Tech, 'avocat' → Droit/Juridique",
-            "Accepter 'peu importe', 'tout' → garder le texte tel quel",
+            "Secteurs entreprise : Informatique/Tech, Finance/Comptabilité, Marketing/Communication, Santé, Éducation, BTP/Ingénierie, Droit/Juridique",
+            "Secteur petit job : si le user mentionne livraison, manutention, vente ambulante, nettoyage, gardiennage, jardinage, baby-sitting, aide ménagère, coursier, porteur, vigile → retourner 'Petits jobs/missions courtes'",
+            "Langage naturel entreprise : 'banque'→Finance/Comptabilité, 'développeur'→Informatique/Tech, 'avocat'→Droit/Juridique, 'médecin'→Santé, 'prof'→Éducation, 'construction'→BTP/Ingénierie",
+            "Si le user dit '8' ou 'petits jobs' ou 'missions courtes' → retourner 'Petits jobs/missions courtes'",
+            "Accepter 'peu importe', 'tout' → retourner 'Autre'",
             "Si l'utilisateur exprime une confusion sur ce qu'il veut faire → action=guide pour l'aider à choisir",
+            "Si le user décrit un métier non classable → retourner le nom du métier tel quel",
         ],
         "platform_rules": [
-            "Le secteur choisi sert au matching avec les offres d'emploi disponibles",
+            "Le secteur 'Petits jobs/missions courtes' oriente vers les missions de courte durée (livraison, manutention...)",
+            "Les autres secteurs orientent vers les offres d'entreprise classiques",
         ],
     },
 
@@ -416,9 +420,10 @@ def _fallback() -> dict:
 
 _EMPLOI_TYPE_SIGNALS = {
     "petit_job": [
-        "manutention", "nettoyage", "gardiennage", "livraison", "vente ambulante",
-        "agent de sécurité", "bricolage", "déménagement", "plomberie",
-        "électricité", "peinture", "restauration rapide",
+        "petits jobs", "missions courtes", "manutention", "nettoyage",
+        "gardiennage", "livraison", "vente ambulante", "agent de sécurité",
+        "bricolage", "déménagement", "plomberie", "électricité", "peinture",
+        "restauration rapide", "coursier", "vigile", "porteur",
     ],
     "entreprise": [
         "informatique", "finance", "comptabilité", "marketing", "communication",
@@ -486,6 +491,170 @@ Réponds UNIQUEMENT avec ce JSON :
         return _NIVEAU_TO_TYPE[niveau]
 
     return "les_deux"
+
+
+# ─── Conversation libre onboarding emploi ───────────────────────────────────
+
+_CONVERSE_SYSTEM = """Tu es l'assistant de Prepa, une plateforme WhatsApp d'aide à l'emploi pour les jeunes en Afrique de l'Ouest.
+
+Ton rôle : avoir une VRAIE CONVERSATION avec le chercheur d'emploi pour comprendre son profil.
+Parle naturellement, comme un conseiller humain bienveillant. Adapte-toi à son niveau de langue (wolof mélangé, français familier, tout est ok).
+
+CHAMPS À COLLECTER (pas forcément dans cet ordre) :
+- secteur_emploi    : domaine de travail voulu (livraison, informatique, nettoyage, finance, etc.)
+- niveau_etudes     : bac | bac+2 | bac+3 | bac+5 | doctorat | aucun
+- type_contrat      : CDI | CDD | Stage | Freelance | mission_courte | indifferent
+- localisation      : ville/quartier où il veut travailler
+- emploi_type       : "petit_job" | "entreprise" | "les_deux" (déduis-le toi-même)
+- needs_cv          : true si emploi_type = "entreprise" ou "les_deux", false si "petit_job" pur
+
+RÈGLES :
+- Pose UNE seule question à la fois, naturellement
+- Si le user donne plusieurs infos en une phrase → mémorise-les toutes, ne re-demande pas
+- Si une info est déjà claire dans la conversation → ne re-demande pas
+- Quand tu as suffisamment d'infos (au moins secteur + localisation) → tu peux terminer
+- N'exige pas tous les champs si le profil est clair (ex : livreur à Dakar → tu as assez)
+- Sois bref et direct, max 2 phrases par message
+- NE MENTIONNE PAS les champs techniques (ne dis pas "j'ai besoin de ton secteur_emploi")
+
+RÈGLES emploi_type :
+- Livraison, manutention, vente ambulante, nettoyage, gardiennage, déménagement → "petit_job"
+- Informatique, finance, marketing, santé, droit, ingénierie, comptabilité → "entreprise"
+- Mix ou incertain → "les_deux"
+
+RÉPONSE : JSON strict, RIEN d'autre.
+{
+  "message": "ton message pour le user (string, obligatoire)",
+  "extracted": {
+    "secteur_emploi": null,
+    "niveau_etudes": null,
+    "type_contrat": null,
+    "localisation": null,
+    "emploi_type": null,
+    "needs_cv": null
+  },
+  "done": false
+}
+
+- "done": true = tu as assez d'infos pour créer le profil, la conversation se termine
+- Dans "extracted", mets uniquement les valeurs que tu as identifiées dans CE message (null si pas mentionné)
+- "message" = ce que tu envoies au user (question suivante, confirmation, etc.)
+"""
+
+_CONVERSE_OPENER_FULL = """Tu es l'assistant emploi de Prepa. Un nouveau user vient de choisir la section emploi.
+Son prénom : {name}
+Pays détecté : {pays}
+
+Lance la conversation de manière naturelle et chaleureuse. Pose une première question ouverte sur ce qu'il cherche comme travail.
+Réponds en JSON selon le format demandé."""
+
+_CONVERSE_OPENER_EMPLOI = """Tu es l'assistant de Prepa, dédié à l'emploi. Un nouveau user arrive.
+Son prénom : {name}
+Pays détecté : {pays}
+
+Lance la conversation de manière naturelle et chaleureuse. Pose une première question ouverte sur ce qu'il cherche comme travail.
+Réponds en JSON selon le format demandé."""
+
+_CONVERSE_TURN = """Conversation en cours avec {name}.
+
+PROFIL DÉJÀ COLLECTÉ :
+{collected}
+
+HISTORIQUE (derniers échanges) :
+{history}
+
+NOUVEAU MESSAGE DU USER : "{text}"
+
+Analyse ce message, extrais les nouvelles infos, et continue la conversation naturellement.
+Si tu as assez d'infos (au moins secteur + localisation), mets done=true et envoie un message de confirmation chaleureux.
+Réponds en JSON selon le format demandé."""
+
+
+async def converse_emploi(
+    user_message: str | None,
+    user_name: str,
+    pays: str,
+    conversation_state: dict,
+    is_emploi_only: bool = False,
+) -> dict:
+    """
+    Gère un tour de la conversation libre onboarding emploi.
+
+    conversation_state doit contenir :
+      - "history"   : list[{"role": "assistant"|"user", "content": str}]
+      - "collected" : dict des champs déjà extraits
+
+    Retourne :
+      {
+        "message"   : str,           # message à envoyer au user
+        "collected" : dict,          # profil mis à jour
+        "done"      : bool,          # True = assez d'infos, passer au CV/matching
+        "needs_cv"  : bool,          # True = demander le CV ensuite
+        "turns"     : int,           # nombre de tours effectués
+      }
+    """
+    history: list = conversation_state.get("history", [])
+    collected: dict = conversation_state.get("collected", {})
+    turns: int = conversation_state.get("turns", 0)
+
+    system = _CONVERSE_SYSTEM
+
+    # Premier message (opener) ou suite de conversation
+    if not history and user_message is None:
+        opener = _CONVERSE_OPENER_EMPLOI if is_emploi_only else _CONVERSE_OPENER_FULL
+        prompt = opener.format(name=user_name, pays=pays or "Sénégal")
+    else:
+        collected_str = "\n".join(
+            f"  - {k}: {v}" for k, v in collected.items() if v is not None
+        ) or "  (rien encore)"
+        history_str = "\n".join(
+            f"  {m['role'].upper()}: {m['content']}" for m in history[-6:]
+        ) or "  (début)"
+        prompt = _CONVERSE_TURN.format(
+            name=user_name,
+            collected=collected_str,
+            history=history_str,
+            text=user_message or "",
+        )
+
+    result = await _call_llm_json(prompt, system=system)
+
+    # Fallback si LLM échoue
+    if not result or not result.get("message"):
+        fallback_msg = (
+            f"Dis-moi {user_name}, tu cherches quel type de travail ?"
+            if turns == 0
+            else "Peux-tu préciser ce que tu recherches ?"
+        )
+        return {
+            "message": fallback_msg,
+            "collected": collected,
+            "done": False,
+            "needs_cv": False,
+            "turns": turns + 1,
+        }
+
+    # Merge des champs extraits
+    new_extracted = result.get("extracted") or {}
+    for field, val in new_extracted.items():
+        if val is not None:
+            collected[field] = val
+
+    done = bool(result.get("done", False))
+    needs_cv = bool(collected.get("needs_cv", False))
+
+    # Force done après 10 tours même si le LLM ne le signale pas
+    turns += 1
+    if turns >= 10:
+        done = True
+
+    return {
+        "message": result["message"],
+        "collected": collected,
+        "done": done,
+        "needs_cv": needs_cv,
+        "turns": turns,
+    }
 
 
 # ─── Helper : faut-il activer le LLM pour cette étape ? ──────────────────────

@@ -87,8 +87,8 @@ class Messages:
 
     def ask_secteur_emploi(self, name: str) -> str:
         return (
-            f"Dans quel domaine tu travailles ou veux travailler *{name}* ?\n\n"
-            "Réponds avec les numéros séparés par des virgules :\n\n"
+            f"Dans quel domaine tu cherches du travail *{name}* ?\n\n"
+            "Réponds avec les numéros, ou décris en quelques mots :\n\n"
             "1 - Informatique / Tech\n"
             "2 - Finance / Comptabilité\n"
             "3 - Marketing / Communication\n"
@@ -96,7 +96,9 @@ class Messages:
             "5 - Éducation\n"
             "6 - BTP / Ingénierie\n"
             "7 - Droit / Juridique\n"
-            "8 - Autre (précise)"
+            "8 - Petits jobs / missions courtes\n"
+            "   _(livraison, manutention, vente, nettoyage, gardiennage...)_\n"
+            "9 - Autre (précise)"
         )
 
     def ask_niveau_etudes(self, name: str) -> str:

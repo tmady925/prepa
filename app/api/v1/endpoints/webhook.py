@@ -388,9 +388,7 @@ async def handle_command(command: str, phone: str, user, db: AsyncSession):
 
     elif command in ("edit_emploi", "add_emploi"):
         _set_editing(user, "emploi")
-        user.onboarding_step = "emploi_secteur"
-        await db.flush()
-        await whatsapp_sender.send_text(phone, messages.ask_secteur_emploi(user.name or "toi"))
+        await _start_emploi_conversation(phone, user, db)
 
     elif command in ("add_concours", "edit_concours"):
         try:
@@ -428,9 +426,7 @@ async def handle_command(command: str, phone: str, user, db: AsyncSession):
             )
         elif service == "emploi":
             _set_editing(user, "emploi")
-            user.onboarding_step = "emploi_secteur"
-            await db.flush()
-            await whatsapp_sender.send_text(phone, messages.ask_secteur_emploi(user.name or "toi"))
+            await _start_emploi_conversation(phone, user, db)
         else:
             await db.flush()
 
@@ -718,6 +714,126 @@ async def process_message(message: dict, db: AsyncSession):
     await user_service.increment_message_count(db, user)
 
 
+async def _start_emploi_conversation(phone: str, user, db: AsyncSession):
+    """Lance la conversation libre LLM pour le profil emploi."""
+    from app.services.onboarding_llm import converse_emploi as _converse
+    from app.services.platform_mode import is_emploi_only as _eo
+
+    # Réinitialise le state de conversation emploi
+    _conv = user.conversation_state or {}
+    _editing = _conv.get("editing_only", False)
+    _conv["history"] = []
+    _conv["collected"] = {}
+    _conv["turns"] = 0
+    user.conversation_state = _conv
+    user.onboarding_step = "emploi_conversation"
+    await db.flush()
+
+    # Le LLM génère l'opener (user_message=None)
+    _result = await _converse(
+        user_message=None,
+        user_name=user.name or "toi",
+        pays=getattr(user, "pays", None) or "",
+        conversation_state=_conv,
+        is_emploi_only=await _eo(),
+    )
+    _conv["history"].append({"role": "assistant", "content": _result["message"]})
+    user.conversation_state = _conv
+    await db.flush()
+    await whatsapp_sender.send_text(phone, _result["message"])
+
+
+async def _finalise_emploi(phone: str, user, db: AsyncSession, editing: bool = False, emploi_type_hint: str | None = None):
+    """
+    Clôture l'onboarding emploi : persiste le profil, déduit emploi_type,
+    envoie le message de fin personnalisé et lance le matching.
+    """
+    from app.models.candidate_profile import CandidateProfile as _CP
+    from sqlalchemy import select as _sel
+
+    # Crée ou met à jour le CandidateProfile
+    _cp = (await db.execute(_sel(_CP).where(_CP.user_id == user.id))).scalar_one_or_none()
+    if not _cp:
+        _cp = _CP(
+            user_id=user.id,
+            secteurs_interets=user.secteur_emploi or [],
+            niveau_etudes=user.niveau_etudes,
+            localisation=user.localisation_emploi,
+            type_contrat_souhaite=user.type_contrat_souhaite,
+        )
+        db.add(_cp)
+        await db.flush()
+    else:
+        if user.secteur_emploi:
+            _cp.secteurs_interets = user.secteur_emploi
+        if user.niveau_etudes:
+            _cp.niveau_etudes = user.niveau_etudes
+        if user.localisation_emploi:
+            _cp.localisation = user.localisation_emploi
+        if user.type_contrat_souhaite:
+            _cp.type_contrat_souhaite = user.type_contrat_souhaite
+        await db.flush()
+
+    # Déduction de l'emploi_type
+    _et = emploi_type_hint or "les_deux"
+    try:
+        from app.services.onboarding_llm import infer_emploi_type as _infer
+        _et = await _infer(user)
+        _cp.emploi_type = _et
+        await db.flush()
+        print(f"  [emploi_type] user={user.id} → {_et}")
+    except Exception as _err:
+        print(f"  [emploi_type] erreur ignorée: {_err}")
+        if emploi_type_hint:
+            _cp.emploi_type = emploi_type_hint
+            await db.flush()
+            _et = emploi_type_hint
+
+    if editing:
+        _conv = user.conversation_state or {}
+        _conv.pop("editing_only", None)
+        user.conversation_state = _conv
+        user.onboarding_step = "done"
+        await db.flush()
+        await whatsapp_sender.send_text(phone, f"✅ Profil emploi mis à jour *{user.name}* !")
+    else:
+        await user_service.complete_onboarding(db, user)
+        if _et == "petit_job":
+            _msg = (
+                f"✅ Profil enregistré *{user.name}* ! 🎉\n\n"
+                f"D'après notre échange, je vais te trouver des *petits jobs* près de chez toi 📍\n\n"
+                f"Tu seras notifié dès qu'une mission correspond !\n"
+                f"_Tape *petits jobs* pour voir les offres disponibles._"
+            )
+        elif _et == "entreprise":
+            _msg = (
+                f"✅ Profil enregistré *{user.name}* ! 🎉\n\n"
+                f"Je vais te matcher avec des *offres d'entreprise* adaptées à ton profil 💼\n\n"
+                f"Tu seras notifié dès qu'une offre correspond !"
+            )
+        else:
+            _msg = (
+                f"✅ Profil enregistré *{user.name}* ! 🎉\n\n"
+                f"Je vais te proposer les deux types d'opportunités :\n"
+                f"💼 Offres d'entreprise  •  ⚡ Petits jobs\n\n"
+                f"Tu seras notifié selon les offres qui te correspondent !"
+            )
+        await whatsapp_sender.send_text(phone, _msg)
+
+    # Matching
+    try:
+        from app.services.matching_service import matching_service
+        matches = await matching_service.match_candidate(db, user.id)
+        if not matches:
+            await whatsapp_sender.send_text(
+                phone,
+                "🔍 Je cherche des offres correspondant à ton profil. "
+                "Tu seras notifié dès qu'une opportunité apparaît ! 💼"
+            )
+    except Exception as _me:
+        print(f"Matching emploi error: {_me}")
+
+
 async def _ask_usage(phone: str, user, db: AsyncSession):
     """Demande l'usage après confirmation du pays.
     En mode emploi uniquement : saute la question usage et va directement
@@ -725,9 +841,7 @@ async def _ask_usage(phone: str, user, db: AsyncSession):
     from app.services.platform_mode import is_emploi_only
     if await is_emploi_only():
         user.usage = ["emploi"]
-        user.onboarding_step = "emploi_secteur"
-        await db.flush()
-        await whatsapp_sender.send_text(phone, messages.ask_secteur_emploi(user.name))
+        await _start_emploi_conversation(phone, user, db)
         return
 
     user.onboarding_step = "usage"
@@ -927,9 +1041,7 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession, msg_t
         # Mode emploi uniquement : force emploi quoi que tape l'utilisateur
         if await is_emploi_only():
             user.usage = ["emploi"]
-            user.onboarding_step = "emploi_secteur"
-            await db.flush()
-            await whatsapp_sender.send_text(phone, messages.ask_secteur_emploi(user.name))
+            await _start_emploi_conversation(phone, user, db)
             return
         choices = [
             {"id": "usage_etudes",   "title": "Études",   "value": "etudes"},
@@ -956,9 +1068,7 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession, msg_t
                 phone, messages.ask_type_concours(user.name), messages.TYPE_CONCOURS_BUTTONS
             )
         elif usage_value == "emploi":
-            user.onboarding_step = "emploi_secteur"
-            await db.flush()
-            await whatsapp_sender.send_text(phone, messages.ask_secteur_emploi(user.name))
+            await _start_emploi_conversation(phone, user, db)
 
     elif step == "type_concours":
         from app.services.choice_detector import detect_choice
@@ -1021,14 +1131,12 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession, msg_t
         if isinstance(usage, str):
             usage = [usage]
         if "emploi" in usage:
-            user.onboarding_step = "emploi_secteur"
-            await db.flush()
             await whatsapp_sender.send_text(
                 phone,
                 f"✅ Concours enregistré *{user.name}* !\n\n"
                 "Passons maintenant à ton *profil emploi* 💼"
             )
-            await whatsapp_sender.send_text(phone, messages.ask_secteur_emploi(user.name))
+            await _start_emploi_conversation(phone, user, db)
         else:
             user.onboarding_step = "plan"
             await db.flush()
@@ -1036,155 +1144,72 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession, msg_t
                 phone, messages.ask_plan(user.name), messages.PLAN_ONBOARDING_BUTTONS
             )
 
-    elif step == "emploi_secteur":
-        secteur_map = {
-            "1": "Informatique/Tech", "2": "Finance/Comptabilité",
-            "3": "Marketing/Communication", "4": "Santé",
-            "5": "Éducation", "6": "BTP/Ingénierie",
-            "7": "Droit/Juridique",
-        }
-        chosen = [secteur_map[s.strip()] for s in text.split(",") if s.strip() in secteur_map]
-        if not chosen:
-            chosen = [text.strip()] if text.strip() else []
-        if not chosen:
-            await whatsapp_sender.send_text(
-                phone, "Réponds avec les numéros ou écris ton secteur."
-            )
+    elif step == "emploi_conversation":
+        # ── Conversation libre LLM pour définir le profil emploi ─────────────
+        _conv_state = user.conversation_state or {}
+        _editing = _conv_state.get("editing_only", False)
+
+        from app.services.onboarding_llm import converse_emploi as _converse
+        from app.services.platform_mode import is_emploi_only as _eo_chk
+
+        _result = await _converse(
+            user_message=text if msg_type == "text" else None,
+            user_name=user.name or "toi",
+            pays=getattr(user, "pays", None) or "",
+            conversation_state=_conv_state,
+            is_emploi_only=await _eo_chk(),
+        )
+
+        # Mettre à jour le state de conversation
+        _conv_state["history"] = (_conv_state.get("history") or [])
+        if msg_type == "text" and text:
+            _conv_state["history"].append({"role": "user", "content": text})
+        _conv_state["history"].append({"role": "assistant", "content": _result["message"]})
+        _conv_state["collected"] = _result["collected"]
+        _conv_state["turns"] = _result["turns"]
+        user.conversation_state = _conv_state
+        await db.flush()
+
+        # Persistre les champs extraits sur le user au fur et à mesure
+        _col = _result["collected"]
+        if _col.get("secteur_emploi") and not user.secteur_emploi:
+            _s = _col["secteur_emploi"]
+            user.secteur_emploi = [_s] if isinstance(_s, str) else _s
+        if _col.get("niveau_etudes") and not user.niveau_etudes:
+            user.niveau_etudes = _col["niveau_etudes"]
+        if _col.get("type_contrat") and not user.type_contrat_souhaite:
+            user.type_contrat_souhaite = _col["type_contrat"]
+        if _col.get("localisation") and not user.localisation_emploi:
+            user.localisation_emploi = _col["localisation"]
+        await db.flush()
+
+        if not _result["done"]:
+            # Conversation en cours → envoyer la réponse du LLM et attendre
+            await whatsapp_sender.send_text(phone, _result["message"])
             return
-        user.secteur_emploi = chosen
-        user.onboarding_step = "emploi_niveau"
-        await db.flush()
-        await whatsapp_sender.send_list(
-            phone,
-            messages.ask_niveau_etudes(user.name),
-            "Choisir",
-            [{
-                "title": "Niveau d'études",
-                "rows": [
-                    {"id": "niveau_bac",      "title": "Bac ou moins"},
-                    {"id": "niveau_bac2",     "title": "Bac+2 / BTS"},
-                    {"id": "niveau_bac3",     "title": "Licence / Bac+3"},
-                    {"id": "niveau_bac5",     "title": "Master / Bac+5"},
-                    {"id": "niveau_doctorat", "title": "Doctorat"},
-                ],
-            }],
-        )
 
-    elif step == "emploi_niveau":
-        from app.services.choice_detector import detect_choice
-        choices = [
-            {"id": "niveau_bac",     "title": "Bac",      "value": "bac"},
-            {"id": "niveau_bac2",    "title": "Bac+2",    "value": "bac+2"},
-            {"id": "niveau_bac3",    "title": "Bac+3",    "value": "bac+3"},
-            {"id": "niveau_bac5",    "title": "Bac+5",    "value": "bac+5"},
-            {"id": "niveau_doctorat","title": "Doctorat", "value": "doctorat"},
-        ]
-        choice = detect_choice(text, choices)
-        if choice:
-            user.niveau_etudes = choice["value"]
+        # ── Conversation terminée → passer au CV si nécessaire ──────────────
+        await whatsapp_sender.send_text(phone, _result["message"])
+
+        _needs_cv = _result["needs_cv"] or (_col.get("emploi_type") in ("entreprise", "les_deux"))
+        if _needs_cv:
+            user.onboarding_step = "emploi_cv"
+            await db.flush()
+            await whatsapp_sender.send_text(phone, messages.ask_cv_upload(user.name or "toi"))
         else:
-            # Normalise la saisie libre vers les valeurs attendues par le matching
-            _niv_map = {
-                "bac": "bac", "bts": "bac+2", "dut": "bac+2", "bac+2": "bac+2",
-                "licence": "bac+3", "bac+3": "bac+3", "bachelor": "bac+3",
-                "master": "bac+5", "bac+5": "bac+5", "ingenieur": "bac+5",
-                "doctorat": "doctorat", "phd": "doctorat", "these": "doctorat",
-            }
-            raw = text.strip().lower().replace("é", "e").replace("è", "e")
-            user.niveau_etudes = next((v for k, v in _niv_map.items() if k in raw), text.strip())
-        user.onboarding_step = "emploi_contrat"
-        await db.flush()
-        await whatsapp_sender.send_buttons(
-            phone, messages.ask_type_contrat(user.name), messages.TYPE_CONTRAT_BUTTONS
-        )
-
-    elif step == "emploi_contrat":
-        from app.services.choice_detector import detect_choice
-        choices = [
-            {"id": "contrat_cdi",         "title": "CDI",        "value": "CDI"},
-            {"id": "contrat_cdd",         "title": "CDD",        "value": "CDD"},
-            {"id": "contrat_stage",       "title": "Stage",      "value": "Stage"},
-            {"id": "contrat_freelance",   "title": "Freelance",  "value": "Freelance"},
-            {"id": "contrat_indifferent", "title": "Peu importe","value": "indifferent"},
-        ]
-        choice = detect_choice(text, choices)
-        if choice:
-            user.type_contrat_souhaite = choice["value"]
-        else:
-            # Normalise vers les valeurs attendues
-            _ctr_map = {
-                "cdi": "CDI", "cdd": "CDD", "stage": "Stage",
-                "freelance": "Freelance", "prestation": "Freelance",
-                "peu importe": "indifferent", "indifferent": "indifferent",
-            }
-            raw_c = text.strip().lower()
-            user.type_contrat_souhaite = next((v for k, v in _ctr_map.items() if k in raw_c), "indifferent")
-        user.onboarding_step = "emploi_localisation"
-        await db.flush()
-        await whatsapp_sender.send_text(phone, messages.ask_localisation_emploi(user.name))
-
-    elif step == "emploi_localisation":
-        user.localisation_emploi = text.strip()
-        user.onboarding_step = "emploi_cv"
-        await db.flush()
-        await whatsapp_sender.send_text(phone, messages.ask_cv_upload(user.name))
+            # Petit job pur → pas besoin de CV, on finalise directement
+            await _finalise_emploi(phone, user, db, editing=_editing, emploi_type_hint=_col.get("emploi_type"))
 
     elif step == "emploi_cv":
         _conv_cv = user.conversation_state or {}
         _editing_cv = _conv_cv.get("editing_only", False)
+        _et_hint = (_conv_cv.get("collected") or {}).get("emploi_type")
 
         async def _finish_emploi():
-            """Clôture la section emploi.
-            Édition → done + matching.
-            Nouveau → complete_onboarding direct (sans passer par le step plan) + message + matching."""
-            if _editing_cv:
-                _conv = user.conversation_state or {}
-                _conv.pop("editing_only", None)
-                user.conversation_state = _conv
-                user.onboarding_step = "done"
-                await db.flush()
-                await whatsapp_sender.send_text(
-                    phone, f"✅ Profil emploi mis à jour *{user.name}* !"
-                )
-            else:
-                await user_service.complete_onboarding(db, user)
-                await whatsapp_sender.send_text(
-                    phone,
-                    f"✅ Tout est prêt *{user.name}* !\n\n"
-                    f"Tu peux maintenant :\n"
-                    f"• Recevoir des offres d'emploi adaptées 💼\n\n"
-                    f"Merci de patienter pendant le matching !"
-                )
-            # ── Déduction intelligente du type d'emploi préféré ──────────────
-            try:
-                from app.services.onboarding_llm import infer_emploi_type as _infer_et
-                from app.models.candidate_profile import CandidateProfile as _CP_et
-                from sqlalchemy import select as _sel_et
-                _et = await _infer_et(user)
-                _cp_et = (await db.execute(
-                    _sel_et(_CP_et).where(_CP_et.user_id == user.id)
-                )).scalar_one_or_none()
-                if _cp_et:
-                    _cp_et.emploi_type = _et
-                    await db.flush()
-                print(f"  [emploi_type] user={user.id} → {_et}")
-            except Exception as _et_err:
-                print(f"  [emploi_type] erreur ignorée: {_et_err}")
+            """Clôture la section emploi après CV."""
+            await _finalise_emploi(phone, user, db, editing=_editing_cv, emploi_type_hint=_et_hint)
 
-            # Lance le matching dans tous les cas
-            try:
-                from app.services.matching_service import matching_service
-                matches = await matching_service.match_candidate(db, user.id)
-                if not matches:
-                    await whatsapp_sender.send_text(
-                        phone,
-                        "🔍 Je cherche des offres correspondant à ton profil. "
-                        "Tu seras notifié dès qu'une opportunité apparaît ! 💼"
-                    )
-            except Exception as e:
-                print(f"Matching emploi error: {e}")
-
-        # ── LLM pour emploi_cv (texte uniquement, pas les fichiers) ──────────
+        # ── LLM pour emploi_cv (texte uniquement) ────────────────────────────
         if msg_type == "text":
             try:
                 from app.services.onboarding_llm import analyze as _cv_analyze, should_analyze as _cv_should
@@ -1201,10 +1226,8 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession, msg_t
                         text = _cv_llm["value"]
             except Exception as _cv_err:
                 print(f"  [onboarding_llm] emploi_cv error ignorée: {_cv_err}")
-        # ─────────────────────────────────────────────────────────────────────
 
-        if text.lower().strip() in ("passer", "skip", "plus tard"):
-            # Crée un profil minimal depuis les infos onboarding pour permettre le matching
+        if text.lower().strip() in ("passer", "skip", "plus tard", "non", "pas de cv", "j'ai pas"):
             from app.models.candidate_profile import CandidateProfile as _CP
             from sqlalchemy import select as _sel
             _existing = (await db.execute(
@@ -1255,7 +1278,6 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession, msg_t
                     await whatsapp_sender.send_text(
                         phone, "⚠️ CV reçu mais difficile à lire. Je ferai de mon mieux !"
                     )
-            # Les messages CV sont envoyés avant _finish_emploi pour garantir l'ordre
             await _finish_emploi()
             return
 
@@ -1458,14 +1480,12 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession, msg_t
                 phone, messages.ask_type_concours(user.name), messages.TYPE_CONCOURS_BUTTONS
             )
         elif "emploi" in usage:
-            user.onboarding_step = "emploi_secteur"
-            await db.flush()
             await whatsapp_sender.send_text(
                 phone,
                 f"✅ Partie études enregistrée *{user.name}* !\n\n"
                 "Passons maintenant à ton *profil emploi* 💼"
             )
-            await whatsapp_sender.send_text(phone, messages.ask_secteur_emploi(user.name))
+            await _start_emploi_conversation(phone, user, db)
         else:
             # Études uniquement : complete directement sans passer par le step plan
             user = await user_service.complete_onboarding(db, user)

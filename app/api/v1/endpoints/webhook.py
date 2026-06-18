@@ -1149,11 +1149,18 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession, msg_t
         _conv_state = user.conversation_state or {}
         _editing = _conv_state.get("editing_only", False)
 
+        # Guard : on n'accepte que du texte pendant la conversation
+        if msg_type not in ("text",):
+            await whatsapp_sender.send_text(
+                phone, "Envoie-moi un message texte pour continuer."
+            )
+            return
+
         from app.services.onboarding_llm import converse_emploi as _converse
         from app.services.platform_mode import is_emploi_only as _eo_chk
 
         _result = await _converse(
-            user_message=text if msg_type == "text" else None,
+            user_message=text,
             user_name=user.name or "toi",
             pays=getattr(user, "pays", None) or "",
             conversation_state=_conv_state,
@@ -1193,17 +1200,17 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession, msg_t
         _intent = _result.get("intent")
         _intent_confirmed = _result.get("intent_confirmed", False)
 
-        # Offreur confirmé → bypass profil candidat, lancer directement le post job
+        # Offreur confirmé → initialise le user et lance directement le post job
         if _intent == "offreur" and _intent_confirmed:
             user.usage = list(set((user.usage or []) + ["emploi"]))
-            user.onboarding_step = "done"
             _conv_state["awaiting_petit_job_offer"] = True
             user.conversation_state = _conv_state
             await db.flush()
+            await user_service.complete_onboarding(db, user)
             await whatsapp_sender.send_text(
                 phone,
-                "Décris le job que tu proposes en quelques mots :\n"
-                "_(type de travail, lieu, durée, rémunération...)_"
+                "Décris le job : type de travail, lieu, durée et paie.\n"
+                "_Ex : Besoin d'un livreur à moto à Dakar, samedi matin, 5000 FCFA_"
             )
             return
 

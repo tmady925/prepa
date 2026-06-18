@@ -567,13 +567,20 @@ Dans "extracted" : seulement les valeurs identifiées dans CE message, null sino
 _CONVERSE_OPENER = """Nouveau user sur la section emploi de Prepa.
 Prénom : {name} | Pays : {pays} | Mode : {mode}
 
-Génère le premier message d'accueil : chaleureux, UNE question ouverte sur ce qu'il cherche.
-Ne salue pas avec "Bonjour" si ce n'est pas naturel — utilise plutôt son prénom directement.
-Exemple de ton attendu : "Alors {name}, tu cherches du travail ou tu as un job à proposer ?"
+Génère le PREMIER message. RÈGLES ABSOLUES :
+- INTERDICTION TOTALE de commencer par "Bonjour", "Salut", "Bonsoir", "Hello" ou toute formule de salutation
+- Commence directement par le prénom ou une question
+- Une seule question ouverte, courte
+- Ton : direct, chaleureux, comme un humain qui connaît déjà le prénom
+
+Exemples valides :
+  "{name}, tu cherches du travail ou t'as un job à proposer ?"
+  "Alors {name}, tu veux quoi exactement — trouver du boulot ou recruter quelqu'un ?"
 Réponds en JSON."""
 
 _CONVERSE_TURN = """Conversation emploi — {name}
 
+INTENT DÉJÀ CONNU : {intent}
 DÉJÀ COLLECTÉ :
 {collected}
 
@@ -582,10 +589,13 @@ HISTORIQUE :
 
 NOUVEAU MESSAGE : "{text}"
 
-Analyse, extrais les nouvelles infos, continue naturellement.
-Si offreur détecté non confirmé → demande confirmation.
-Si demandeur avec secteur + localisation connus → done=true.
-Si offreur confirmé → done=true, intent_confirmed=true.
+RÈGLES :
+- Si intent est déjà connu (pas null) → NE PAS redemander l'intent, continue sur ce fil
+- Si message non informatif ("bonjour", "ok", "oui", "ça va", "hm", "?") → relance avec la question en cours, sans reformuler l'historique
+- Si offreur détecté mais non confirmé → demande confirmation courte (ex: "Tu veux poster une offre, c'est bien ça ?")
+- Si demandeur avec secteur + localisation collectés → done=true
+- Si offreur confirmé (user dit oui à la confirmation) → done=true, intent_confirmed=true dans extracted
+- Ne salue JAMAIS
 Réponds en JSON."""
 
 
@@ -619,14 +629,17 @@ async def converse_emploi(
         mode = "emploi uniquement" if is_emploi_only else "plateforme complète"
         prompt = _CONVERSE_OPENER.format(name=user_name, pays=pays or "Sénégal", mode=mode)
     else:
+        _intent_known = collected.get("intent") or "null (pas encore déterminé)"
         collected_str = "\n".join(
-            f"  {k}: {v}" for k, v in collected.items() if v is not None
+            f"  {k}: {v}" for k, v in collected.items()
+            if v is not None and k != "intent"
         ) or "  (rien encore)"
         history_str = "\n".join(
             f"  {m['role'].upper()}: {m['content']}" for m in history[-6:]
         ) or "  (début)"
         prompt = _CONVERSE_TURN.format(
             name=user_name,
+            intent=_intent_known,
             collected=collected_str,
             history=history_str,
             text=user_message or "",

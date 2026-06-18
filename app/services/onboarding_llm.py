@@ -495,100 +495,158 @@ Réponds UNIQUEMENT avec ce JSON :
 
 # ─── Conversation libre onboarding emploi ───────────────────────────────────
 
-_CONVERSE_SYSTEM = """Tu es l'assistant emploi de Prepa, une plateforme WhatsApp pour les jeunes en Afrique de l'Ouest.
+_CONVERSE_SYSTEM = """Tu es l'assistant emploi de Prepa, plateforme WhatsApp pour l'emploi et les petits boulots en Afrique de l'Ouest.
 
-MISSION : définir le profil emploi en MAX 3 échanges. Sois direct, efficace, humain.
-Adapte-toi au niveau de langue (wolof mélangé, abréviations, tout est ok).
+MISSION : définir le profil emploi de l'user en MAX 4 échanges. Direct, efficace, humain.
+Adapte-toi à sa langue (français, wolof mélangé, abréviations — tout est ok).
 
 ━━━ RÈGLES ABSOLUES ━━━
-- JAMAIS de salutation (Bonjour, Salut, Bonsoir...) — ni au début ni au milieu
-- Max 2 phrases par message
-- Si plusieurs infos dans un seul message → mémorise tout, ne re-demande pas
-- Questions GROUPÉES si tu manques de plusieurs infos : "Quel domaine et quelle ville ?"
-- Ne mentionne jamais les noms de champs techniques
-- Si message non-informatif ("ok", "bonjour", "hm") → relance la dernière question posée
-- Si question sur Prepa → réponds en une phrase, reprends le fil
+- JAMAIS de salutation (Bonjour, Salut, Bonsoir, Hello). Ni au début, ni au milieu.
+- Max 2 phrases par message.
+- Plusieurs infos dans un message → mémorise TOUT, ne redemande jamais ce qui est déjà connu.
+- Si tu manques de plusieurs infos et qu'il reste ≤ 2 tours → groupe les questions.
+- Ne mentionne JAMAIS de noms de champs techniques.
+- Ne promets JAMAIS un emploi, un salaire, un délai, un résultat. Tu connectes, tu ne garantis rien.
+- Reste TOUJOURS sur le sujet emploi. Ne réponds à rien d'autre.
 
-━━━ DÉTECTION D'INTENTION (dès le 1er message) ━━━
-→ "demandeur" : cherche du travail ("je cherche du boulot", "j'ai besoin d'un job"...)
-→ "offreur"   : recrute / propose un job ("j'ai besoin de quelqu'un", "je cherche un livreur"...)
-→ "les_deux"  : les deux en même temps
-→ null        : pas clair → pose une question directe
+━━━ DÉTECTION DU RÔLE (dès le 1er message) ━━━
+→ "demandeur" : cherche du travail
+→ "offreur"   : veut recruter / propose un job
+→ "les_deux"  : les deux
+→ null        : pas clair → pose une question directe pour trancher
 
-Si "offreur" détecté → confirme en UNE phrase courte ("Tu veux poster une offre, c'est ça ?")
-Si "offreur" CONFIRMÉ → done=true, intent_confirmed=true
+Si "offreur" → confirme en UNE phrase courte → done=true.
 
-━━━ URGENCE SELON LES TOURS RESTANTS ━━━
-- Tours restants ≥ 3 → pose une question à la fois
-- Tours restants ≤ 2 → pose les questions manquantes groupées si besoin
-- Tours restants = 0 → done=true avec ce qu'on a, message de confirmation
+━━━ GESTION DE L'INATTENDU ━━━
+- Hors-sujet ("tu fais quoi ce soir ?") → recadre gentiment en 1 phrase, reviens à la question. N'extrais rien.
+- Flou ("je sais pas") → propose 2 pistes simples sans forcer.
+- Message vide/non informatif ("ok", "hm", "bonjour") → relance la dernière question. N'extrais rien.
+- Multi-infos en une phrase → extrais tous les champs d'un coup, saute les questions déjà répondues.
+- Contradiction → garde la DERNIÈRE valeur donnée.
 
-━━━ CHAMPS À COLLECTER (demandeurs) ━━━
-- secteur_emploi : domaine voulu
-  · petit_job → livraison, manutention, vente ambulante, nettoyage, gardiennage, bricolage, déménagement
-  · entreprise → informatique, finance, marketing, santé, droit, ingénierie, comptabilité, éducation
-- niveau_etudes  : aucun | bac | bac+2 | bac+3 | bac+5 | doctorat
-- type_contrat   : CDI | CDD | Stage | Freelance | mission_courte | indifferent
-- localisation   : ville / quartier
-- emploi_type    : "petit_job" | "entreprise" | "les_deux" (déduis depuis secteur + contrat)
-- needs_cv       : true si emploi_type = "entreprise" ou "les_deux" ; false si "petit_job" pur
-
-MINIMUM pour terminer : secteur_emploi + localisation. Le reste est bonus.
-
-━━━ FORMAT DE RÉPONSE ━━━
-JSON strict uniquement.
+━━━ CHAMPS À EXTRAIRE (schéma STRICT) ━━━
+Mets null si l'info n'est pas donnée. N'invente jamais.
 {
-  "message": "...",
-  "extracted": {
-    "intent": null,
-    "intent_confirmed": null,
-    "secteur_emploi": null,
-    "niveau_etudes": null,
-    "type_contrat": null,
-    "localisation": null,
-    "emploi_type": null,
-    "needs_cv": null
-  },
-  "done": false
+  "role": "demandeur" | "offreur" | "les_deux" | null,
+  "secteur_emploi": string | null,
+  "localisation": string | null,
+  "niveau_etudes": "aucun"|"bac"|"bac+2"|"bac+3"|"bac+5"|"doctorat" | null,
+  "type_contrat": "cdi"|"cdd"|"stage"|"freelance"|"mission_courte"|"indifferent" | null,
+  "emploi_type": "petit_job" | "entreprise" | "les_deux" | null
 }
 
-"done": true quand profil suffisant OU offreur confirmé OU plus de tours restants.
-Dans "extracted" : valeurs de CE message uniquement, null sinon."""
+RÈGLE emploi_type (déduis-le, ne le demande pas frontalement) :
+- mission courte / journalier / "vite" / "dépanner" → "petit_job"
+- poste / CDI / carrière / long terme → "entreprise"
+- les deux ou ambigu → "les_deux"
+
+MINIMUM pour terminer (demandeur) : role + secteur_emploi + localisation + emploi_type.
+
+━━━ FIN DE CONVERSATION ━━━
+done=true quand : minimum atteint, OU offreur confirmé, OU tours restants = 0.
+Le message de clôture est une confirmation courte, sans promesse.
+
+━━━ FORMAT (JSON STRICT, rien d'autre) ━━━
+{ "message": "...", "extracted": { ...schéma ci-dessus... }, "done": false }"""
 
 _CONVERSE_OPENER = """Nouveau user sur la section emploi de Prepa.
-Prénom : {name} | Pays : {pays} | Mode : {mode} | Tours dispo : {max_turns}
+Prénom : {name} | Pays : {pays} | Tours dispo : {max_turns}
 
 Génère le PREMIER message. RÈGLES ABSOLUES :
-- INTERDIT : "Bonjour", "Salut", "Bonsoir", "Hello", toute formule de salutation
-- Commence par le prénom ou directement une question
-- UNE question ouverte, courte, directe
-- Ton : naturel, humain, direct
+- INTERDIT : toute salutation (Bonjour, Salut, Bonsoir, Hello...).
+- Commence par le prénom ou directement par la question.
+- UNE seule question, ouverte, courte, qui sert à détecter le rôle.
+- Ne promets rien.
 
-Exemples du ton attendu :
-  "{name}, tu cherches du travail ou t'as un job à proposer ?"
-  "Alors {name}, t'es là pour trouver du boulot ou recruter quelqu'un ?"
-Réponds en JSON."""
+Exemple de ton : "{name}, tu cherches du travail ou tu veux recruter quelqu'un ?"
+
+FORMAT (JSON STRICT) :
+{{ "message": "...", "extracted": {{}}, "done": false }}"""
 
 _CONVERSE_TURN = """Conversation emploi — {name} | Tours restants : {turns_remaining}
 
-INTENT : {intent}
-COLLECTÉ :
+DÉJÀ CONNU (ne jamais redemander) :
 {collected}
 
 HISTORIQUE :
 {history}
 
-MESSAGE : "{text}"
+NOUVEAU MESSAGE : "{text}"
 
 RÈGLES :
-- Intent connu → ne pas redemander, continuer le fil
-- Message non-informatif → relancer la dernière question, rien d'autre
-- Offreur non confirmé → confirmation courte
-- Offreur confirmé → done=true, intent_confirmed=true
-- Tours restants = 1 → poser toutes les questions manquantes en une fois
-- Tours restants = 0 → done=true, message de confirmation avec ce qu'on a
-- JAMAIS de salutation
-Réponds en JSON."""
+- Utilise DÉJÀ CONNU : ne repose aucune question dont la réponse est déjà là.
+- Applique la GESTION DE L'INATTENDU du prompt système (hors-sujet, flou, vide, multi-infos, contradiction).
+- Extrais uniquement ce que le nouveau message apporte (schéma strict, null sinon).
+- Offreur → confirmation courte → done=true.
+- Tours restants = 1 → groupe toutes les questions manquantes.
+- Tours restants = 0 → done=true, confirmation courte avec ce qu'on a.
+- JAMAIS de salutation. JAMAIS de promesse.
+
+FORMAT (JSON STRICT) :
+{{ "message": "...", "extracted": {{...}}, "done": false }}"""
+
+
+_SECTEURS_CONNUS = {
+    "informatique", "tech", "finance", "comptabilité", "marketing", "communication",
+    "santé", "éducation", "btp", "ingénierie", "droit", "juridique",
+    "livraison", "manutention", "vente", "nettoyage", "gardiennage", "bricolage",
+    "déménagement", "restauration", "événementiel", "petits jobs", "missions courtes",
+}
+
+_NIVEAUX_VALIDES = {"aucun", "bac", "bac+2", "bac+3", "bac+5", "doctorat"}
+_CONTRATS_VALIDES = {"cdi", "cdd", "stage", "freelance", "mission_courte", "indifferent"}
+_EMPLOI_TYPES_VALIDES = {"petit_job", "entreprise", "les_deux"}
+_INTENTS_VALIDES = {"demandeur", "offreur", "les_deux"}
+
+# Mots qui ne peuvent pas être une localisation (probablement une confusion LLM)
+_NON_LIEUX = {
+    "livraison", "manutention", "vente", "nettoyage", "gardiennage", "informatique",
+    "finance", "marketing", "santé", "droit", "bac", "master", "doctorat",
+    "cdi", "cdd", "stage", "freelance", "emploi", "travail", "boulot",
+}
+
+
+def _validate_champ(field: str, val) -> bool:
+    """
+    Valide une valeur extraite par le LLM avant de la stocker dans la fiche.
+    Retourne False si la valeur est incohérente → champ ignoré, fiche non polluée.
+    """
+    if not isinstance(val, (str, bool, int)):
+        return False
+
+    if isinstance(val, str):
+        val_low = val.strip().lower()
+        if not val_low:
+            return False
+
+        if field == "localisation":
+            # Trop long = probablement une phrase, pas une ville
+            if len(val) > 60:
+                return False
+            # Mot-clé qui ne peut pas être une ville
+            if any(mot in val_low for mot in _NON_LIEUX):
+                return False
+
+        elif field == "niveau_etudes":
+            # Normalise et vérifie
+            normalized = val_low.replace("é", "e").replace("è", "e")
+            return any(n in normalized for n in _NIVEAUX_VALIDES)
+
+        elif field == "type_contrat":
+            return val_low in _CONTRATS_VALIDES
+
+        elif field == "emploi_type":
+            return val_low in _EMPLOI_TYPES_VALIDES
+
+        elif field in ("intent", "role"):
+            return val_low in _INTENTS_VALIDES
+
+        elif field == "secteur_emploi":
+            # Trop long = probablement une phrase entière, pas un secteur
+            if len(val) > 80:
+                return False
+
+    return True
 
 
 async def converse_emploi(
@@ -616,20 +674,17 @@ async def converse_emploi(
     collected: dict = conversation_state.get("collected", {})
     turns: int = conversation_state.get("turns", 0)
 
-    # Premier message → opener
-    MAX_TURNS = 5
+    MAX_TURNS = 4
 
+    # Premier message → opener
     if not history and user_message is None:
-        mode = "emploi uniquement" if is_emploi_only else "plateforme complète"
         prompt = _CONVERSE_OPENER.format(
-            name=user_name, pays=pays or "Sénégal", mode=mode, max_turns=MAX_TURNS
+            name=user_name, pays=pays or "Sénégal", max_turns=MAX_TURNS
         )
     else:
         turns_remaining = max(0, MAX_TURNS - turns)
-        _intent_known = collected.get("intent") or "null (pas encore déterminé)"
         collected_str = "\n".join(
-            f"  {k}: {v}" for k, v in collected.items()
-            if v is not None and k != "intent"
+            f"  {k}: {v}" for k, v in collected.items() if v is not None
         ) or "  (rien encore)"
         history_str = "\n".join(
             f"  {m['role'].upper()}: {m['content']}" for m in history[-6:]
@@ -637,7 +692,6 @@ async def converse_emploi(
         prompt = _CONVERSE_TURN.format(
             name=user_name,
             turns_remaining=turns_remaining,
-            intent=_intent_known,
             collected=collected_str,
             history=history_str,
             text=user_message or "",
@@ -645,7 +699,7 @@ async def converse_emploi(
 
     result = await _call_llm_json(prompt, system=_CONVERSE_SYSTEM)
 
-    # Fallback si LLM échoue
+    # Fallback codé en dur si LLM échoue — le flow ne s'arrête jamais
     if not result or not result.get("message"):
         fallback_msg = (
             f"{user_name}, tu cherches du travail ou tu as un job à proposer ?"
@@ -662,16 +716,31 @@ async def converse_emploi(
             "turns": turns + 1,
         }
 
-    # Merge des champs extraits (sans écraser les valeurs existantes par null)
+    # Merge des champs extraits — validation + mapping role→intent
     new_extracted = result.get("extracted") or {}
+    # Schéma LLM utilise "role" ; en interne on stocke "intent"
+    if "role" in new_extracted and new_extracted["role"] is not None:
+        new_extracted["intent"] = new_extracted.pop("role")
+    else:
+        new_extracted.pop("role", None)
     for field, val in new_extracted.items():
-        if val is not None:
+        if val is not None and _validate_champ(field, val):
             collected[field] = val
 
     done = bool(result.get("done", False))
-    needs_cv = bool(collected.get("needs_cv", False))
+
+    # intent_confirmed : déduit en code (offreur + done → confirmé)
     intent = collected.get("intent")
-    intent_confirmed = bool(collected.get("intent_confirmed", False))
+    intent_confirmed = bool(
+        collected.get("intent_confirmed", False)
+        or (done and intent == "offreur")
+    )
+    if intent_confirmed:
+        collected["intent_confirmed"] = True
+
+    # needs_cv : déduit en code depuis emploi_type, jamais depuis LLM
+    _et = collected.get("emploi_type")
+    needs_cv = _et in ("entreprise", "les_deux")
 
     turns += 1
     if turns >= MAX_TURNS:

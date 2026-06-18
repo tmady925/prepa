@@ -775,19 +775,25 @@ async def _finalise_emploi(phone: str, user, db: AsyncSession, editing: bool = F
         await db.flush()
 
     # Déduction de l'emploi_type
-    _et = emploi_type_hint or "les_deux"
-    try:
-        from app.services.onboarding_llm import infer_emploi_type as _infer
-        _et = await _infer(user)
+    # Priorité : hint (capté en conversation) → infer LLM → fallback les_deux
+    _et = emploi_type_hint or _cp.emploi_type or None
+    if _et:
+        # Déjà connu depuis la conversation — pas besoin d'un appel LLM supplémentaire
         _cp.emploi_type = _et
         await db.flush()
-        print(f"  [emploi_type] user={user.id} → {_et}")
-    except Exception as _err:
-        print(f"  [emploi_type] erreur ignorée: {_err}")
-        if emploi_type_hint:
-            _cp.emploi_type = emploi_type_hint
+        print(f"  [emploi_type] user={user.id} → {_et} (conversation)")
+    else:
+        _et = "les_deux"
+        try:
+            from app.services.onboarding_llm import infer_emploi_type as _infer
+            _et = await _infer(user)
+            _cp.emploi_type = _et
             await db.flush()
-            _et = emploi_type_hint
+            print(f"  [emploi_type] user={user.id} → {_et} (infer)")
+        except Exception as _err:
+            print(f"  [emploi_type] erreur ignorée: {_err}")
+            _cp.emploi_type = _et
+            await db.flush()
 
     if editing:
         _conv = user.conversation_state or {}
@@ -1195,8 +1201,7 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession, msg_t
             return
 
         # ── Conversation terminée ────────────────────────────────────────────
-        await whatsapp_sender.send_text(phone, _result["message"])
-
+        # Le message final est codé en dur par chaque branche — pas généré par le LLM.
         _intent = _result.get("intent")
         _intent_confirmed = _result.get("intent_confirmed", False)
 

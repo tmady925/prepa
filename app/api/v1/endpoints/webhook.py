@@ -715,16 +715,17 @@ async def process_message(message: dict, db: AsyncSession):
 
 
 async def _start_emploi_conversation(phone: str, user, db: AsyncSession):
-    """Lance l'onboarding emploi structuré (étape 1 : choix du type de travail)."""
+    """Lance l'onboarding emploi structuré (étape 1 : liste rôle + type)."""
     _conv = user.conversation_state or {}
-    _conv["emploi_ob"] = {}          # state des 4 étapes emploi
+    _conv["emploi_ob"] = {}
     user.conversation_state = _conv
     user.onboarding_step = "emploi_type_choice"
     await db.flush()
-    await whatsapp_sender.send_buttons(
+    await whatsapp_sender.send_list(
         phone,
-        messages.ask_emploi_type(user.name or "toi"),
-        messages.EMPLOI_TYPE_BUTTONS,
+        messages.ask_emploi_role(user.name or "toi"),
+        "Choisir",
+        messages.EMPLOI_ROLE_SECTIONS,
     )
 
 
@@ -1123,7 +1124,7 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession, msg_t
     # ════════════════════════════════════════════════════════════════
 
     elif step == "emploi_type_choice":
-        # ── Étape 1 : quel type de travail ? ────────────────────────
+        # ── Étape 1 : rôle + type de travail (liste 4 options) ──────
         from app.services.onboarding_llm import interpret_emploi_step as _interp
 
         _conv = user.conversation_state or {}
@@ -1131,76 +1132,69 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession, msg_t
         _editing = _conv.get("editing_only", False)
         _name = user.name or "toi"
 
-        # Mapping IDs bouton → valeur
-        _ET_MAP = {
-            "et_petit_job":  "petit_job",
-            "et_entreprise": "entreprise",
-            "et_les_deux":   "les_deux",
+        # IDs liste → (role, emploi_type)
+        _ROLE_MAP = {
+            "ert_petit_job":  ("demandeur", "petit_job"),
+            "ert_entreprise": ("demandeur", "entreprise"),
+            "ert_les_deux":   ("demandeur", "les_deux"),
+            "ert_offreur":    ("offreur",   None),
         }
 
-        _et = _ET_MAP.get(text)
+        _role, _et = _ROLE_MAP.get(text, (None, None))
 
-        if not _et and msg_type == "text" and text:
+        if _role is None and msg_type == "text" and text:
             # Texte libre → LLM interprète
-            _i = await _interp("emploi_type", text)
-            _et = _i.get("mapped_value")
-
-            if _et == "offreur":
-                # Détection offreur via texte libre → rediriger
-                user.usage = list(set((user.usage or []) + ["emploi"]))
-                _conv["awaiting_petit_job_offer"] = True
-                user.conversation_state = _conv
-                await db.flush()
-                await user_service.complete_onboarding(db, user)
-                await whatsapp_sender.send_text(
-                    phone,
-                    "Décris le job : type de travail, lieu, durée et paie.\n"
-                    "_Ex : Besoin d'un livreur à moto à Dakar, samedi matin, 5000 FCFA_"
-                )
+            _i = await _interp("emploi_role", text)
+            _mv = _i.get("mapped_value")
+            if _mv == "offreur":
+                _role, _et = "offreur", None
+            elif _mv in ("petit_job", "entreprise", "les_deux"):
+                _role, _et = "demandeur", _mv
+            else:
+                # LLM guide : envoyer message contextuel + re-afficher la liste
+                _guide = _i.get("guide_message") or messages.ask_emploi_role(_name)
+                await whatsapp_sender.send_list(phone, _guide, "Choisir", messages.EMPLOI_ROLE_SECTIONS)
                 return
 
-            if not _et:
-                # LLM n'a pas compris → renvoyer les boutons (avec guide_message si dispo)
-                _guide = _i.get("guide_message")
-                _txt = _guide or messages.ask_emploi_type(_name)
-                await whatsapp_sender.send_buttons(phone, _txt, messages.EMPLOI_TYPE_BUTTONS)
-                return
-
-        if not _et:
-            # Aucune réponse valide (image, audio…) → renvoyer les boutons
-            await whatsapp_sender.send_buttons(
-                phone, messages.ask_emploi_type(_name), messages.EMPLOI_TYPE_BUTTONS
+        if _role is None:
+            # Image, audio, réponse incompréhensible → re-afficher la liste
+            await whatsapp_sender.send_list(
+                phone, messages.ask_emploi_role(_name), "Choisir", messages.EMPLOI_ROLE_SECTIONS
             )
             return
 
-        # Stocker emploi_type et passer à l'étape 2
+        # ── Offreur : lancer le flux post-job directement ───────────
+        if _role == "offreur":
+            user.usage = list(set((user.usage or []) + ["emploi"]))
+            _conv["awaiting_petit_job_offer"] = True
+            user.conversation_state = _conv
+            await db.flush()
+            await user_service.complete_onboarding(db, user)
+            await whatsapp_sender.send_text(
+                phone,
+                "Décris le job : type de travail, lieu, durée et paie.\n"
+                "_Ex : Besoin d'un livreur à moto à Dakar, samedi matin, 5000 FCFA_"
+            )
+            return
+
+        # ── Chercheur : stocker et passer à l'étape secteur ─────────
         _ob["emploi_type"] = _et
         _conv["emploi_ob"] = _ob
         user.conversation_state = _conv
         user.onboarding_step = "emploi_secteur_choice"
         await db.flush()
 
-        # Envoyer la liste de secteurs adaptée
         if _et == "petit_job":
             await whatsapp_sender.send_list(
-                phone,
-                messages.ask_secteur_petit_job(_name),
-                "Choisir",
-                messages.SECTEUR_PJ_SECTIONS,
+                phone, messages.ask_secteur_petit_job(_name), "Choisir", messages.SECTEUR_PJ_SECTIONS
             )
         elif _et == "entreprise":
             await whatsapp_sender.send_list(
-                phone,
-                messages.ask_secteur_entreprise(_name),
-                "Choisir",
-                messages.SECTEUR_ENT_SECTIONS,
+                phone, messages.ask_secteur_entreprise(_name), "Choisir", messages.SECTEUR_ENT_SECTIONS
             )
-        else:  # les_deux
+        else:
             await whatsapp_sender.send_list(
-                phone,
-                messages.ask_secteur_les_deux(_name),
-                "Choisir",
-                messages.SECTEUR_LES_DEUX_SECTIONS,
+                phone, messages.ask_secteur_les_deux(_name), "Choisir", messages.SECTEUR_LES_DEUX_SECTIONS
             )
 
     elif step == "emploi_secteur_choice":
@@ -1235,39 +1229,60 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession, msg_t
 
         _secteur = _SECTEUR_MAP.get(text)
 
-        if not _secteur and text in _AUTRE_IDS:
-            # "Autre" → LLM demande de préciser
-            _guide = "C'est quel type de boulot exactement ?" if _et == "petit_job" else "C'est quel domaine exactement ?"
-            await whatsapp_sender.send_text(phone, _guide)
-            return
-
-        if not _secteur and msg_type == "text" and text:
-            # Texte libre → LLM interprète
-            _step_key = "secteur_petit_job" if _et == "petit_job" else "secteur_entreprise"
-            _i = await _interp(_step_key, text)
-            _secteur = _i.get("mapped_value")
-            if not _secteur:
-                _guide = _i.get("guide_message")
-                if _guide:
-                    await whatsapp_sender.send_text(phone, _guide)
-                else:
-                    # Renvoyer la liste
-                    if _et == "petit_job":
-                        await whatsapp_sender.send_list(phone, messages.ask_secteur_petit_job(_name), "Choisir", messages.SECTEUR_PJ_SECTIONS)
-                    elif _et == "entreprise":
-                        await whatsapp_sender.send_list(phone, messages.ask_secteur_entreprise(_name), "Choisir", messages.SECTEUR_ENT_SECTIONS)
-                    else:
-                        await whatsapp_sender.send_list(phone, messages.ask_secteur_les_deux(_name), "Choisir", messages.SECTEUR_LES_DEUX_SECTIONS)
-                return
-
-        if not _secteur:
-            # Aucune réponse valide → renvoyer la liste
+        # Helper : renvoyer la liste secteur adaptée (avec guide optionnel avant)
+        async def _retry_secteur(guide: str | None = None):
+            if guide:
+                await whatsapp_sender.send_text(phone, guide)
             if _et == "petit_job":
                 await whatsapp_sender.send_list(phone, messages.ask_secteur_petit_job(_name), "Choisir", messages.SECTEUR_PJ_SECTIONS)
             elif _et == "entreprise":
                 await whatsapp_sender.send_list(phone, messages.ask_secteur_entreprise(_name), "Choisir", messages.SECTEUR_ENT_SECTIONS)
             else:
                 await whatsapp_sender.send_list(phone, messages.ask_secteur_les_deux(_name), "Choisir", messages.SECTEUR_LES_DEUX_SECTIONS)
+
+        if not _secteur and text in _AUTRE_IDS:
+            # "Autre" → LLM demande de préciser via un step dédié
+            _step_key = "secteur_autre_pj" if _et == "petit_job" else "secteur_autre_ent"
+            _ob["awaiting_autre_secteur"] = _step_key
+            _conv["emploi_ob"] = _ob
+            user.conversation_state = _conv
+            await db.flush()
+            _q = "C'est quel type de boulot ? _(ex: jardinage, baby-sitting...)_" if _et == "petit_job" \
+                else "C'est quel domaine ? _(ex: communication, audit...)_"
+            await whatsapp_sender.send_text(phone, _q)
+            return
+
+        # Texte libre "Autre" en cours (awaiting_autre_secteur) OU texte ordinaire
+        if not _secteur:
+            _awaiting_autre = _ob.get("awaiting_autre_secteur")
+            if _awaiting_autre and msg_type == "text" and text:
+                _i = await _interp(_awaiting_autre, text)
+                _secteur = _i.get("mapped_value")
+                if not _secteur:
+                    _guide = _i.get("guide_message") or (
+                        "Décris le boulot en quelques mots _(ex: jardinage, garderie...)_"
+                        if _awaiting_autre == "secteur_autre_pj"
+                        else "Précise le domaine en quelques mots _(ex: communication, audit...)_"
+                    )
+                    await whatsapp_sender.send_text(phone, _guide)
+                    return
+                # "Autre" bien précisé → nettoyer flag
+                _ob.pop("awaiting_autre_secteur", None)
+            elif msg_type == "text" and text:
+                _step_key = "secteur_petit_job" if _et == "petit_job" else "secteur_entreprise"
+                _i = await _interp(_step_key, text)
+                _secteur = _i.get("mapped_value")
+                if not _secteur:
+                    # Guide LLM + re-afficher la liste
+                    await _retry_secteur(_i.get("guide_message"))
+                    return
+            else:
+                # Image, audio, réponse non-texte → re-afficher la liste
+                await _retry_secteur()
+                return
+
+        if not _secteur:
+            await _retry_secteur()
             return
 
         # Stocker secteur
@@ -1315,19 +1330,20 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession, msg_t
 
         _niv = _NIV_MAP.get(text)
 
+        async def _retry_niveau(guide: str | None = None):
+            if guide:
+                await whatsapp_sender.send_text(phone, guide)
+            await whatsapp_sender.send_list(phone, messages.ask_niveau_emploi(_name), "Choisir", messages.NIVEAU_EMPLOI_SECTIONS)
+
         if not _niv and msg_type == "text" and text:
             _i = await _interp("niveau_etudes", text)
             _niv = _i.get("mapped_value")
             if not _niv:
-                _guide = _i.get("guide_message")
-                _txt = _guide or messages.ask_niveau_emploi(_name)
-                await whatsapp_sender.send_list(phone, _txt, "Choisir", messages.NIVEAU_EMPLOI_SECTIONS)
+                await _retry_niveau(_i.get("guide_message"))
                 return
 
         if not _niv:
-            await whatsapp_sender.send_list(
-                phone, messages.ask_niveau_emploi(_name), "Choisir", messages.NIVEAU_EMPLOI_SECTIONS
-            )
+            await _retry_niveau()
             return
 
         # Stocker niveau et déduire emploi_type final intelligemment
@@ -1373,8 +1389,11 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession, msg_t
         _loc = _i.get("mapped_value")
 
         if not _loc:
-            _guide = _i.get("guide_message") or messages.ask_localisation_onboarding(_name)
-            await whatsapp_sender.send_text(phone, _guide)
+            # Guide contextuel LLM + re-demander la question (toujours les deux)
+            _guide = _i.get("guide_message")
+            if _guide:
+                await whatsapp_sender.send_text(phone, _guide)
+            await whatsapp_sender.send_text(phone, messages.ask_localisation_onboarding(_name))
             return
 
         # Stocker localisation

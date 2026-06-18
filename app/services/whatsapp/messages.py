@@ -85,14 +85,25 @@ class Messages:
 
     # ── Emploi — onboarding structuré (4 étapes fixes) ────────────
 
-    # Étape 1 : type de travail
-    def ask_emploi_type(self, name: str) -> str:
-        return f"{name}, tu cherches quel type de travail ?"
+    # Étape 1 : rôle + type de travail (liste — 4 options dont offreur)
+    def ask_emploi_role(self, name: str) -> str:
+        return f"{name}, tu es là pour ?"
 
-    EMPLOI_TYPE_BUTTONS = [
-        {"id": "et_petit_job",  "title": "⚡ Petit job"},
-        {"id": "et_entreprise", "title": "💼 Emploi entreprise"},
-        {"id": "et_les_deux",   "title": "🔁 Les deux"},
+    EMPLOI_ROLE_SECTIONS = [
+        {
+            "title": "Je cherche du travail",
+            "rows": [
+                {"id": "ert_petit_job",   "title": "⚡ Un petit job / mission"},
+                {"id": "ert_entreprise",  "title": "💼 Un emploi en entreprise"},
+                {"id": "ert_les_deux",    "title": "🔁 Les deux types"},
+            ],
+        },
+        {
+            "title": "Je propose du travail",
+            "rows": [
+                {"id": "ert_offreur", "title": "📢 Proposer un petit job"},
+            ],
+        },
     ]
 
     # Étape 2a : secteur petit job

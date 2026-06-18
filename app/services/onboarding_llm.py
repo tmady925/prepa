@@ -788,54 +788,90 @@ async def converse_emploi(
 
 # ─── Interpréteur LLM pour les étapes fixes emploi ──────────────────────────
 
+_INTERP_SYSTEM = (
+    "Tu es l'assistant emploi de Prepa (WhatsApp, Afrique de l'Ouest). "
+    "Ton rôle : interpréter un message libre et le mapper à une valeur fixe. "
+    "JAMAIS de salutation. Max 1 phrase dans guide_message. "
+    "Adapte-toi à la langue (wolof mélangé, abréviations, fautes — tout est ok)."
+)
+
 _INTERP_PROMPTS = {
-    "emploi_type": (
-        'Analyse ce message et détermine l\'intention emploi.\n\n'
+    "emploi_role": (
+        'L\'user a envoyé ce message au lieu de choisir dans la liste.\n\n'
         'Message : "{text}"\n\n'
+        'Options disponibles :\n'
+        '- "petit_job"  : cherche une mission courte, petit boulot, journalier\n'
+        '- "entreprise" : cherche un poste CDI/CDD/stage en entreprise\n'
+        '- "les_deux"   : cherche les deux types\n'
+        '- "offreur"    : c\'est LUI qui veut proposer un job / recruter quelqu\'un\n'
+        '- null         : vraiment pas clair\n\n'
         'Réponds UNIQUEMENT avec ce JSON :\n'
         '{{"mapped_value": "petit_job"|"entreprise"|"les_deux"|"offreur"|null, '
         '"guide_message": "..."|null}}\n\n'
-        'Règles :\n'
-        '- "petit_job" : missions courtes, journalier, livraison, manutention, vente, nettoyage...\n'
-        '- "entreprise" : poste, CDI, CDD, stage, bureau, carrière...\n'
-        '- "les_deux" : ouvert aux deux types\n'
-        '- "offreur" : c\'est LUI qui veut recruter quelqu\'un\n'
-        '- null : pas clair → guide_message = relance en 1 phrase sans salutation\n'
-        'guide_message = null si mapped_value trouvé, sinon une relance courte.'
+        'Si mapped_value trouvé → guide_message = null.\n'
+        'Si null → guide_message = reformule la question avec un exemple concret, '
+        'ton naturel, SANS salutation, max 1 phrase.'
     ),
     "secteur_petit_job": (
-        'Identifie le secteur petit job dans ce message.\n\n'
+        'L\'user devait choisir un type de boulot dans une liste mais a écrit du texte.\n\n'
         'Message : "{text}"\n\n'
         'Secteurs valides : livraison, vente, nettoyage, manutention, gardiennage, restauration, bricolage\n\n'
         'Réponds UNIQUEMENT avec ce JSON :\n'
         '{{"mapped_value": "<secteur>"|null, "guide_message": "..."|null}}\n\n'
-        'Si clair → mapped_value = secteur exact. Si proche → secteur le plus logique.\n'
-        'Si vraiment trop flou → null + guide_message (1 phrase).'
+        'Si clair → mapped_value = secteur exact.\n'
+        'Si proche d\'un secteur valide → mapped_value = le plus logique, guide_message = null.\n'
+        'Si trop flou → null + guide_message : reformule avec exemples (ex: "Livraison, vente, '
+        'nettoyage... tu fais quoi exactement ?"), SANS salutation.'
     ),
     "secteur_entreprise": (
-        'Identifie le secteur entreprise dans ce message.\n\n'
+        'L\'user devait choisir un domaine dans une liste mais a écrit du texte.\n\n'
         'Message : "{text}"\n\n'
         'Secteurs valides : informatique, finance, marketing, santé, btp, éducation, droit, rh\n\n'
         'Réponds UNIQUEMENT avec ce JSON :\n'
         '{{"mapped_value": "<secteur>"|null, "guide_message": "..."|null}}\n\n'
-        'Si clair → mapped_value = secteur exact. Si proche → secteur le plus logique.\n'
-        'Si trop flou → null + guide_message (1 phrase).'
+        'Si clair → mapped_value = secteur exact.\n'
+        'Si proche → mapped_value = le plus logique, guide_message = null.\n'
+        'Si trop flou → null + guide_message : demande de préciser avec 2 exemples, '
+        'SANS salutation.'
+    ),
+    "secteur_autre_pj": (
+        'L\'user a choisi "Autre" pour un petit job et précise ici.\n\n'
+        'Message : "{text}"\n\n'
+        'Réponds avec ce JSON :\n'
+        '{{"mapped_value": "<description_courte>"|null, "guide_message": "..."|null}}\n\n'
+        'mapped_value = description courte du boulot (max 4 mots, ex: "jardinage", "baby-sitting").\n'
+        'Si trop vague → null + guide_message demandant de préciser.'
+    ),
+    "secteur_autre_ent": (
+        'L\'user a choisi "Autre" pour un domaine entreprise et précise ici.\n\n'
+        'Message : "{text}"\n\n'
+        'Réponds avec ce JSON :\n'
+        '{{"mapped_value": "<domaine_court>"|null, "guide_message": "..."|null}}\n\n'
+        'mapped_value = nom court du domaine (max 4 mots, ex: "communication", "audit").\n'
+        'Si trop vague → null + guide_message demandant de préciser.'
     ),
     "niveau_etudes": (
-        'Identifie le niveau d\'études dans ce message.\n\n'
+        'L\'user devait choisir son niveau d\'études dans une liste mais a écrit du texte.\n\n'
         'Message : "{text}"\n\n'
         'Valeurs valides : aucun, bac, bac+2, bac+3, bac+5, doctorat\n\n'
         'Réponds UNIQUEMENT avec ce JSON :\n'
-        '{{"mapped_value": "<niveau>"|null, "guide_message": "..."|null}}'
+        '{{"mapped_value": "<niveau>"|null, "guide_message": "..."|null}}\n\n'
+        'Si clair ou proche → mapped_value = valeur valide.\n'
+        'Exemples : "BTS" → "bac+2", "licence" → "bac+3", "master" → "bac+5", '
+        '"terminal" → "bac", "je suis à l\'uni" → "bac+3" si pas plus précis.\n'
+        'Si vraiment pas clair → null + guide_message bref, SANS salutation.'
     ),
     "localisation": (
-        'Normalise cette localisation pour l\'Afrique de l\'Ouest.\n\n'
+        'L\'user devait donner sa ville ou son quartier.\n\n'
         'Message : "{text}"\n\n'
-        'Extrait juste la ville ou le quartier (ex: "dkr" → "Dakar", "Grand Yoff" → "Grand Yoff").\n'
-        'Si "partout" ou équivalent → "partout".\n'
-        'Si c\'est un secteur ou mot générique, pas une ville → null.\n\n'
+        'Normalise pour l\'Afrique de l\'Ouest :\n'
+        '- Abréviations → ville complète ("dkr" → "Dakar", "thies" → "Thiès")\n'
+        '- Quartiers connus → garde tel quel ("Grand Yoff", "Sacré-Cœur")\n'
+        '- "partout" / "n\'importe où" / "remote" → "partout"\n'
+        '- Si c\'est clairement un secteur ou un métier, pas une ville → null\n\n'
         'Réponds UNIQUEMENT avec ce JSON :\n'
-        '{{"mapped_value": "<ville_normalisée>"|null, "guide_message": "..."|null}}'
+        '{{"mapped_value": "<ville_normalisée>"|null, "guide_message": "..."|null}}\n\n'
+        'Si null → guide_message = demande la ville avec un exemple, SANS salutation.'
     ),
 }
 
@@ -850,7 +886,7 @@ async def interpret_emploi_step(step: str, text: str) -> dict:
     if not prompt_tpl:
         return {"mapped_value": None, "guide_message": None}
     prompt = prompt_tpl.format(text=text)
-    result = await _call_llm_json(prompt)
+    result = await _call_llm_json(prompt, system=_INTERP_SYSTEM)
     if not result:
         return {"mapped_value": None, "guide_message": None}
     return {

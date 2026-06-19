@@ -1112,13 +1112,12 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession, msg_t
             return
 
         if msg_type in ("document", "image") and (image_data or message):
-            # Télécharge + déchiffre + analyse réellement le CV (sinon cv_url
-            # resterait vide et la voie entreprise serait bloquée à tort).
-            _raw_media = (message or {}).get("message") or (image_data or {}).get("message")
+            # Télécharge (via Wasender /decrypt-media) + analyse réellement le CV
+            # (sinon cv_url resterait vide et la voie entreprise bloquée à tort).
             _cv_ok = False
             try:
                 from app.services.whatsapp.media_download import download_media
-                _media = await download_media(_raw_media)
+                _media = await download_media(message)
                 if _media and _media.get("bytes"):
                     from app.services.cv_processor_service import cv_processor
                     _res = await cv_processor.process_cv(

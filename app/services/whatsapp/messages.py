@@ -570,6 +570,19 @@ class Messages:
 
     # ── Commandes spéciales ────────────────────────────────────────
 
+    def services_menu(self, name: str = "") -> str:
+        """Menu fixe des services du bot (point d'ancrage post-onboarding)."""
+        who = f" *{name}*" if name else ""
+        return (
+            f"💼 Que veux-tu faire{who} ?\n\n"
+            "1️⃣ Voir mes *offres d'emploi*\n"
+            "2️⃣ *Petits jobs* / missions courtes\n"
+            "3️⃣ *Mon profil* (voir / modifier)\n"
+            "4️⃣ *Inviter des amis* 🎁\n"
+            "5️⃣ Passer *Pro* ⭐\n\n"
+            "_Réponds par un numéro, ou dis-moi simplement ce que tu cherches._"
+        )
+
     def help_message(self, name: str, days_left: int = 0) -> str:
         return (
             f"👋 Bonjour *{name}* ! Voici ce que tu peux faire :\n\n"

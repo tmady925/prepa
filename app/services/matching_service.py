@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_
 from app.core.settings import get_settings
 from app.services.rag.embedding_service import embedding_service
+from app.services import qualification
 
 settings = get_settings()
 
@@ -36,6 +37,12 @@ class MatchingService:
         candidate, user = await self._load_candidate_and_user(db, user_id)
         if not candidate or not candidate.embedding:
             print(f"  → matching: pas de profil/embedding pour {user_id}")
+            return []
+
+        # Voie entreprise = offres qualifiées → CV OBLIGATOIRE.
+        # Sans CV : aucune offre entreprise (la relance CV est gérée côté webhook).
+        if not (candidate.cv_url or candidate.cv_text):
+            print(f"  → matching: pas de CV pour {user_id} → offres entreprise inactives")
             return []
 
         if not self._check_quota(candidate, user):
@@ -73,6 +80,9 @@ class MatchingService:
             # Couche 1 — cosinus
             cosine = embedding_service.cosine_similarity(candidate.embedding, job.embedding)
             if cosine < COSINE_MIN:
+                continue
+            # Barrière niveau DURE — sensiblement supérieur ou égal (1 cran toléré)
+            if not qualification.meets_requirement(candidate.niveau_etudes, job.niveau_etudes):
                 continue
             # Couche 2 — LLM
             llm_result = await self._llm_match(candidate, job)
@@ -158,10 +168,16 @@ class MatchingService:
 
         notified = 0
         for candidate, user in rows:
+            # CV obligatoire pour la voie entreprise
+            if not (candidate.cv_url or candidate.cv_text):
+                continue
             if not self._check_quota(candidate, user):
                 continue
             cosine = embedding_service.cosine_similarity(candidate.embedding, job.embedding)
             if cosine < COSINE_MIN:
+                continue
+            # Barrière niveau DURE — sensiblement supérieur ou égal (1 cran toléré)
+            if not qualification.meets_requirement(candidate.niveau_etudes, job.niveau_etudes):
                 continue
             llm_result = await self._llm_match(candidate, job)
             if not llm_result or llm_result.get("score", 0) < LLM_MIN:

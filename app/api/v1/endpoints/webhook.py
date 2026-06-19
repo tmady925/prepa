@@ -328,6 +328,20 @@ async def _send_pro_offer(phone: str, user, context: str = "tout") -> None:
     await whatsapp_sender.send_text(phone, messages.pro_upsell(user.name or "toi", context, payment_url))
 
 
+# Options du menu de services (ordre = numéros 1..5) → commandes internes.
+_SERVICES_MENU_OPTIONS = ["mes_offres", "petits_jobs", "profil", "inviter", "plan"]
+
+
+async def _send_services_menu(phone: str, user, db: AsyncSession) -> None:
+    """Envoie le menu fixe des services + arme la navigation numérique (1..5)."""
+    conv = user.conversation_state or {}
+    conv["pending_menu"] = "services"
+    conv["menu_options"] = list(_SERVICES_MENU_OPTIONS)
+    user.conversation_state = conv
+    await db.flush()
+    await whatsapp_sender.send_text(phone, messages.services_menu(user.name or ""))
+
+
 async def process_message(message: dict, db: AsyncSession):
     phone = message.get("from")
     msg_type = message.get("type", "text")
@@ -464,6 +478,11 @@ async def _finalise_emploi(phone: str, user, db: AsyncSession, editing: bool = F
     from app.models.candidate_profile import CandidateProfile as _CP
     from sqlalchemy import select as _sel
 
+    # Garde-fou anti double-finalise (cause de messages en double).
+    if not editing and (user.conversation_state or {}).get("_emploi_finalised"):
+        print(f"  [_finalise_emploi] déjà finalisé pour {user.id} — ignoré")
+        return
+
     # Crée ou met à jour le CandidateProfile
     _cp = (await db.execute(_sel(_CP).where(_CP.user_id == user.id))).scalar_one_or_none()
     if not _cp:
@@ -521,18 +540,41 @@ async def _finalise_emploi(phone: str, user, db: AsyncSession, editing: bool = F
             phone, messages.emploi_done_msg(user.name or "toi", _et)
         )
 
-    # Matching
-    try:
-        from app.services.matching_service import matching_service
-        matches = await matching_service.match_candidate(db, user.id)
-        if not matches:
-            await whatsapp_sender.send_text(
-                phone,
-                "🔍 Je cherche des offres correspondant à ton profil. "
-                "Tu seras notifié dès qu'une opportunité apparaît ! 💼"
-            )
-    except Exception as _me:
-        print(f"Matching emploi error: {_me}")
+    # Marque la finalisation (idempotence anti-doublon)
+    _conv_fin = user.conversation_state or {}
+    _conv_fin["_emploi_finalised"] = True
+    user.conversation_state = _conv_fin
+    await db.flush()
+
+    # ── CTA finale selon la voie + présence de CV ────────────────────
+    # IMPORTANT : emploi_done_msg dit DÉJÀ « tu seras notifié ». On n'envoie donc
+    # PAS de second message « je cherche des offres » (c'était le doublon BUG 1).
+    has_cv = bool(_cp.cv_url or _cp.cv_text)
+    needs_cv = _et in ("entreprise", "les_deux")
+
+    if needs_cv and not has_cv:
+        # Voie entreprise = CV obligatoire → relance souple (flag cv_pending).
+        _conv_cv = user.conversation_state or {}
+        _conv_cv["cv_pending"] = True
+        user.conversation_state = _conv_cv
+        await db.flush()
+        _cta = (
+            "_En attendant, tu reçois déjà les petits jobs près de chez toi._"
+            if _et == "les_deux"
+            else "_Ou tape *petits jobs* pour les missions courtes._"
+        )
+        await whatsapp_sender.send_text(
+            phone,
+            f"📄 Pour recevoir les *offres d'entreprise*, envoie ton *CV* (PDF ou photo).\n{_cta}"
+        )
+    elif needs_cv and has_cv:
+        # CV présent → matching entreprise (match_candidate notifie lui-même).
+        try:
+            from app.services.matching_service import matching_service
+            await matching_service.match_candidate(db, user.id)
+        except Exception as _me:
+            print(f"Matching emploi error: {_me}")
+    # Voie petit_job pure → emploi_done_msg contient déjà le CTA « petits jobs ».
 
 
 async def _ask_usage(phone: str, user, db: AsyncSession):
@@ -1213,9 +1255,9 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession, msg_t
                 )
                 return
 
-        # Réponse à un menu en attente (ex: /profil) — interprète "1/2/3"
+        # Réponse à un menu en attente (/profil ou menu services) — interprète "1/2/3"
         conv_state = user.conversation_state or {}
-        if conv_state.get("pending_menu") == "profil":
+        if conv_state.get("pending_menu") in ("profil", "services"):
             menu_options = conv_state.get("menu_options", [])
             raw = text.lower().strip()
             cmd = None
@@ -1249,11 +1291,10 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession, msg_t
             await user_service.increment_message_count(db, user)
             return
 
-        # ── Cerveau conversationnel (post-onboarding) ──────────────────
-        # Le LLM décide + extrait ; le code valide, persiste, exécute et rend
-        # les faits. Une erreur du LLM ne peut produire qu'une phrase maladroite,
-        # jamais une fausse offre ni un champ invalide. Si le cerveau échoue
-        # (None), on retombe sur answer_emploi puis le message générique.
+        # ── Routeur conversationnel (post-onboarding) ──────────────────
+        # Le LLM COMPREND et ROUTE ; il ne génère pas de contenu libre. Le code
+        # valide, persiste, exécute et rend les faits. Tout finit sur une action
+        # de service ou le menu fixe. Si le routeur échoue (None) → menu services.
         if msg_type == "text" and text and len(text.strip()) > 2:
             try:
                 from app.services import conversation_brain as _brain
@@ -1264,35 +1305,35 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession, msg_t
                 _decision = None
 
             if _decision:
-                _action = _decision.get("action", "none")
+                _action = _decision.get("action", "show_menu")
                 _reply = _decision.get("reply")
                 _updates = _decision.get("profile_updates") or {}
 
-                # 1) Persiste les champs profil validés
+                # 1) Persiste les champs profil validés (corrections incluses)
                 _profile_changed = False
                 if _updates:
                     _profile_changed = await _brain.apply_profile_updates(db, user, _updates)
+                    if _profile_changed:
+                        await _brain.rematch(db, user)
 
-                # 2) Si le profil a changé, relance le matching (notifie les
-                #    nouvelles offres) AVANT d'afficher quoi que ce soit.
-                if _profile_changed:
-                    await _brain.rematch(db, user)
-
-                # 3) Message humain
+                # 2) Message court du routeur (déjà capé à ~280 car.)
                 if _reply:
                     await whatsapp_sender.send_text(phone, _reply)
+                # Confirmation systématique si correction/màj sans message explicite
+                elif _profile_changed:
+                    await whatsapp_sender.send_text(phone, "✅ C'est noté, ton profil est à jour !")
 
-                # 4) Action métier (réutilise les handlers existants)
+                # 3) Action de SERVICE (réutilise les handlers existants)
                 if _action == "show_jobs":
                     await handle_command("mes_offres", phone, user, db)
                 elif _action == "show_petit_jobs":
-                    from app.services.petit_job_service import petit_job_service as _pjs
-                    _jobs = await _pjs.list_active(db, lieu=getattr(user, "localisation_emploi", None))
-                    await whatsapp_sender.send_text(phone, messages.petit_job_list(_jobs, user.name or ""))
+                    await handle_command("petits_jobs", phone, user, db)
                 elif _action == "show_profile":
                     await handle_command("profil", phone, user, db)
                 elif _action == "show_plan":
                     await handle_command("plan", phone, user, db)
+                elif _action == "show_invite":
+                    await handle_command("inviter", phone, user, db)
                 elif _action == "post_job":
                     from app.services.petit_job_service import petit_job_service as _pjs
                     _draft = await _pjs.extract_from_text(text, user)
@@ -1313,6 +1354,15 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession, msg_t
                             f"📝 Décris le travail que tu proposes *{user.name or ''}* !\n\n"
                             "_Exemple : J'ai besoin de 2 livreurs à moto demain à Dakar Plateau, 5000F la journée_"
                         )
+                elif _action == "show_menu":
+                    # Le menu est le point d'ancrage permanent : on l'affiche
+                    # toujours (après l'éventuelle phrase courte), sauf si on vient
+                    # juste de confirmer une correction de profil.
+                    if not _profile_changed:
+                        await _send_services_menu(phone, user, db)
+                # action "none" sans rien → menu aussi.
+                elif _action == "none" and not _reply and not _profile_changed:
+                    await _send_services_menu(phone, user, db)
 
                 await user_service.increment_message_count(db, user)
                 await message_repo.save(db=db, user_id=user.id, direction="inbound", content=text, intent=_decision.get("intent") or "emploi")
@@ -1321,24 +1371,7 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession, msg_t
                 return
         # ─────────────────────────────────────────────────────────────
 
-        # ── Réponse emploi fallback ──────────────────────────────────
+        # ── Fallback : routeur muet → menu fixe (jamais de pavé libre) ──
         if msg_type == "text" and text:
-            try:
-                from app.services.bot_intelligence import answer_emploi as _answer_emploi
-                _hist2 = await message_repo.get_history(db, user.id, limit=6)
-                _reply = await _answer_emploi(text=text, user=user, db=db, history=_hist2)
-            except Exception as _e_emp:
-                print(f"  [answer_emploi] erreur: {_e_emp}")
-                _reply = None
-            if not _reply:
-                _reply = (
-                    f"💼 Je suis ton assistant emploi *{user.name or ''}* !\n\n"
-                    "Je peux t'aider à :\n"
-                    "→ Trouver des offres adaptées à ton profil\n"
-                    "→ Améliorer ton CV et ta lettre de motivation\n"
-                    "→ Préparer tes entretiens d'embauche\n\n"
-                    "Que puis-je faire pour toi ? 🚀"
-                )
-            await whatsapp_sender.send_text(phone, _reply)
+            await _send_services_menu(phone, user, db)
             await message_repo.save(db=db, user_id=user.id, direction="inbound", content=text, intent="emploi")
-            await message_repo.save(db=db, user_id=user.id, direction="outbound", content=_reply, intent="emploi")

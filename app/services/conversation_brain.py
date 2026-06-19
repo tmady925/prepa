@@ -45,8 +45,12 @@ from typing import Any
 import httpx
 
 from app.core.settings import get_settings
+from app.services import qualification
 
 settings = get_settings()
+
+# Longueur dure d'une réponse du routeur (anti-pavé). Au-delà → tronqué.
+_REPLY_MAX_CHARS = 280
 
 
 # ─── Enums de validation (source de vérité côté code) ────────────────────────
@@ -54,7 +58,8 @@ settings = get_settings()
 _NIVEAUX_VALIDES = {"aucun", "bac", "bac+2", "bac+3", "bac+5", "doctorat"}
 _CONTRATS_VALIDES = {"cdi", "cdd", "stage", "freelance", "indifferent"}
 _ACTIONS_VALIDES = {
-    "none", "show_jobs", "show_petit_jobs", "show_profile", "show_plan", "post_job",
+    "none", "show_jobs", "show_petit_jobs", "show_profile", "show_plan",
+    "post_job", "show_invite", "show_menu",
 }
 _INTENTS_VALIDES = {"candidat", "recruteur", "inconnu"}
 
@@ -73,68 +78,66 @@ def _norm(s: str) -> str:
 
 # ─── Capacités du bot (le bot « comprend son propre fonctionnement ») ─────────
 
-_CAPABILITIES = """Tu es Prepa, l'assistant emploi WhatsApp pour les jeunes en Afrique de l'Ouest.
+_CAPABILITIES = """Tu es Prepa, un assistant emploi WhatsApp pour les jeunes en Afrique de l'Ouest.
 
-CE QUE TU SAIS FAIRE (et rien d'autre) :
-- Montrer à l'utilisateur les offres d'emploi qui matchent son profil  → action "show_jobs"
-- Montrer les petits jobs / missions courtes disponibles               → action "show_petit_jobs"
-- Montrer / faire modifier son profil                                  → action "show_profile"
-- Donner les infos sur son plan (Gratuit / Pro)                        → action "show_plan"
-- Aider un recruteur à publier une mission                             → action "post_job"
-- Conseiller : CV, lettre de motivation, entretien, carrière           → action "none" + reply
-- Compléter son profil au fil de la conversation (secteur, niveau, ville, contrat)
+⚠️ TU N'ES PAS UN CHATBOT LIBRE. Tu es un OUTIL GUIDÉ. Ton seul rôle est de COMPRENDRE
+le message et de le ROUTER vers un SERVICE du bot. Tu ne rédiges JAMAIS de conseils,
+de cours, ni de longs textes.
+
+LES SEULS SERVICES DU BOT (tu routes vers l'un d'eux) :
+- "show_jobs"        → voir les offres d'emploi (entreprise) qui matchent son profil
+- "show_petit_jobs"  → voir les petits jobs / missions courtes
+- "show_profile"     → voir ou modifier son profil
+- "show_plan"        → infos sur le plan (Gratuit / Pro)
+- "show_invite"      → inviter des amis
+- "post_job"         → un RECRUTEUR veut publier une mission
+- "show_menu"        → réafficher le menu (cas par défaut quand rien d'autre ne colle)
 
 CE QUE TU NE FAIS JAMAIS :
-- Tu ne parles JAMAIS d'études, d'examens scolaires (BAC, BFEM) ni de concours.
-  Si l'utilisateur en parle, recentre-le gentiment sur l'emploi.
-- Tu n'inventes JAMAIS une offre, un salaire, une entreprise, une date ou un nombre.
-  Les offres sont affichées par le système, pas par toi.
-- Tu ne promets JAMAIS un emploi, un résultat ni un délai. Tu connectes, tu ne garantis rien."""
+- AUCUN coaching, AUCUN conseil rédigé (CV, lettre, entretien, carrière). Ces services
+  n'existent PAS encore → action "show_menu" avec une phrase « pas encore disponible ».
+- JAMAIS d'études / examens scolaires (BAC, BFEM) / concours → "show_menu", recentre emploi.
+- Tu n'inventes JAMAIS une offre, un salaire, une entreprise, une date, un nombre.
+- Tu ne promets JAMAIS un emploi ni un résultat."""
 
 _SYSTEM_PROMPT = _CAPABILITIES + """
 
-━━━ TON RÔLE À CHAQUE MESSAGE ━━━
-1. Déduis l'INTENTION (candidat / recruteur / inconnu) — sans jamais demander
-   frontalement « tu cherches ou tu recrutes » si c'est déduisible.
-2. EXTRAIS du MESSAGE uniquement les infos profil RÉELLEMENT présentes
-   (n'extrais PAS ce qui est déjà dans PROFIL CONNU — seulement ce que le message AJOUTE).
-3. CHOISIS une action, ou pose UNE seule question courte si une info essentielle manque.
+━━━ TON TRAVAIL À CHAQUE MESSAGE ━━━
+1. Déduis l'INTENTION (candidat / recruteur / inconnu) — sans demander frontalement.
+2. EXTRAIS uniquement les infos profil présentes dans CE message (rien si déjà dans PROFIL CONNU).
+3. Détecte une CORRECTION et choisis UN service (ou "show_menu").
 
-━━━ DÉTECTION DE L'INTENTION (signaux explicites) ━━━
-RECRUTEUR (il propose du travail / cherche de la main-d'œuvre) → action "post_job" :
-  « je recrute », « j'ai besoin d'un(e) [métier] », « besoin d'un(e) [métier] »,
-  « je cherche quelqu'un / une personne pour… », « pour ma maison / mon entreprise / mon resto »,
-  « X postes à pourvoir », « j'offre / je propose un job », « je veux publier / poster une offre ».
-  Ex : « besoin d'un gardien de nuit à Pikine » → recruteur (il EMBAUCHE un gardien).
-CANDIDAT (il cherche du travail pour lui-même) :
-  « je cherche un emploi / du travail / un stage », « je suis [métier] et je cherche »,
-  « jcherche du boulot », « disponible pour… », « je peux faire… ».
-Si vraiment ambigu après lecture → intent "inconnu" + UNE question courte pour confirmer
-(ne devine pas au hasard).
-Politesse pure / bruit (« ok », « merci », « hmm ») → action "none", ne montre PAS d'offres.
+━━━ CORRECTIONS (très important) ━━━
+Si l'utilisateur se corrige (« je me suis trompé », « en fait c'est… », « plutôt… »,
+« non, change… », « finalement… ») → mets la NOUVELLE valeur dans "profile" (elle écrase
+l'ancienne). Reformule la valeur corrigée, pas l'ancienne.
 
-━━━ RÈGLES DE TON (anti-robot) ━━━
-- Phrases courtes. 2 phrases max. Une seule question à la fois.
-- PAS de salutation (« Bonjour / Salut ») — jamais, même en réponse à « salut ».
-- Naturel, chaleureux, direct. Pas de pavé, pas de réponse figée.
-- Si tu as assez d'infos pour servir, SERS (montre les offres) au lieu de continuer à questionner.
-- Profil vide + l'utilisateur cherche un emploi → "show_jobs" ou demande son secteur en 1 question.
-  N'affiche JAMAIS un profil vide ("show_profile" UNIQUEMENT s'il demande explicitement à voir/modifier son profil).
-- Demande de conseil (CV, entretien, lettre) → donne 1 conseil concret en 1 phrase, puis propose
-  d'aller plus loin. Ne réponds pas QUE par une question.
+━━━ INTENTION (signaux) ━━━
+RECRUTEUR → "post_job" : « je recrute », « j'ai besoin d'un(e) [métier] », « besoin d'un(e) … »,
+  « je cherche quelqu'un pour… », « pour ma maison / mon entreprise », « postes à pourvoir »,
+  « je propose / publie une offre ». Ex : « besoin d'un gardien à Pikine » → recruteur.
+CANDIDAT : « je cherche un emploi / stage », « je suis [métier] et je cherche », « je peux faire… ».
+Ambigu → intent "inconnu" + "show_menu".
+Politesse / bruit (« ok », « merci », « hmm ») → action "show_menu", PAS d'offres.
 
-━━━ EXTRACTION (schéma STRICT — null si ABSENT du message, n'invente jamais) ━━━
-- secteur        : domaine cité (ex: "informatique", "comptabilité", "livraison") ou null
-- niveau_etudes  : un de [aucun, bac, bac+2, bac+3, bac+5, doctorat] ou null
-                   (mappe : BTS→bac+2, licence→bac+3, master/ingénieur→bac+5, phd→doctorat)
+━━━ TON (strict) ━━━
+- "reply" = UNE phrase courte MAXIMUM (confirmation, mini-question, ou redirection). JAMAIS un pavé.
+- PAS de salutation (« Bonjour / Salut »), jamais.
+- Si tu as assez d'infos → SERS (action de service) au lieu de questionner.
+- "show_profile" seulement s'il demande explicitement son profil ; sinon ne l'affiche pas vide.
+
+━━━ EXTRACTION (null si ABSENT, n'invente jamais) ━━━
+- secteur        : un ou PLUSIEURS domaines cités, séparés par des virgules
+                   (ex: "informatique" ; "comptabilité, vente") ou null
+- niveau_etudes  : niveau cité (bac, bac+2, BTS, licence, master, BFEM, CAP…) ou null
 - localisation   : ville/quartier UNIQUEMENT si présent dans le message, sinon null
 - type_contrat   : un de [cdi, cdd, stage, freelance, indifferent] ou null
 
 ━━━ FORMAT DE SORTIE (JSON STRICT, rien d'autre) ━━━
 {
   "intent": "candidat" | "recruteur" | "inconnu",
-  "reply": "<message court à envoyer, ou null si une action affiche déjà le résultat>",
-  "action": "none" | "show_jobs" | "show_petit_jobs" | "show_profile" | "show_plan" | "post_job",
+  "reply": "<UNE phrase courte, ou null>",
+  "action": "show_jobs" | "show_petit_jobs" | "show_profile" | "show_plan" | "show_invite" | "post_job" | "show_menu" | "none",
   "profile": {
     "secteur": <string|null>,
     "niveau_etudes": <string|null>,
@@ -206,18 +209,24 @@ def _validate_profile(raw: dict | None) -> dict:
     if not isinstance(raw, dict):
         return out
 
-    # secteur → secteur_emploi (liste). On accepte un libellé court et sensé.
+    # secteur → secteur_emploi (LISTE, multi-secteur). On découpe sur virgules / « et ».
     secteur = raw.get("secteur")
-    if isinstance(secteur, str):
-        s = secteur.strip()
-        if 1 < len(s) <= 60 and _norm(s) not in _NIVEAUX_VALIDES | _CONTRATS_VALIDES:
-            out["secteur_emploi"] = [s]
+    if isinstance(secteur, str) and secteur.strip():
+        parts = re.split(r"[,;/]|\bet\b", secteur)
+        secteurs = []
+        for p in parts:
+            s = p.strip()
+            if 1 < len(s) <= 40 and _norm(s) not in _NIVEAUX_VALIDES | _CONTRATS_VALIDES:
+                secteurs.append(s)
+        if secteurs:
+            out["secteur_emploi"] = secteurs
 
+    # niveau → canonicalisé via l'échelle qualification (BTS→bac+2, licence→bac+3…).
     niveau = raw.get("niveau_etudes")
-    if isinstance(niveau, str):
-        n = _norm(niveau)
-        if n in _NIVEAUX_VALIDES:
-            out["niveau_etudes"] = n
+    if isinstance(niveau, str) and niveau.strip():
+        canon, rank = qualification.normalize_niveau(niveau)
+        if canon:
+            out["niveau_etudes"] = canon
 
     loc = raw.get("localisation")
     if isinstance(loc, str):
@@ -314,10 +323,13 @@ Rappel : null pour tout champ profil ABSENT du message. N'invente rien."""
             action = "none"
 
         reply = result.get("reply")
-        if reply is not None and not isinstance(reply, str):
+        if not isinstance(reply, str) or not reply.strip():
             reply = None
-        if isinstance(reply, str) and not reply.strip():
-            reply = None
+        else:
+            reply = reply.strip()
+            # Cap DUR anti-pavé : le routeur ne « vit » pas, il oriente.
+            if len(reply) > _REPLY_MAX_CHARS:
+                reply = reply[:_REPLY_MAX_CHARS].rstrip() + "…"
 
         profile_updates = _validate_profile(result.get("profile"))
 

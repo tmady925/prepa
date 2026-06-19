@@ -1115,9 +1115,10 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession, msg_t
             # Télécharge (via Wasender /decrypt-media) + analyse réellement le CV
             # (sinon cv_url resterait vide et la voie entreprise bloquée à tort).
             _cv_ok = False
+            _diag = ""
             try:
-                from app.services.whatsapp.media_download import download_media
-                _media = await download_media(message)
+                from app.services.whatsapp import media_download as _md
+                _media = await _md.download_media(message)
                 if _media and _media.get("bytes"):
                     from app.services.cv_processor_service import cv_processor
                     _res = await cv_processor.process_cv(
@@ -1126,7 +1127,12 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession, msg_t
                         filename=_media.get("filename") or "cv.pdf",
                     )
                     _cv_ok = bool(_res and _res.get("success"))
+                    if not _cv_ok:
+                        _diag = f"lecture PDF échouée ({len(_media['bytes'])} octets)"
+                else:
+                    _diag = _md.get_last_error() or "téléchargement échoué"
             except Exception as _cv_dl_err:
+                _diag = f"exception {type(_cv_dl_err).__name__}: {str(_cv_dl_err)[:120]}"
                 print(f"  [cv upload] erreur: {_cv_dl_err}")
 
             if _cv_ok:
@@ -1136,11 +1142,12 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession, msg_t
                 )
                 await _finish_emploi()
             else:
-                # Honnête : on ne prétend pas avoir le CV. On reste sur l'étape.
+                # Honnête + DIAGNOSTIC TEMPORAIRE (à retirer une fois réglé).
                 await whatsapp_sender.send_text(
                     phone,
                     "😕 Je n'ai pas réussi à lire ton CV. Renvoie-le en *PDF* "
-                    "(ou une photo nette), ou tape *passer* pour continuer sans."
+                    "(ou une photo nette), ou tape *passer* pour continuer sans.\n\n"
+                    f"_diag : {_diag}_"
                 )
             return
 

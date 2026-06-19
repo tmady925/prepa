@@ -20,6 +20,24 @@ from app.core.settings import get_settings
 
 settings = get_settings()
 
+# Endpoint de déchiffrement documenté (host www, pas api).
+_DECRYPT_URL = "https://www.wasenderapi.com/api/decrypt-media"
+
+# Dernière raison d'échec (diagnostic temporaire, lisible côté chat).
+_LAST_ERROR = ""
+
+
+def get_last_error() -> str:
+    return _LAST_ERROR
+
+
+def _fail(reason: str):
+    global _LAST_ERROR
+    _LAST_ERROR = reason
+    print(f"  [media_download] {reason}")
+    return None
+
+
 _MEDIA_KEYS = ("documentMessage", "imageMessage", "videoMessage", "audioMessage")
 
 
@@ -49,9 +67,11 @@ async def download_media(message: dict) -> dict | None:
     Déchiffre (via Wasender) puis télécharge le média d'un message entrant.
     Retourne {"bytes", "filename"} ou None si pas de média / échec.
     """
+    global _LAST_ERROR
+    _LAST_ERROR = ""
     raw = (message or {}).get("message")
     if not _media_node(raw):
-        return None
+        return _fail("aucun media dans le message")
 
     # Wasender attend la même enveloppe que le webhook : data.messages{key, message}
     body = {
@@ -62,7 +82,6 @@ async def download_media(message: dict) -> dict | None:
             }
         }
     }
-    decrypt_url = f"{settings.wasender_base_url}/decrypt-media"
     headers = {
         "Authorization": f"Bearer {settings.wasender_api_key}",
         "Content-Type": "application/json",
@@ -70,20 +89,17 @@ async def download_media(message: dict) -> dict | None:
 
     try:
         async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
-            resp = await client.post(decrypt_url, headers=headers, json=body)
+            resp = await client.post(_DECRYPT_URL, headers=headers, json=body)
             if resp.status_code != 200:
-                print(f"  [media_download] decrypt HTTP {resp.status_code}: {resp.text[:200]}")
-                return None
-            public_url = (resp.json() or {}).get("publicUrl")
+                return _fail(f"decrypt HTTP {resp.status_code}: {resp.text[:120]}")
+            data = resp.json() or {}
+            public_url = data.get("publicUrl") or data.get("url") or (data.get("data") or {}).get("publicUrl")
             if not public_url:
-                print(f"  [media_download] pas de publicUrl: {resp.text[:200]}")
-                return None
+                return _fail(f"pas de publicUrl: {str(data)[:120]}")
 
             f = await client.get(public_url)
             if f.status_code != 200 or not f.content:
-                print(f"  [media_download] download HTTP {f.status_code}")
-                return None
+                return _fail(f"download HTTP {f.status_code}")
             return {"bytes": f.content, "filename": _filename(raw)}
     except Exception as e:
-        print(f"  [media_download] erreur: {e}")
-        return None
+        return _fail(f"exception {type(e).__name__}: {str(e)[:120]}")

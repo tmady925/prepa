@@ -1112,8 +1112,37 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession, msg_t
             return
 
         if msg_type in ("document", "image") and (image_data or message):
-            await whatsapp_sender.send_text(phone, "✅ CV reçu ! Je vais chercher les opportunités correspondant à ton profil. 🎯")
-            await _finish_emploi()
+            # Télécharge + déchiffre + analyse réellement le CV (sinon cv_url
+            # resterait vide et la voie entreprise serait bloquée à tort).
+            _raw_media = (message or {}).get("message") or (image_data or {}).get("message")
+            _cv_ok = False
+            try:
+                from app.services.whatsapp.media_download import download_media
+                _media = await download_media(_raw_media)
+                if _media and _media.get("bytes"):
+                    from app.services.cv_processor_service import cv_processor
+                    _res = await cv_processor.process_cv(
+                        db=db, user=user,
+                        file_bytes=_media["bytes"],
+                        filename=_media.get("filename") or "cv.pdf",
+                    )
+                    _cv_ok = bool(_res and _res.get("success"))
+            except Exception as _cv_dl_err:
+                print(f"  [cv upload] erreur: {_cv_dl_err}")
+
+            if _cv_ok:
+                await whatsapp_sender.send_text(
+                    phone,
+                    "✅ CV reçu et analysé ! Je cherche les opportunités correspondant à ton profil. 🎯"
+                )
+                await _finish_emploi()
+            else:
+                # Honnête : on ne prétend pas avoir le CV. On reste sur l'étape.
+                await whatsapp_sender.send_text(
+                    phone,
+                    "😕 Je n'ai pas réussi à lire ton CV. Renvoie-le en *PDF* "
+                    "(ou une photo nette), ou tape *passer* pour continuer sans."
+                )
             return
 
         await whatsapp_sender.send_text(

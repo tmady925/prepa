@@ -584,14 +584,8 @@ tr:hover td { background: rgba(255,255,255,0.02); }
       <span class="icon">👥</span> Élèves
       <span class="nav-badge" id="badge-students">—</span>
     </a>
-    <a class="nav-item" onclick="showPage('exercises')" data-page="exercises">
-      <span class="icon">📝</span> Exercices
-    </a>
 
     <div class="sidebar-section">Contenu</div>
-    <a class="nav-item" onclick="showPage('documents')" data-page="documents">
-      <span class="icon">📚</span> Documents RAG
-    </a>
     <a class="nav-item" onclick="showPage('notifications')" data-page="notifications">
       <span class="icon">📣</span> Notifications
     </a>
@@ -605,20 +599,6 @@ tr:hover td { background: rgba(255,255,255,0.02); }
     </a>
     <a class="nav-item" onclick="showPage('config')" data-page="config">
       <span class="icon">⚙️</span> Configuration
-    </a>
-
-    <div class="sidebar-section">Référentiels</div>
-    <a class="nav-item" onclick="showPage('exams')" data-page="exams">
-      <span class="icon">🎓</span> Examens
-    </a>
-    <a class="nav-item" onclick="showPage('series')" data-page="series">
-      <span class="icon">📋</span> Séries
-    </a>
-    <a class="nav-item" onclick="showPage('concours')" data-page="concours">
-      <span class="icon">🏆</span> Concours
-    </a>
-    <a class="nav-item" onclick="showPage('simulations')" data-page="simulations">
-      <span class="icon">🎯</span> Simulations
     </a>
 
     <div class="sidebar-section">Emploi</div>
@@ -694,12 +674,6 @@ tr:hover td { background: rgba(255,255,255,0.02); }
           <div class="kpi-change" id="kpi-cost">$— USD</div>
         </div>
         <div class="kpi-card green">
-          <div class="kpi-icon">📚</div>
-          <div class="kpi-label">Chunks RAG</div>
-          <div class="kpi-value green" id="kpi-chunks">—</div>
-          <div class="kpi-change up">indexés</div>
-        </div>
-        <div class="kpi-card green">
           <div class="kpi-icon">💼</div>
           <div class="kpi-label">Offres actives</div>
           <div class="kpi-value green" id="jobs-count">—</div>
@@ -719,7 +693,7 @@ tr:hover td { background: rgba(255,255,255,0.02); }
         </div>
       </div>
 
-      <div class="grid-6-4" style="margin-bottom:16px">
+      <div style="margin-bottom:16px">
         <div class="card">
           <div class="card-header">
             <div>
@@ -733,14 +707,6 @@ tr:hover td { background: rgba(255,255,255,0.02); }
           </div>
           <div class="chart-container" style="height:220px">
             <canvas id="chart-activity"></canvas>
-          </div>
-        </div>
-        <div class="card">
-          <div class="card-header">
-            <div class="card-title">🎯 Répartition</div>
-          </div>
-          <div class="chart-container" style="height:220px">
-            <canvas id="chart-subjects"></canvas>
           </div>
         </div>
       </div>
@@ -783,12 +749,6 @@ tr:hover td { background: rgba(255,255,255,0.02); }
           <option value="free">Gratuit</option>
           <option value="pro">Pro ⭐</option>
         </select>
-        <select class="filter-select" id="filter-exam" onchange="filterStudents()">
-          <option value="">Tous les examens</option>
-          <option value="bac_senegal">BAC Sénégal</option>
-          <option value="bfem">BFEM</option>
-          <option value="concours">Concours</option>
-        </select>
         <select class="filter-select" id="filter-status" onchange="filterStudents()">
           <option value="">Tous les statuts</option>
           <option value="active">Actif</option>
@@ -804,7 +764,6 @@ tr:hover td { background: rgba(255,255,255,0.02); }
                 <th>Élève</th>
                 <th>Téléphone</th>
                 <th>Plan</th>
-                <th>Examen / Série</th>
                 <th>Streak</th>
                 <th>Messages</th>
                 <th>Score</th>
@@ -813,115 +772,11 @@ tr:hover td { background: rgba(255,255,255,0.02); }
               </tr>
             </thead>
             <tbody id="students-table">
-              <tr><td colspan="9" style="text-align:center;padding:40px;color:var(--text3)"><div class="spinner"></div></td></tr>
+              <tr><td colspan="8" style="text-align:center;padding:40px;color:var(--text3)"><div class="spinner"></div></td></tr>
             </tbody>
           </table>
         </div>
         <div class="pagination" id="students-pagination"></div>
-      </div>
-    </div>
-
-    <!-- PAGE: EXERCISES -->
-    <div class="page" id="page-exercises">
-      <div class="section-header">
-        <div>
-          <div class="section-title">📝 Exercices</div>
-          <div class="section-sub">Gérer les exercices PDF et corrections</div>
-        </div>
-        <button class="btn btn-primary" onclick="openModal('modal-upload-exercise')">+ Ajouter un exercice</button>
-      </div>
-
-      <div class="filter-bar">
-        <select class="filter-select" id="filter-ex-matiere" onchange="loadExercises()">
-          <option value="">Toutes les matières</option>
-          <option value="maths">Maths</option>
-          <option value="physique_chimie">Physique-Chimie</option>
-          <option value="svt">SVT</option>
-          <option value="francais">Français</option>
-          <option value="philosophie">Philosophie</option>
-          <option value="histoire_geo">Histoire-Géo</option>
-          <option value="anglais">Anglais</option>
-        </select>
-        <select class="filter-select" id="filter-ex-niveau" onchange="loadExercises()">
-          <option value="">Tous les niveaux</option>
-          <option value="1">🟢 Facile</option>
-          <option value="2">🟡 Intermédiaire</option>
-          <option value="3">🔴 Difficile</option>
-        </select>
-        <select class="filter-select" id="filter-ex-exam" onchange="loadExercises()">
-          <option value="">Tous les examens</option>
-          <option value="bac_senegal">BAC Sénégal</option>
-          <option value="bfem">BFEM</option>
-          <option value="concours">Concours</option>
-        </select>
-      </div>
-
-      <div class="card">
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Titre</th>
-                <th>Matière</th>
-                <th>Chapitre</th>
-                <th>Examen / Série</th>
-                <th>Année</th>
-                <th>Niveau</th>
-                <th>Correction</th>
-                <th>Statut</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody id="exercises-table">
-              <tr><td colspan="9" style="text-align:center;padding:40px;color:var(--text3)">Chargement...</td></tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </div>
-
-    <!-- PAGE: DOCUMENTS -->
-    <div class="page" id="page-documents">
-      <div class="section-header">
-        <div>
-          <div class="section-title">📚 Documents RAG</div>
-          <div class="section-sub">Base de connaissances du bot</div>
-        </div>
-        <button class="btn btn-primary" onclick="openModal('modal-upload-doc')">+ Indexer un document</button>
-      </div>
-
-      <div class="kpi-grid" id="rag-stats" style="margin-bottom:20px">
-        <div class="kpi-card blue"><div class="kpi-label">Total chunks</div><div class="kpi-value blue" id="rag-total">—</div></div>
-        <div class="kpi-card green"><div class="kpi-label">Physique-Chimie</div><div class="kpi-value green" id="rag-pc">—</div></div>
-        <div class="kpi-card purple"><div class="kpi-label">Maths</div><div class="kpi-value purple" id="rag-maths">—</div></div>
-        <div class="kpi-card yellow"><div class="kpi-label">Autres matières</div><div class="kpi-value yellow" id="rag-other">—</div></div>
-      </div>
-
-      <div class="card">
-        <div class="card-header">
-          <div class="card-title">Documents indexés</div>
-          <button class="btn btn-ghost btn-sm" onclick="loadDocuments()">🔄</button>
-        </div>
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Titre</th>
-                <th>Examen</th>
-                <th>Série</th>
-                <th>Matière</th>
-                <th>Type</th>
-                <th>Pages</th>
-                <th>Chunks</th>
-                <th>Statut</th>
-                <th>Action</th>
-              </tr>
-            </thead>
-            <tbody id="docs-table">
-              <tr><td colspan="9" style="text-align:center;padding:40px;color:var(--text3)">Chargement...</td></tr>
-            </tbody>
-          </table>
-        </div>
       </div>
     </div>
 
@@ -940,39 +795,15 @@ tr:hover td { background: rgba(255,255,255,0.02); }
             <div class="card-title">Composer un message</div>
           </div>
 
-          <div class="form-row" style="margin-bottom:12px">
+          <div class="form-row" style="margin-bottom:16px">
             <div class="form-group" style="margin:0">
               <label class="form-label">Audience</label>
               <select class="form-select" id="notif-filter" onchange="updateNotifCount()">
                 <option value="all">Tous les élèves</option>
                 <option value="inactive_24h">Inactifs 24h</option>
                 <option value="inactive_7d">Inactifs 7 jours</option>
-                <option value="before_exam_7d">Examen dans 7 jours</option>
-                <option value="before_exam_30d">Examen dans 30 jours</option>
                 <option value="free_users">Plan Gratuit</option>
                 <option value="pro_users">Plan Pro</option>
-              </select>
-            </div>
-            <div class="form-group" style="margin:0">
-              <label class="form-label">Examen</label>
-              <select class="form-select" id="notif-exam" onchange="updateNotifCount()">
-                <option value="">Tous</option>
-                <option value="bac_senegal">BAC Sénégal</option>
-                <option value="bfem">BFEM</option>
-                <option value="concours">Concours</option>
-              </select>
-            </div>
-          </div>
-
-          <div class="form-row" style="margin-bottom:16px">
-            <div class="form-group" style="margin:0">
-              <label class="form-label">Série</label>
-              <select class="form-select" id="notif-series" onchange="updateNotifCount()">
-                <option value="">Toutes</option>
-                <option value="S1">S1</option>
-                <option value="S2">S2</option>
-                <option value="L1">L1</option>
-                <option value="L2">L2</option>
               </select>
             </div>
             <div style="display:flex;align-items:flex-end;padding-bottom:2px">
@@ -984,7 +815,7 @@ tr:hover td { background: rgba(255,255,255,0.02); }
           </div>
 
           <div class="form-group">
-            <label class="form-label">Message <span style="color:var(--text3);font-weight:400;text-transform:none">— Variables: {nom} {streak} {jours_restants} {plan} {exam}</span></label>
+            <label class="form-label">Message <span style="color:var(--text3);font-weight:400;text-transform:none">— Variables: {nom} {streak} {plan}</span></label>
             <textarea class="form-textarea" id="notif-message" rows="8" placeholder="Écris ton message..." oninput="updateNotifPreview()" style="min-height:160px"></textarea>
           </div>
 
@@ -1007,8 +838,7 @@ tr:hover td { background: rgba(255,255,255,0.02); }
             <div style="font-size:11px;color:var(--text3);margin-bottom:10px;text-transform:uppercase;letter-spacing:0.05em">Templates</div>
             <div style="display:flex;flex-direction:column;gap:6px">
               <button class="btn btn-ghost btn-sm" onclick="useTemplate('motivation')" style="justify-content:flex-start">🔥 Motivation streak</button>
-              <button class="btn btn-ghost btn-sm" onclick="useTemplate('rappel')" style="justify-content:flex-start">📚 Rappel révision</button>
-              <button class="btn btn-ghost btn-sm" onclick="useTemplate('urgence')" style="justify-content:flex-start">⚠️ Urgence examen</button>
+              <button class="btn btn-ghost btn-sm" onclick="useTemplate('rappel')" style="justify-content:flex-start">💼 Rappel profil</button>
               <button class="btn btn-ghost btn-sm" onclick="useTemplate('upsell')" style="justify-content:flex-start">⭐ Passage Pro</button>
               <button class="btn btn-ghost btn-sm" onclick="useTemplate('weekend')" style="justify-content:flex-start">🌟 Weekend</button>
             </div>
@@ -1077,15 +907,7 @@ tr:hover td { background: rgba(255,255,255,0.02); }
         </div>
       </div>
 
-      <div class="grid-2" style="margin-bottom:16px">
-        <div class="card">
-          <div class="card-header">
-            <div class="card-title">📚 Matières populaires</div>
-          </div>
-          <div class="chart-container" style="height:200px">
-            <canvas id="chart-matiere"></canvas>
-          </div>
-        </div>
+      <div style="margin-bottom:16px">
         <div class="card">
           <div class="card-header">
             <div class="card-title">💰 Revenus mensuels</div>
@@ -1096,18 +918,10 @@ tr:hover td { background: rgba(255,255,255,0.02); }
         </div>
       </div>
 
-      <div class="grid-3">
-        <div class="card">
-          <div class="card-header"><div class="card-title">🎯 Examens</div></div>
-          <div id="exam-stats"></div>
-        </div>
+      <div>
         <div class="card">
           <div class="card-header"><div class="card-title">📡 Providers LLM</div></div>
           <div id="provider-stats"></div>
-        </div>
-        <div class="card">
-          <div class="card-header"><div class="card-title">📊 Séries</div></div>
-          <div id="series-stats"></div>
         </div>
       </div>
     </div>
@@ -1126,7 +940,7 @@ tr:hover td { background: rgba(255,255,255,0.02); }
         <div class="card-title" style="margin-bottom:12px">🔔 Contrôles notifications</div>
         <div style="display:flex;flex-wrap:wrap;gap:20px;align-items:center">
           <div style="display:flex;align-items:center;gap:10px">
-            <div id="toggle-notif-blocker" class="toggle" onclick="toggleNotifBlocker()" title="Active/désactive la mise en queue des notifications pendant les exercices"></div>
+            <div id="toggle-notif-blocker" class="toggle" onclick="toggleNotifBlocker()" title="Active/désactive la mise en queue des notifications pendant une conversation active"></div>
             <div>
               <div style="font-size:13px;font-weight:600">Bloqueur de notifications</div>
               <div style="font-size:11px;color:var(--text2)" id="notif-blocker-desc">Chargement...</div>
@@ -1196,85 +1010,6 @@ tr:hover td { background: rgba(255,255,255,0.02); }
       </div>
     </div>
 
-
-    <!-- PAGE: EXAMS -->
-    <div class="page" id="page-exams">
-      <div class="section-header">
-        <div>
-          <div class="section-title">🎓 Examens</div>
-          <div class="section-sub">Gérer les systèmes éducatifs nationaux</div>
-        </div>
-        <button class="btn btn-primary" onclick="openModal('modal-exam')">+ Nouvel examen</button>
-      </div>
-      <div class="card">
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr><th>Nom</th><th>Code</th><th>Pays</th><th>Niveau</th><th>Statut</th><th>Actions</th></tr>
-            </thead>
-            <tbody id="exams-table">
-              <tr><td colspan="6" style="text-align:center;padding:40px;color:var(--text3)">Chargement...</td></tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </div>
-
-    <!-- PAGE: SERIES -->
-    <div class="page" id="page-series">
-      <div class="section-header">
-        <div>
-          <div class="section-title">📋 Séries</div>
-          <div class="section-sub">Gérer les séries par examen</div>
-        </div>
-        <button class="btn btn-primary" onclick="openModal('modal-series')">+ Nouvelle série</button>
-      </div>
-      <div class="filter-bar">
-        <select class="filter-select" id="filter-series-exam" onchange="loadSeries()">
-          <option value="">Tous les examens</option>
-        </select>
-      </div>
-      <div class="card">
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr><th>Code</th><th>Nom</th><th>Examen</th><th>Matières & Coefficients</th><th>Statut</th><th>Actions</th></tr>
-            </thead>
-            <tbody id="series-table">
-              <tr><td colspan="6" style="text-align:center;padding:40px;color:var(--text3)">Chargement...</td></tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </div>
-
-    <!-- PAGE: CONCOURS -->
-    <div class="page" id="page-concours">
-      <div class="section-header">
-        <div>
-          <div class="section-title">🏆 Concours</div>
-          <div class="section-sub">Gérer les concours et séries éligibles</div>
-        </div>
-        <button class="btn btn-primary" onclick="openModal('modal-concours'); loadConcoursSeriesChecks()">+ Nouveau concours</button>
-      </div>
-      <div id="concours-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:16px">
-        <div style="text-align:center;padding:40px;color:var(--text3)">Chargement...</div>
-      </div>
-    </div>
-
-    <!-- PAGE: SIMULATIONS -->
-    <div class="page" id="page-simulations">
-      <div class="section-header">
-        <div>
-          <div class="section-title">🎯 Simulations</div>
-          <div class="section-sub">Examens blancs et concours simulés</div>
-        </div>
-        <button class="btn btn-primary" onclick="openModal('modal-simulation')">+ Nouvelle simulation</button>
-      </div>
-      <div id="simulations-grid" style="display:flex;flex-direction:column;gap:12px">
-        <div style="text-align:center;padding:40px;color:var(--text3)">Chargement...</div>
-      </div>
-    </div>
 
     <!-- ── PAGE JOBS ─────────────────────────────────── -->
     <div id="page-jobs" class="page">
@@ -1525,191 +1260,6 @@ tr:hover td { background: rgba(255,255,255,0.02); }
 
 <!-- MODALS -->
 
-<!-- Modal: Upload Exercise -->
-<div class="modal-overlay" id="modal-upload-exercise">
-  <div class="modal">
-    <div class="modal-header">
-      <div class="modal-title">📝 Ajouter un exercice</div>
-      <button class="modal-close" onclick="closeModal('modal-upload-exercise')">✕</button>
-    </div>
-
-    <div class="grid-2" style="margin-bottom:16px">
-      <div>
-        <label class="form-label">PDF Exercice *</label>
-        <div class="upload-zone" id="zone-exercise" onclick="document.getElementById('ex-file').click()">
-          <div class="upload-icon">📄</div>
-          <div class="upload-text">Cliquer pour sélectionner</div>
-          <div class="upload-sub">PDF uniquement</div>
-        </div>
-        <input type="file" id="ex-file" accept=".pdf" style="display:none" onchange="onFileSelect('ex-file','zone-exercise','ex-filename')"/>
-        <div id="ex-filename" style="font-size:11px;color:var(--green);margin-top:6px"></div>
-      </div>
-      <div>
-        <label class="form-label">PDF Correction <span style="color:var(--text3)">(optionnel)</span></label>
-        <div class="upload-zone" id="zone-correction" onclick="document.getElementById('corr-file').click()">
-          <div class="upload-icon">✅</div>
-          <div class="upload-text">Cliquer pour sélectionner</div>
-          <div class="upload-sub">PDF uniquement</div>
-        </div>
-        <input type="file" id="corr-file" accept=".pdf" style="display:none" onchange="onFileSelect('corr-file','zone-correction','corr-filename')"/>
-        <div id="corr-filename" style="font-size:11px;color:var(--green);margin-top:6px"></div>
-      </div>
-    </div>
-
-    <div class="form-group">
-      <label class="form-label">Titre</label>
-      <input type="text" class="form-input" id="ex-title" placeholder="Ex: Exercice acide-base terminale S"/>
-    </div>
-
-    <div class="form-row">
-      <div class="form-group">
-        <label class="form-label">Examen *</label>
-        <select class="form-select" id="ex-exam">
-          <option value="bac_senegal">BAC Sénégal</option>
-          <option value="bfem">BFEM</option>
-          <option value="concours">Concours</option>
-        </select>
-      </div>
-      <div class="form-group">
-        <label class="form-label">Séries</label>
-        <div id="ex-series-checks" style="display:flex;flex-wrap:wrap;gap:8px;padding:10px;background:var(--surface2);border-radius:var(--radius-sm)">
-          Sélectionne d'abord un examen
-        </div>
-      </div>
-    </div>
-
-    <div class="form-row">
-      <div class="form-group">
-        <label class="form-label">Matière *</label>
-        <select class="form-select" id="ex-matiere">
-          <option value="">— Matière —</option>
-          <option value="maths">Maths</option>
-          <option value="physique_chimie">Physique-Chimie</option>
-          <option value="svt">SVT</option>
-          <option value="francais">Français</option>
-          <option value="philosophie">Philosophie</option>
-          <option value="histoire_geo">Histoire-Géo</option>
-          <option value="anglais">Anglais</option>
-        </select>
-      </div>
-      <div class="form-group">
-        <label class="form-label">Chapitre</label>
-        <input type="text" class="form-input" id="ex-chapitre" placeholder="Ex: derivees"/>
-      </div>
-    </div>
-
-    <div class="form-row">
-      <div class="form-group">
-        <label class="form-label">Année</label>
-        <input type="number" class="form-input" id="ex-annee" placeholder="2024"/>
-      </div>
-      <div class="form-group">
-        <label class="form-label">Tags</label>
-        <input type="text" class="form-input" id="ex-tags" placeholder="tag1, tag2"/>
-      </div>
-    </div>
-
-    <div style="font-size:11px;color:var(--text3);margin-bottom:16px;padding:10px;background:var(--surface2);border-radius:var(--radius-sm)">
-      🤖 Le niveau de difficulté sera déterminé automatiquement par l'IA
-    </div>
-
-    <div id="ex-upload-status" style="font-size:12px;color:var(--text2);margin-bottom:12px"></div>
-
-    <div style="display:flex;gap:10px;justify-content:flex-end">
-      <button class="btn btn-ghost" onclick="closeModal('modal-upload-exercise')">Annuler</button>
-      <button class="btn btn-primary" onclick="uploadExercise()">⬆️ Ajouter l'exercice</button>
-    </div>
-  </div>
-</div>
-
-<!-- Modal: Upload Document RAG -->
-<div class="modal-overlay" id="modal-upload-doc">
-  <div class="modal">
-    <div class="modal-header">
-      <div class="modal-title">📚 Indexer un document</div>
-      <button class="modal-close" onclick="closeModal('modal-upload-doc')">✕</button>
-    </div>
-
-    <div class="form-group">
-      <label class="form-label">Fichier (PDF/Word)</label>
-      <div class="upload-zone" id="zone-doc" onclick="document.getElementById('doc-file').click()">
-        <div class="upload-icon">📎</div>
-        <div class="upload-text">Cliquer pour sélectionner</div>
-        <div class="upload-sub">PDF ou DOCX — Max 10MB</div>
-      </div>
-      <input type="file" id="doc-file" accept=".pdf,.docx,.doc" style="display:none" onchange="onFileSelect('doc-file','zone-doc','doc-filename')"/>
-      <div id="doc-filename" style="font-size:11px;color:var(--green);margin-top:6px"></div>
-    </div>
-
-    <div class="form-group">
-      <label class="form-label">Titre</label>
-      <input type="text" class="form-input" id="doc-title" placeholder="Titre du document"/>
-    </div>
-
-    <div class="form-row">
-      <div class="form-group">
-        <label class="form-label">Examen</label>
-        <select class="form-select" id="doc-exam">
-          <option value="">— Examen —</option>
-          <option value="bac_senegal">BAC Sénégal</option>
-          <option value="bfem">BFEM</option>
-          <option value="concours">Concours</option>
-        </select>
-      </div>
-      <div class="form-group">
-        <label class="form-label">Série</label>
-        <select class="form-select" id="doc-serie">
-          <option value="">— Série —</option>
-          <option value="S1">S1</option>
-          <option value="S2">S2</option>
-          <option value="S3">S3</option>
-          <option value="L1">L1</option>
-          <option value="L2">L2</option>
-          <option value="T">T</option>
-        </select>
-      </div>
-    </div>
-
-    <div class="form-row">
-      <div class="form-group">
-        <label class="form-label">Matière</label>
-        <select class="form-select" id="doc-matiere">
-          <option value="">— Matière —</option>
-          <option value="maths">Maths</option>
-          <option value="physique_chimie">Physique-Chimie</option>
-          <option value="svt">SVT</option>
-          <option value="francais">Français</option>
-          <option value="philosophie">Philosophie</option>
-          <option value="histoire_geo">Histoire-Géo</option>
-          <option value="anglais">Anglais</option>
-        </select>
-      </div>
-      <div class="form-group">
-        <label class="form-label">Type</label>
-        <select class="form-select" id="doc-type">
-          <option value="cours">Cours</option>
-          <option value="annale">Annale</option>
-          <option value="correction">Correction</option>
-          <option value="serie">Série</option>
-          <option value="exercice">Exercice</option>
-          <option value="fiche">Fiche</option>
-          <option value="programme">Programme</option>
-        </select>
-      </div>
-    </div>
-
-    <div id="doc-upload-status" style="font-size:12px;color:var(--text2);margin-bottom:12px"></div>
-    <div id="doc-upload-progress" style="display:none;margin-bottom:12px">
-      <div class="progress-bar"><div class="progress-fill" id="doc-progress-fill" style="width:0%;background:var(--accent)"></div></div>
-    </div>
-
-    <div style="display:flex;gap:10px;justify-content:flex-end">
-      <button class="btn btn-ghost" onclick="closeModal('modal-upload-doc')">Annuler</button>
-      <button class="btn btn-primary" onclick="uploadDocument()">⬆️ Indexer</button>
-    </div>
-  </div>
-</div>
-
 <!-- Modal: Détail offre emploi -->
 <div class="modal-overlay" id="modal-job-detail">
   <div class="modal" style="max-width:680px;width:95%">
@@ -1744,269 +1294,6 @@ tr:hover td { background: rgba(255,255,255,0.02); }
   </div>
 </div>
 
-<!-- Modal: Exam -->
-<div class="modal-overlay" id="modal-exam">
-  <div class="modal">
-    <div class="modal-header">
-      <div class="modal-title">🎓 Nouvel examen</div>
-      <button class="modal-close" onclick="closeModal('modal-exam')">✕</button>
-    </div>
-    <div class="form-row">
-      <div class="form-group">
-        <label class="form-label">Code *</label>
-        <input type="text" class="form-input" id="exam-code" placeholder="bac_senegal"/>
-      </div>
-      <div class="form-group">
-        <label class="form-label">Nom *</label>
-        <input type="text" class="form-input" id="exam-name" placeholder="BAC Sénégal"/>
-      </div>
-    </div>
-    <div class="form-row">
-      <div class="form-group">
-        <label class="form-label">Pays</label>
-        <input type="text" class="form-input" id="exam-pays" placeholder="senegal"/>
-      </div>
-      <div class="form-group">
-        <label class="form-label">Niveau</label>
-        <select class="form-select" id="exam-niveau">
-          <option value="bac">BAC</option>
-          <option value="brevet">Brevet/BFEM</option>
-          <option value="cap">CAP</option>
-          <option value="autre">Autre</option>
-        </select>
-      </div>
-    </div>
-    <div class="form-group">
-      <label class="form-label">Description</label>
-      <textarea class="form-textarea" id="exam-desc" rows="2"></textarea>
-    </div>
-    <div id="exam-status" style="font-size:12px;color:var(--text2);margin-bottom:12px"></div>
-    <div style="display:flex;gap:10px;justify-content:flex-end">
-      <button class="btn btn-ghost" onclick="closeModal('modal-exam')">Annuler</button>
-      <button class="btn btn-primary" onclick="createExam()">Créer l'examen</button>
-    </div>
-  </div>
-</div>
-
-<!-- Modal: Series -->
-<div class="modal-overlay" id="modal-series">
-  <div class="modal">
-    <div class="modal-header">
-      <div class="modal-title">📋 Nouvelle série</div>
-      <button class="modal-close" onclick="closeModal('modal-series')">✕</button>
-    </div>
-    <div class="form-row">
-      <div class="form-group">
-        <label class="form-label">Code *</label>
-        <input type="text" class="form-input" id="series-code" placeholder="S2"/>
-      </div>
-      <div class="form-group">
-        <label class="form-label">Nom *</label>
-        <input type="text" class="form-input" id="series-name" placeholder="Série S2"/>
-      </div>
-    </div>
-    <div class="form-group">
-      <label class="form-label">Examen *</label>
-      <select class="form-select" id="series-exam-id">
-        <option value="">-- Choisir un examen --</option>
-      </select>
-    </div>
-    <div class="form-group">
-      <label class="form-label">Description</label>
-      <input type="text" class="form-input" id="series-desc" placeholder="Sciences de la Vie et de la Terre"/>
-    </div>
-    <div class="form-group">
-      <label class="form-label">Matières & Coefficients <span style="color:var(--text3);font-weight:400">(JSON)</span></label>
-      <textarea class="form-textarea" id="series-matieres" rows="4"
-        placeholder='{"maths": 4, "physique_chimie": 4, "svt": 5}'></textarea>
-    </div>
-    <div id="series-status" style="font-size:12px;color:var(--text2);margin-bottom:12px"></div>
-    <div style="display:flex;gap:10px;justify-content:flex-end">
-      <button class="btn btn-ghost" onclick="closeModal('modal-series')">Annuler</button>
-      <button class="btn btn-primary" onclick="createSeries()">Créer la série</button>
-    </div>
-  </div>
-</div>
-
-<!-- Modal: Concours -->
-<div class="modal-overlay" id="modal-concours">
-  <div class="modal">
-    <div class="modal-header">
-      <div class="modal-title">🏆 Nouveau concours</div>
-      <button class="modal-close" onclick="closeModal('modal-concours')">✕</button>
-    </div>
-    <div class="form-row">
-      <div class="form-group">
-        <label class="form-label">Code *</label>
-        <input type="text" class="form-input" id="concours-code" placeholder="concours_ensept"/>
-      </div>
-      <div class="form-group">
-        <label class="form-label">Nom *</label>
-        <input type="text" class="form-input" id="concours-name" placeholder="Concours ENSEPT"/>
-      </div>
-    </div>
-    <div class="form-row">
-      <div class="form-group">
-        <label class="form-label">Pays</label>
-        <input type="text" class="form-input" id="concours-pays" placeholder="senegal"/>
-      </div>
-      <div class="form-group">
-        <label class="form-label">Niveau requis</label>
-        <select class="form-select" id="concours-niveau">
-          <option value="bac">BAC</option>
-          <option value="brevet">Brevet/BFEM</option>
-          <option value="licence">Licence</option>
-        </select>
-      </div>
-    </div>
-    <div class="form-group">
-      <label class="form-label">Description</label>
-      <textarea class="form-textarea" id="concours-desc" rows="2"></textarea>
-    </div>
-    <div class="form-group">
-      <label class="form-label">Matières d'épreuve <span style="color:var(--text3);font-weight:400">(JSON)</span></label>
-      <textarea class="form-textarea" id="concours-matieres" rows="3"
-        placeholder='{"maths": 4, "physique_chimie": 4}'></textarea>
-    </div>
-    <div class="form-group">
-      <label class="form-label">Séries éligibles</label>
-      <div id="concours-series-checks" style="display:flex;flex-wrap:wrap;gap:8px;padding:10px;background:var(--surface2);border-radius:var(--radius-sm)">
-        Chargement...
-      </div>
-    </div>
-    <div id="concours-status" style="font-size:12px;color:var(--text2);margin-bottom:12px"></div>
-    <div style="display:flex;gap:10px;justify-content:flex-end">
-      <button class="btn btn-ghost" onclick="closeModal('modal-concours')">Annuler</button>
-      <button class="btn btn-primary" onclick="createConcours()">Créer le concours</button>
-    </div>
-  </div>
-</div>
-
-<!-- Modal: Notifier simulation -->
-<div class="modal-overlay" id="modal-notif-simulation">
-  <div class="modal" style="max-width:480px;width:95%">
-    <div class="modal-header">
-      <div class="modal-title">🔔 Notifier les élèves</div>
-      <button class="modal-close" onclick="closeModal('modal-notif-simulation')">✕</button>
-    </div>
-    <div style="margin-bottom:8px;font-size:13px;color:var(--text2)">
-      Simulation : <strong id="notif-sim-titre"></strong>
-    </div>
-    <div style="margin-bottom:12px;font-size:12px;color:var(--text2)">
-      La notification sera envoyée à tous les élèves <strong>Pro</strong> éligibles. Laisse le champ vide pour utiliser le message par défaut.
-    </div>
-    <label style="font-size:12px;color:var(--text2);display:block;margin-bottom:4px">Message personnalisé (optionnel)</label>
-    <textarea id="notif-sim-message" rows="5" style="width:100%;padding:10px;border-radius:8px;border:1px solid var(--border);background:var(--bg2);color:var(--text1);font-size:13px;resize:vertical;box-sizing:border-box"
-      placeholder="Ex : La simulation aura lieu demain à 9h. Prépare-toi ! ✏️"></textarea>
-    <div id="notif-sim-result" style="margin-top:10px;font-size:13px"></div>
-    <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:16px">
-      <button class="btn btn-ghost" onclick="closeModal('modal-notif-simulation')">Annuler</button>
-      <button class="btn btn-warning" onclick="envoyerNotifSimulation()">🔔 Envoyer la notification</button>
-    </div>
-  </div>
-</div>
-
-<!-- Modal: Simulation -->
-<div class="modal-overlay" id="modal-simulation">
-  <div class="modal" style="width:600px">
-    <div class="modal-header">
-      <div class="modal-title">🎯 Nouvelle simulation</div>
-      <button class="modal-close" onclick="closeModal('modal-simulation')">✕</button>
-    </div>
-
-    <div class="form-group">
-      <label class="form-label">Titre *</label>
-      <input type="text" class="form-input" id="sim-titre" placeholder="BAC Blanc Physique-Chimie S2 — Juin 2026"/>
-    </div>
-
-    <div class="form-row">
-      <div class="form-group">
-        <label class="form-label">Type</label>
-        <select class="form-select" id="sim-type">
-          <option value="examen">Examen</option>
-          <option value="concours">Concours</option>
-        </select>
-      </div>
-      <div class="form-group">
-        <label class="form-label">Matière</label>
-        <select class="form-select" id="sim-matiere">
-          <option value="">-- Matière --</option>
-          <option value="maths">Maths</option>
-          <option value="physique_chimie">Physique-Chimie</option>
-          <option value="svt">SVT</option>
-          <option value="francais">Français</option>
-          <option value="philosophie">Philosophie</option>
-          <option value="histoire_geo">Histoire-Géo</option>
-          <option value="anglais">Anglais</option>
-        </select>
-      </div>
-    </div>
-
-    <div class="form-row">
-      <div class="form-group">
-        <label class="form-label">Examen</label>
-        <select class="form-select" id="sim-exam-id" onchange="loadSimSeries()">
-          <option value="">-- Examen --</option>
-        </select>
-      </div>
-      <div class="form-group">
-        <label class="form-label">Série principale</label>
-        <select class="form-select" id="sim-serie">
-          <option value="">-- Série --</option>
-        </select>
-      </div>
-    </div>
-
-    <div class="form-row">
-      <div class="form-group">
-        <label class="form-label">Date et heure début *</label>
-        <input type="datetime-local" class="form-input" id="sim-date"/>
-      </div>
-      <div class="form-group">
-        <label class="form-label">Durée (minutes)</label>
-        <input type="number" class="form-input" id="sim-duree" value="240" min="30" max="480"/>
-      </div>
-    </div>
-
-    <div class="form-group">
-      <label class="form-label">Séries éligibles</label>
-      <div id="sim-series-checks" style="display:flex;flex-wrap:wrap;gap:8px;padding:10px;background:var(--surface2);border-radius:var(--radius-sm)">
-        Sélectionne d'abord un examen
-      </div>
-    </div>
-
-    <div class="grid-2" style="margin-bottom:16px">
-      <div>
-        <label class="form-label">📄 Sujet PDF *</label>
-        <div class="upload-zone" id="zone-sim-sujet" onclick="document.getElementById('sim-sujet-file').click()">
-          <div class="upload-icon">📝</div>
-          <div class="upload-text">Sujet de l'épreuve</div>
-        </div>
-        <input type="file" id="sim-sujet-file" accept=".pdf" style="display:none"
-          onchange="onFileSelect('sim-sujet-file','zone-sim-sujet','sim-sujet-name')"/>
-        <div id="sim-sujet-name" style="font-size:11px;color:var(--green);margin-top:4px"></div>
-      </div>
-      <div>
-        <label class="form-label">✅ Correction PDF <span style="color:var(--text3)">(optionnel)</span></label>
-        <div class="upload-zone" id="zone-sim-corr" onclick="document.getElementById('sim-corr-file').click()">
-          <div class="upload-icon">✅</div>
-          <div class="upload-text">Correction officielle</div>
-        </div>
-        <input type="file" id="sim-corr-file" accept=".pdf" style="display:none"
-          onchange="onFileSelect('sim-corr-file','zone-sim-corr','sim-corr-name')"/>
-        <div id="sim-corr-name" style="font-size:11px;color:var(--green);margin-top:4px"></div>
-      </div>
-    </div>
-
-    <div id="sim-status" style="font-size:12px;color:var(--text2);margin-bottom:12px"></div>
-
-    <div style="display:flex;gap:10px;justify-content:flex-end">
-      <button class="btn btn-ghost" onclick="closeModal('modal-simulation')">Annuler</button>
-      <button class="btn btn-primary" onclick="createSimulation()">🎯 Créer la simulation</button>
-    </div>
-  </div>
-</div>
-
 <!-- Toast -->
 <div id="toast"></div>
 
@@ -2020,27 +1307,20 @@ let charts = {};
 const PAGE_TITLES = {
   overview: 'Vue d\'ensemble',
   students: 'Élèves',
-  exercises: 'Exercices',
-  documents: 'Documents RAG',
   notifications: 'Notifications',
   payments: 'Paiements',
   analytics: 'Analytics',
   config: 'Configuration',
-  exams: 'Examens',
-  series: 'Séries',
-  concours: 'Concours',
-  simulations: 'Simulations',
   jobs: 'Offres d\'emploi',
   recruiters: 'Recruteurs',
   candidates: 'Candidats',
   scraping: 'Scraping',
 };
 const TEMPLATES = {
-  motivation: "🔥 Salut {nom} !\n\nTon streak de *{streak} jours* est impressionnant !\n\nIl te reste *{jours_restants} jours* avant ton examen.\n\nContinue comme ça 💪",
-  rappel: "📚 Salut {nom} !\n\nN'oublie pas de réviser aujourd'hui.\n\nIl te reste *{jours_restants} jours* avant ton {exam}.",
-  urgence: "⚠️ *{nom}* — Plus que *{jours_restants} jours* avant ton examen !\n\nC'est le moment de tout donner. Je suis là pour t'aider 🎯",
-  upsell: "⭐ *{nom}*, passe *Prepa Pro* et révise sans limite !\n\n✅ Messages illimités\n✅ Corrections détaillées\n\n💰 Seulement *3000 FCFA/mois*\n\nTape */plan* pour en savoir plus 🚀",
-  weekend: "🌟 Bon weekend *{nom}* !\n\n*{jours_restants} jours* avant ton examen — un peu de révision aujourd'hui fait toute la différence !\n\nJe suis disponible 24h/24 📚",
+  motivation: "🔥 Salut {nom} !\n\nTon engagement est impressionnant !\n\nDe nouvelles offres d'emploi t'attendent. Continue comme ça 💪",
+  rappel: "💼 Salut {nom} !\n\nPense à compléter ton profil candidat pour recevoir les meilleures offres.",
+  upsell: "⭐ *{nom}*, passe *Prepa Pro* et profite de tous les avantages !\n\n✅ Messages illimités\n✅ Offres prioritaires\n\n💰 Seulement *3000 FCFA/mois*\n\nTape */plan* pour en savoir plus 🚀",
+  weekend: "🌟 Bon weekend *{nom}* !\n\nJette un œil aux nouvelles offres d'emploi — ta prochaine opportunité est peut-être là !\n\nJe suis disponible 24h/24 💼",
 };
 
 // ════════════════════════════════════════════════════════════
@@ -2085,13 +1365,11 @@ async function api(path, method = 'GET', body = null) {
 // ════════════════════════════════════════════════════════════
 async function loadDashboard() {
   try {
-    const [stats, users, configs, docs] = await Promise.all([
+    const [stats, users, configs] = await Promise.all([
       api('/admin/stats'),
       api('/admin/users?limit=50'),
       api('/admin/config'),
-      api('/admin/documents'),
     ]);
-    loadExams();
 
     document.getElementById('auth-overlay').style.display = 'none';
     document.getElementById('app').style.display = 'block';
@@ -2111,16 +1389,6 @@ async function loadDashboard() {
     // Badge nav
     document.getElementById('badge-students').textContent = stats.total_users || 0;
 
-    // Chunks RAG
-    const totalChunks = docs.reduce((s, d) => s + (d.chunk_count || 0), 0);
-    document.getElementById('kpi-chunks').textContent = totalChunks.toLocaleString();
-    document.getElementById('rag-total').textContent = totalChunks.toLocaleString();
-    const pc = docs.filter(d => d.matiere === 'physique_chimie').reduce((s,d) => s + d.chunk_count, 0);
-    const mt = docs.filter(d => d.matiere === 'maths').reduce((s,d) => s + d.chunk_count, 0);
-    document.getElementById('rag-pc').textContent = pc.toLocaleString();
-    document.getElementById('rag-maths').textContent = mt.toLocaleString();
-    document.getElementById('rag-other').textContent = (totalChunks - pc - mt).toLocaleString();
-
     // Activity feed
     renderActivity(users.slice(0, 6));
 
@@ -2129,15 +1397,10 @@ async function loadDashboard() {
 
     // Charts
     renderActivityChart(stats);
-    renderSubjectsChart(docs);
-    renderMatiereChart(docs);
     renderRevenueChart(stats);
 
     // Students table
     renderStudentsTable(users);
-
-    // Docs table
-    renderDocsTable(docs);
 
     // Config
     renderConfig(configs);
@@ -2168,13 +1431,7 @@ function showPage(name) {
   document.getElementById('page-' + name).classList.add('active');
   document.querySelector(`[data-page="${name}"]`).classList.add('active');
   document.getElementById('page-title').textContent = PAGE_TITLES[name];
-  if (name === 'exercises') loadExercises();
-  if (name === 'documents') loadDocuments();
   if (name === 'payments') loadPayments();
-  if (name === 'exams') loadExams();
-  if (name === 'series') { loadExams(); loadSeries(); }
-  if (name === 'concours') loadConcours();
-  if (name === 'simulations') loadSimulations();
   if (name === 'jobs') loadJobs();
   if (name === 'recruiters') loadRecruiters();
   if (name === 'candidates') loadCandidates();
@@ -2192,7 +1449,7 @@ function renderActivity(users) {
       <div class="activity-dot" style="background:${colors[u.plan] || 'var(--text3)'}"></div>
       <div>
         <div class="activity-text"><strong>${u.name || '—'}</strong> — ${u.phone}</div>
-        <div class="activity-time">${u.exam_type || '—'} ${u.series || ''} · ${u.plan === 'pro' ? '⭐ Pro' : '🆓 Gratuit'} · ${u.total_messages || 0} msgs</div>
+        <div class="activity-time">${u.plan === 'pro' ? '⭐ Pro' : '🆓 Gratuit'} · ${u.total_messages || 0} msgs</div>
       </div>
     </div>
   `).join('');
@@ -2272,42 +1529,6 @@ function renderActivityChart(stats) {
   });
 }
 
-function renderSubjectsChart(docs) {
-  const ctx = document.getElementById('chart-subjects');
-  if (!ctx) return;
-  if (charts.subjects) charts.subjects.destroy();
-  const matiereMap = {};
-  docs.forEach(d => { const m = d.matiere || 'autre'; matiereMap[m] = (matiereMap[m] || 0) + d.chunk_count; });
-  charts.subjects = new Chart(ctx, {
-    type: 'doughnut',
-    data: {
-      labels: Object.keys(matiereMap),
-      datasets: [{ data: Object.values(matiereMap), backgroundColor: ['#3b82f6','#8b5cf6','#10b981','#f59e0b','#ef4444','#06b6d4','#84cc16'], borderWidth: 0 }]
-    },
-    options: {
-      responsive: true, maintainAspectRatio: false,
-      plugins: { legend: { position: 'bottom', labels: { color: '#8b9cb0', font: { size: 10 }, padding: 8 } } }
-    }
-  });
-}
-
-function renderMatiereChart(docs) {
-  const ctx = document.getElementById('chart-matiere');
-  if (!ctx) return;
-  if (charts.matiere) charts.matiere.destroy();
-  const matiereMap = {};
-  docs.forEach(d => { const m = d.matiere || 'autre'; matiereMap[m] = (matiereMap[m]||0)+1; });
-  const sorted = Object.entries(matiereMap).sort((a,b) => b[1]-a[1]);
-  charts.matiere = new Chart(ctx, {
-    type: 'bar',
-    data: {
-      labels: sorted.map(x => x[0]),
-      datasets: [{ data: sorted.map(x => x[1]), backgroundColor: '#3b82f6', borderRadius: 4 }]
-    },
-    options: { ...CHART_DEFAULTS, indexAxis: 'y' }
-  });
-}
-
 function renderRevenueChart(stats) {
   const ctx = document.getElementById('chart-revenue');
   if (!ctx) return;
@@ -2352,7 +1573,6 @@ function renderStudentsTable(users) {
       <td><div style="font-weight:600">${u.name || '—'}</div><div style="font-size:10px;color:var(--text3)">${u.created_at ? new Date(u.created_at).toLocaleDateString('fr') : ''}</div></td>
       <td><span style="font-family:'JetBrains Mono',monospace;font-size:11px">${u.phone}</span></td>
       <td>${planBadge(u.plan)}</td>
-      <td><span style="font-size:12px">${u.exam_type || '—'} ${u.series || ''}</span></td>
       <td><span style="color:var(--yellow)">🔥 ${u.streak_days || 0}j</span></td>
       <td><span style="font-family:'JetBrains Mono',monospace">${u.total_messages || 0}</span></td>
       <td>${scoreBar(u.engagement_score || 0)}</td>
@@ -2367,7 +1587,7 @@ function renderStudentsTable(users) {
     </tr>
   `).join('');
 
-  document.getElementById('students-table').innerHTML = html || '<tr><td colspan="9"><div class="empty-state"><div class="empty-icon">👥</div><div class="empty-text">Aucun élève</div></div></td></tr>';
+  document.getElementById('students-table').innerHTML = html || '<tr><td colspan="8"><div class="empty-state"><div class="empty-icon">👥</div><div class="empty-text">Aucun élève</div></div></td></tr>';
 }
 
 async function loadStudents() {
@@ -2381,14 +1601,12 @@ async function loadStudents() {
 function filterStudents() {
   const search = document.getElementById('search-students').value.toLowerCase();
   const plan = document.getElementById('filter-plan').value;
-  const exam = document.getElementById('filter-exam').value;
   const status = document.getElementById('filter-status').value;
   const filtered = allStudents.filter(u => {
     const matchSearch = !search || (u.name||'').toLowerCase().includes(search) || u.phone.includes(search);
     const matchPlan = !plan || u.plan === plan;
-    const matchExam = !exam || u.exam_type === exam;
     const matchStatus = !status || u.status === status;
-    return matchSearch && matchPlan && matchExam && matchStatus;
+    return matchSearch && matchPlan && matchStatus;
   });
   renderStudentsTable(filtered);
 }
@@ -2418,270 +1636,6 @@ async function deleteUser(userId, name) {
 }
 
 // ════════════════════════════════════════════════════════════
-// EXERCISES
-// ════════════════════════════════════════════════════════════
-async function loadExercises() {
-  try {
-    const matiere = document.getElementById('filter-ex-matiere').value;
-    const niveau = document.getElementById('filter-ex-niveau').value;
-    const exam = document.getElementById('filter-ex-exam').value;
-    let params = [];
-    if (matiere) params.push('matiere=' + matiere);
-    if (niveau) params.push('niveau=' + niveau);
-    if (exam) params.push('exam_type=' + exam);
-    const qs = params.length ? '?' + params.join('&') : '';
-    const exercises = await api('/admin/exercises' + qs);
-    renderExercisesTable(exercises);
-  } catch(e) {
-    document.getElementById('exercises-table').innerHTML = '<tr><td colspan="9"><div class="empty-state"><div class="empty-icon">📝</div><div class="empty-text">Aucun exercice</div><div class="empty-sub">Ajoutez des exercices depuis le bouton ci-dessus</div></div></td></tr>';
-  }
-}
-
-function renderExercisesTable(exercises) {
-  if (!exercises || !exercises.length) {
-    document.getElementById('exercises-table').innerHTML = '<tr><td colspan="9"><div class="empty-state"><div class="empty-icon">📝</div><div class="empty-text">Aucun exercice</div></div></td></tr>';
-    return;
-  }
-  const niveauLabel = n => ({1:'<span class="badge green">🟢 Facile</span>', 2:'<span class="badge yellow">🟡 Moyen</span>', 3:'<span class="badge red">🔴 Difficile</span>'}[n] || n);
-  const html = exercises.map(ex => `
-    <tr>
-      <td><div style="font-weight:500;max-width:200px">${ex.title || '—'}</div></td>
-      <td><span class="badge blue">${ex.matiere || '—'}</span></td>
-      <td><span style="font-size:12px;color:var(--text2)">${ex.chapitre || '—'}</span></td>
-      <td><span style="font-size:12px">${ex.exam_type || '—'} ${ex.serie || ''}</span></td>
-      <td><span style="font-family:'JetBrains Mono',monospace;font-size:12px">${ex.annee || '—'}</span></td>
-      <td>${niveauLabel(ex.niveau)}</td>
-      <td>${ex.correction_path ? '<span class="badge green">✅ Oui</span>' : '<span class="badge gray">—</span>'}</td>
-      <td><span class="badge ${ex.status === 'ready' ? 'green' : 'yellow'}">${ex.status}</span></td>
-      <td>
-        <button class="btn btn-danger btn-sm btn-icon" onclick="deleteExercise('${ex.id}')">🗑</button>
-      </td>
-    </tr>
-  `).join('');
-  document.getElementById('exercises-table').innerHTML = html;
-}
-
-async function deleteExercise(id) {
-  if (!confirm('Supprimer cet exercice ?')) return;
-  try {
-    await api('/admin/exercises/' + id, 'DELETE');
-    showToast('Exercice supprimé');
-    loadExercises();
-  } catch(e) { showToast('Erreur', 'error'); }
-}
-
-// ════════════════════════════════════════════════════════════
-// UPLOAD EXERCISE
-// ════════════════════════════════════════════════════════════
-function onFileSelect(inputId, zoneId, nameId) {
-  const f = document.getElementById(inputId).files[0];
-  if (!f) return;
-  document.getElementById(zoneId).classList.add('has-file');
-  document.getElementById(nameId).textContent = `✅ ${f.name} (${(f.size/1024/1024).toFixed(1)}MB)`;
-}
-
-const toBase64 = (file) => new Promise((res, rej) => {
-  const r = new FileReader();
-  r.onload = () => res(r.result.split(',')[1]);
-  r.onerror = rej;
-  r.readAsDataURL(file);
-});
-
-async function uploadExercise() {
-  const exFile = document.getElementById('ex-file').files[0];
-  const corrFile = document.getElementById('corr-file').files[0];
-  const matiere = document.getElementById('ex-matiere').value;
-  const status = document.getElementById('ex-upload-status');
-
-  if (!exFile) { showToast('Sélectionne un PDF exercice', 'error'); return; }
-  if (!matiere) { showToast('Sélectionne une matière', 'error'); return; }
-
-  status.textContent = '⏳ Lecture des fichiers...';
-
-  try {
-    const exercise_b64 = await toBase64(exFile);
-    const correction_b64 = corrFile ? await toBase64(corrFile) : null;
-
-    status.textContent = '🤖 Analyse du niveau par IA...';
-
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 120000);
-
-    const res = await fetch('/api/v1/admin/exercises/upload', {
-      method: 'POST',
-      headers: { 'X-Admin-Key': API_KEY, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        exercise_b64,
-        correction_b64,
-        filename_ex: exFile.name,
-        filename_corr: corrFile?.name || 'correction.pdf',
-        title: document.getElementById('ex-title').value || '',
-        exam_type: document.getElementById('ex-exam').value,
-        series: Array.from(
-          document.querySelectorAll('#ex-series-checks input:checked')
-        ).map(el => el.value),
-        matiere,
-        chapitre: document.getElementById('ex-chapitre').value || null,
-        annee: document.getElementById('ex-annee').value || null,
-        tags: document.getElementById('ex-tags').value.split(',').map(t => t.trim()).filter(Boolean),
-      }),
-      signal: controller.signal,
-    });
-    clearTimeout(timeoutId);
-    const data = await res.json();
-
-    if (data.duplicate) {
-      const ex = data.existing;
-      const typeLabel = ex.type === 'exact' ? '📋 Fichier identique' : '📝 Contenu identique';
-      status.innerHTML = `
-        ⚠️ <strong>Doublon détecté !</strong> ${typeLabel}<br>
-        <span style="color:var(--accent2)">${ex.title || data.message}</span><br>
-        ${ex.matiere ? `Matière : ${ex.matiere}` : ''}
-        ${ex.niveau ? ` · Niveau ${ex.niveau}` : ''}<br>
-        <span style="font-size:10px;color:var(--text3)">
-          Ajouté le ${new Date(ex.created_at).toLocaleDateString('fr')}
-        </span>
-      `;
-      showToast('Doublon détecté', 'error');
-      return;
-    }
-    if (data.success) {
-      const niveauLabel = {1:'🟢 Facile', 2:'🟡 Intermédiaire', 3:'🔴 Difficile'}[data.niveau] || data.niveau;
-      status.innerHTML = `✅ Exercice ajouté ! Niveau : <strong style="color:var(--green)">${niveauLabel}</strong>`;
-      showToast('Exercice ajouté ✅');
-      closeModal('modal-upload-exercise');
-      loadExercises();
-    } else {
-      status.textContent = '❌ ' + (data.detail || 'Erreur');
-      showToast('Erreur upload', 'error');
-    }
-  } catch(e) {
-    status.textContent = e.name === 'AbortError' ? '❌ Timeout' : '❌ ' + e.message;
-    showToast('Erreur', 'error');
-  }
-}
-
-// ════════════════════════════════════════════════════════════
-// DOCUMENTS
-// ════════════════════════════════════════════════════════════
-async function loadDocuments() {
-  try {
-    const docs = await api('/admin/documents');
-    renderDocsTable(docs);
-    const totalChunks = docs.reduce((s,d) => s + (d.chunk_count||0), 0);
-    document.getElementById('rag-total').textContent = totalChunks.toLocaleString();
-    const pc = docs.filter(d => d.matiere === 'physique_chimie').reduce((s,d) => s + d.chunk_count, 0);
-    const mt = docs.filter(d => d.matiere === 'maths').reduce((s,d) => s + d.chunk_count, 0);
-    document.getElementById('rag-pc').textContent = pc.toLocaleString();
-    document.getElementById('rag-maths').textContent = mt.toLocaleString();
-    document.getElementById('rag-other').textContent = (totalChunks - pc - mt).toLocaleString();
-  } catch(e) {}
-}
-
-function renderDocsTable(docs) {
-  const statusBadge = s => ({
-    indexed: '<span class="badge green">Indexé</span>',
-    processing: '<span class="badge yellow">En cours</span>',
-    error: '<span class="badge red">Erreur</span>',
-  }[s] || `<span class="badge gray">${s}</span>`);
-
-  const html = docs.map(d => `
-    <tr>
-      <td><div style="max-width:200px;font-size:12px">${d.title}</div></td>
-      <td>${d.exam_type || '—'}</td>
-      <td>${d.serie || '—'}</td>
-      <td>${d.matiere || '—'}</td>
-      <td>${d.doc_type || '—'}</td>
-      <td>${d.page_count}</td>
-      <td><span style="font-family:'JetBrains Mono',monospace">${d.chunk_count}</span></td>
-      <td>${statusBadge(d.status)}</td>
-      <td><button class="btn btn-danger btn-sm btn-icon" onclick="deleteDocument('${d.id}')">🗑</button></td>
-    </tr>
-  `).join('');
-  document.getElementById('docs-table').innerHTML = html || '<tr><td colspan="9"><div class="empty-state"><div class="empty-icon">📚</div><div class="empty-text">Aucun document</div></div></td></tr>';
-}
-
-async function deleteDocument(docId) {
-  if (!confirm('Supprimer ce document et tous ses chunks ?')) return;
-  try {
-    await api('/admin/documents/' + docId, 'DELETE');
-    showToast('Document supprimé');
-    loadDocuments();
-  } catch(e) { showToast('Erreur', 'error'); }
-}
-
-async function uploadDocument() {
-  const file = document.getElementById('doc-file').files[0];
-  if (!file) { showToast('Sélectionne un fichier', 'error'); return; }
-  if (file.size > 10 * 1024 * 1024) { showToast('Max 10MB', 'error'); return; }
-
-  const status = document.getElementById('doc-upload-status');
-  status.textContent = `⏳ Lecture (${(file.size/1024/1024).toFixed(1)}MB)...`;
-  document.getElementById('doc-upload-progress').style.display = 'block';
-
-  const reader = new FileReader();
-  reader.onload = async (e) => {
-    const b64 = e.target.result.split(',')[1];
-    status.textContent = '⏳ Indexation en cours...';
-    document.getElementById('doc-progress-fill').style.width = '30%';
-
-    try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 300000);
-
-      const res = await fetch('/api/v1/admin/documents/upload', {
-        method: 'POST',
-        headers: { 'X-Admin-Key': API_KEY, 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          filename: file.name,
-          file_b64: b64,
-          title: document.getElementById('doc-title').value || file.name,
-          exam_type: document.getElementById('doc-exam').value,
-          series: document.getElementById('doc-serie').value,
-          subject: document.getElementById('doc-matiere').value,
-          doc_type: document.getElementById('doc-type').value,
-        }),
-        signal: controller.signal,
-      });
-      clearTimeout(timeoutId);
-      document.getElementById('doc-progress-fill').style.width = '100%';
-
-      if (!res.ok) throw new Error('Erreur ' + res.status);
-      const result = await res.json();
-
-      if (result.duplicate) {
-        const ex = result.existing;
-        const typeLabel = ex.type === 'exact' ? '📋 Fichier identique' : '📝 Contenu identique';
-        status.innerHTML = `
-          ⚠️ <strong>Doublon détecté !</strong> ${typeLabel}<br>
-          <span style="color:var(--accent2)">${ex.title || result.message}</span><br>
-          ${ex.matiere ? `Matière : ${ex.matiere}` : ''}
-          ${ex.doc_type ? ` · ${ex.doc_type}` : ''}<br>
-          <span style="font-size:10px;color:var(--text3)">
-            Ajouté le ${new Date(ex.created_at).toLocaleDateString('fr')}
-          </span>
-        `;
-        showToast('Doublon détecté', 'error');
-        return;
-      }
-      if (result.success) {
-        status.textContent = `✅ ${result.chunks} chunks, ${result.pages} pages`;
-        showToast('Document indexé ✅');
-        closeModal('modal-upload-doc');
-        loadDocuments();
-      } else {
-        status.textContent = '❌ ' + result.error;
-        showToast('Erreur indexation', 'error');
-      }
-    } catch(e) {
-      status.textContent = e.name === 'AbortError' ? '❌ Timeout' : '❌ ' + e.message;
-      showToast('Erreur', 'error');
-    }
-  };
-  reader.readAsDataURL(file);
-}
-
-// ════════════════════════════════════════════════════════════
 // NOTIFICATIONS
 // ════════════════════════════════════════════════════════════
 async function updateNotifCount() {
@@ -2689,8 +1643,6 @@ async function updateNotifCount() {
   try {
     const data = await api('/admin/notifications/count', 'POST', {
       filter_type: document.getElementById('notif-filter')?.value || 'all',
-      exam_type: document.getElementById('notif-exam')?.value || null,
-      series: document.getElementById('notif-series')?.value || null,
     });
     document.getElementById('notif-count').textContent = data.count;
   } catch(e) { document.getElementById('notif-count').textContent = '—'; }
@@ -2703,8 +1655,6 @@ function updateNotifPreview() {
     .replace(/\{streak\}/g, '5')
     .replace(/\{jours_restants\}/g, '42')
     .replace(/\{plan\}/g, 'FREE')
-    .replace(/\{exam\}/g, 'BAC')
-    .replace(/\{serie\}/g, 'S2')
     .replace(/\{messages\}/g, '28');
   document.getElementById('notif-preview').textContent = preview || 'Aperçu...';
 }
@@ -2728,8 +1678,6 @@ async function sendNotification() {
       filter_type: document.getElementById('notif-filter').value,
       message_type: 'custom',
       custom_message: msg,
-      exam_type: document.getElementById('notif-exam').value || null,
-      series: document.getElementById('notif-series').value || null,
     });
     status.textContent = `✅ Envoyé à ${result.sent} élèves` + (result.failed > 0 ? ` (${result.failed} échecs)` : '');
     showToast(`Notifications envoyées : ${result.sent}`);
@@ -2770,21 +1718,9 @@ async function loadPayments() {
 // ANALYTICS
 // ════════════════════════════════════════════════════════════
 function renderAnalytics(stats, users) {
-  const examMap = {};
-  users.forEach(u => { const e = u.exam_type||'—'; examMap[e]=(examMap[e]||0)+1; });
-  document.getElementById('exam-stats').innerHTML = Object.entries(examMap).map(([k,v]) => `
-    <div class="stat-row"><span class="stat-label">${k}</span><span class="stat-val">${v} élèves</span></div>
-  `).join('') || '<div style="color:var(--text3);padding:10px;font-size:12px">Aucune donnée</div>';
-
   const pb = stats.provider_breakdown || {};
   document.getElementById('provider-stats').innerHTML = Object.entries(pb).map(([k,v]) => `
     <div class="stat-row"><span class="stat-label"><span class="badge blue">${k}</span></span><span class="stat-val">${(v.tokens||0).toLocaleString()}</span></div>
-  `).join('') || '<div style="color:var(--text3);padding:10px;font-size:12px">Aucune donnée</div>';
-
-  const seriesMap = {};
-  users.forEach(u => { const s = u.series||'—'; seriesMap[s]=(seriesMap[s]||0)+1; });
-  document.getElementById('series-stats').innerHTML = Object.entries(seriesMap).map(([k,v]) => `
-    <div class="stat-row"><span class="stat-label">${k}</span><span class="stat-val">${v} élèves</span></div>
   `).join('') || '<div style="color:var(--text3);padding:10px;font-size:12px">Aucune donnée</div>';
 }
 
@@ -2811,7 +1747,7 @@ function _renderNotifBlocker() {
   if (!toggle || !desc) return;
   if (_notifBlockerState) {
     toggle.classList.add('on');
-    desc.textContent = 'Activé — les notifs sont mises en attente pendant les exercices/simulations';
+    desc.textContent = 'Activé — les notifs sont mises en attente pendant une conversation active';
     desc.style.color = 'var(--green)';
   } else {
     toggle.classList.remove('on');
@@ -2941,643 +1877,8 @@ function showToast(msg, type = 'success') {
   t.style.display = 'block';
   setTimeout(() => t.style.display = 'none', 3500);
 }
-
-// ════════════════════════════════════════════════════════════
-// EXAMS
-// ════════════════════════════════════════════════════════════
-let allExams = [];
-
-async function loadExams() {
-  try {
-    const exams = await api('/admin/exams');
-    allExams = exams;
-    renderExamsTable(exams);
-    populateExamDropdowns(exams);
-  } catch(e) { showToast('Erreur chargement examens', 'error'); }
-}
-
-function renderExamsTable(exams) {
-  const html = exams.map(e => `
-    <tr>
-      <td><strong>${e.name}</strong></td>
-      <td><span style="font-family:'JetBrains Mono',monospace;font-size:11px">${e.code}</span></td>
-      <td><span class="badge blue">${e.pays}</span></td>
-      <td><span class="badge purple">${e.niveau}</span></td>
-      <td>${e.is_active ? '<span class="badge green">Actif</span>' : '<span class="badge gray">Inactif</span>'}</td>
-      <td>
-        <div style="display:flex;gap:4px">
-          <button class="btn btn-ghost btn-sm btn-icon" onclick="editExamById('${e.id}')" title="Modifier">✏️</button>
-          <button class="btn btn-ghost btn-sm btn-icon" onclick="toggleExam('${e.id}',${!e.is_active})">${e.is_active ? '⏸' : '▶'}</button>
-          <button class="btn btn-danger btn-sm btn-icon" onclick="deleteExam('${e.id}','${e.name}')">🗑</button>
-        </div>
-      </td>
-    </tr>
-  `).join('');
-  const tbody = document.getElementById('exams-table');
-  if (tbody) tbody.innerHTML = html || '<tr><td colspan="6"><div class="empty-state"><div class="empty-icon">🎓</div><div class="empty-text">Aucun examen</div></div></td></tr>';
-}
-
-function populateExamDropdowns(exams) {
-  const filterEl = document.getElementById('filter-series-exam');
-  if (filterEl) {
-    filterEl.innerHTML = '<option value="">Tous les examens</option>' +
-      exams.map(e => `<option value="${e.id}">${e.name}</option>`).join('');
-  }
-  const seriesExamEl = document.getElementById('series-exam-id');
-  if (seriesExamEl) {
-    seriesExamEl.innerHTML = '<option value="">-- Choisir un examen --</option>' +
-      exams.map(e => `<option value="${e.id}">${e.name}</option>`).join('');
-  }
-  const exExamEl = document.getElementById('ex-exam');
-  if (exExamEl) {
-    // Conserve les options statiques existantes, complète avec les examens DB
-    const existing = Array.from(exExamEl.options).map(o => o.value);
-    exams.forEach(e => {
-      if (!existing.includes(e.code)) {
-        exExamEl.add(new Option(e.name, e.code));
-      }
-    });
-  }
-  const simExamEl = document.getElementById('sim-exam-id');
-  if (simExamEl) {
-    simExamEl.innerHTML = '<option value="">-- Examen --</option>' +
-      exams.map(e => `<option value="${e.id}">${e.name}</option>`).join('');
-  }
-}
-
-async function createExam() {
-  const code = document.getElementById('exam-code').value.trim();
-  const name = document.getElementById('exam-name').value.trim();
-  if (!code || !name) { showToast('Code et nom requis', 'error'); return; }
-  try {
-    await api('/admin/exams', 'POST', {
-      code, name,
-      pays: document.getElementById('exam-pays').value || 'senegal',
-      niveau: document.getElementById('exam-niveau').value,
-      description: document.getElementById('exam-desc').value,
-    });
-    showToast('Examen créé ✅');
-    closeModal('modal-exam');
-    loadExams();
-  } catch(e) { showToast('Erreur création examen', 'error'); }
-}
-
-async function toggleExam(id, isActive) {
-  try {
-    await api('/admin/exams/' + id, 'PUT', { is_active: isActive });
-    showToast(isActive ? 'Examen activé' : 'Examen désactivé');
-    loadExams();
-  } catch(e) { showToast('Erreur', 'error'); }
-}
-
-async function deleteExam(id, name) {
-  if (!confirm(`Supprimer "${name}" et toutes ses séries ?`)) return;
-  try {
-    await api('/admin/exams/' + id, 'DELETE');
-    showToast('Examen supprimé');
-    loadExams();
-  } catch(e) { showToast('Erreur', 'error'); }
-}
-
-// ════════════════════════════════════════════════════════════
-// SERIES
-// ════════════════════════════════════════════════════════════
-async function loadSeries() {
-  try {
-    const examId = document.getElementById('filter-series-exam')?.value;
-    const url = '/admin/series' + (examId ? '?exam_id=' + examId : '');
-    const series = await api(url);
-    window._allSeries = series;
-    renderSeriesTable(series);
-  } catch(e) { showToast('Erreur chargement séries', 'error'); }
-}
-
-function renderSeriesTable(series) {
-  const html = series.map(s => {
-    const matieres = s.matieres
-      ? Object.entries(s.matieres).map(([m,c]) => `<span class="badge blue" style="margin:2px">${m}: ${c}</span>`).join('')
-      : '—';
-    return `
-      <tr>
-        <td><strong style="font-family:'JetBrains Mono',monospace">${s.code}</strong></td>
-        <td>${s.name}</td>
-        <td><span class="badge purple">${s.exam_name || '—'}</span></td>
-        <td style="max-width:250px">${matieres}</td>
-        <td>${s.is_active ? '<span class="badge green">Actif</span>' : '<span class="badge gray">Inactif</span>'}</td>
-        <td>
-          <div style="display:flex;gap:4px">
-            <button class="btn btn-ghost btn-sm btn-icon" onclick="editSeriesById('${s.id}')" title="Modifier">✏️</button>
-            <button class="btn btn-danger btn-sm btn-icon" onclick="deleteSeries('${s.id}','${s.code}')">🗑</button>
-          </div>
-        </td>
-      </tr>
-    `;
-  }).join('');
-  const tbody = document.getElementById('series-table');
-  if (tbody) tbody.innerHTML = html || '<tr><td colspan="6"><div class="empty-state"><div class="empty-icon">📋</div><div class="empty-text">Aucune série</div></div></td></tr>';
-}
-
-async function createSeries() {
-  const code = document.getElementById('series-code').value.trim();
-  const name = document.getElementById('series-name').value.trim();
-  const exam_id = document.getElementById('series-exam-id').value;
-  if (!code || !name || !exam_id) { showToast('Code, nom et examen requis', 'error'); return; }
-
-  let matieres = null;
-  const matieresRaw = document.getElementById('series-matieres').value.trim();
-  if (matieresRaw) {
-    try { matieres = JSON.parse(matieresRaw); }
-    catch(e) { showToast('JSON matières invalide', 'error'); return; }
-  }
-
-  try {
-    await api('/admin/series', 'POST', {
-      code, name, exam_id,
-      description: document.getElementById('series-desc').value,
-      matieres,
-    });
-    showToast('Série créée ✅');
-    closeModal('modal-series');
-    loadSeries();
-    loadExams();
-  } catch(e) { showToast('Erreur création série', 'error'); }
-}
-
-async function deleteSeries(id, code) {
-  if (!confirm(`Supprimer la série "${code}" ?`)) return;
-  try {
-    await api('/admin/series/' + id, 'DELETE');
-    showToast('Série supprimée');
-    loadSeries();
-  } catch(e) { showToast('Erreur', 'error'); }
-}
-
-// ════════════════════════════════════════════════════════════
-// CONCOURS
-// ════════════════════════════════════════════════════════════
-async function loadConcours() {
-  try {
-    const list = await api('/admin/concours');
-    renderConcoursGrid(list);
-  } catch(e) { showToast('Erreur chargement concours', 'error'); }
-}
-
-function renderConcoursGrid(list) {
-  const html = list.map(c => `
-    <div class="card" style="border-left:3px solid var(--yellow)">
-      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px">
-        <div>
-          <div style="font-weight:700;font-size:14px">${c.name}</div>
-          <div style="font-size:11px;color:var(--text3);margin-top:2px">${c.code}</div>
-        </div>
-        <div style="display:flex;gap:4px">
-          <span class="badge ${c.niveau_requis === 'bac' ? 'blue' : 'purple'}">${c.niveau_requis}</span>
-          <button class="btn btn-ghost btn-sm btn-icon" onclick="editConcours('${c.id}')" title="Modifier">✏️</button>
-          <button class="btn btn-danger btn-sm btn-icon" onclick="deleteConcours('${c.id}','${c.name}')">🗑</button>
-        </div>
-      </div>
-      ${c.description ? `<div style="font-size:12px;color:var(--text2);margin-bottom:10px">${c.description}</div>` : ''}
-      ${c.matieres_epreuves ? `
-        <div style="margin-bottom:10px">
-          <div style="font-size:10px;color:var(--text3);margin-bottom:4px;text-transform:uppercase">Épreuves</div>
-          <div>${Object.entries(c.matieres_epreuves).map(([m,coef]) =>
-            `<span class="badge blue" style="margin:2px">${m}: coef ${coef}</span>`
-          ).join('')}</div>
-        </div>
-      ` : ''}
-      <div>
-        <div style="font-size:10px;color:var(--text3);margin-bottom:6px;text-transform:uppercase">Séries éligibles</div>
-        <div>${c.series_eligibles.length
-          ? c.series_eligibles.map(s => `<span class="badge green" style="margin:2px">${s.code}</span>`).join('')
-          : '<span style="font-size:12px;color:var(--text3)">Aucune série définie</span>'
-        }</div>
-      </div>
-      <div style="font-size:11px;color:var(--text2);margin-top:8px">🌍 ${c.pays}</div>
-    </div>
-  `).join('');
-  const grid = document.getElementById('concours-grid');
-  if (grid) grid.innerHTML = html || '<div class="empty-state"><div class="empty-icon">🏆</div><div class="empty-text">Aucun concours</div></div>';
-}
-
-async function loadConcoursSeriesChecks() {
-  try {
-    const series = await api('/admin/series');
-    const container = document.getElementById('concours-series-checks');
-    if (!container) return;
-    container.innerHTML = series.map(s => `
-      <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer;
-        background:var(--surface3);padding:5px 10px;border-radius:20px">
-        <input type="checkbox" value="${s.id}" style="cursor:pointer"/>
-        ${s.code} <span style="color:var(--text3)">(${s.exam_name || '?'})</span>
-      </label>
-    `).join('') || '<span style="color:var(--text3);font-size:12px">Aucune série disponible — créez des séries d\'abord</span>';
-  } catch(e) {}
-}
-
-async function createConcours() {
-  const code = document.getElementById('concours-code').value.trim();
-  const name = document.getElementById('concours-name').value.trim();
-  if (!code || !name) { showToast('Code et nom requis', 'error'); return; }
-
-  let matieres = null;
-  const matRaw = document.getElementById('concours-matieres').value.trim();
-  if (matRaw) {
-    try { matieres = JSON.parse(matRaw); }
-    catch(e) { showToast('JSON matières invalide', 'error'); return; }
-  }
-
-  const seriesIds = Array.from(
-    document.querySelectorAll('#concours-series-checks input:checked')
-  ).map(el => el.value);
-
-  try {
-    await api('/admin/concours', 'POST', {
-      code, name,
-      pays: document.getElementById('concours-pays').value || 'senegal',
-      niveau_requis: document.getElementById('concours-niveau').value,
-      description: document.getElementById('concours-desc').value,
-      matieres_epreuves: matieres,
-      series_ids: seriesIds,
-    });
-    showToast('Concours créé ✅');
-    closeModal('modal-concours');
-    loadConcours();
-  } catch(e) { showToast('Erreur création concours', 'error'); }
-}
-
-async function deleteConcours(id, name) {
-  if (!confirm(`Supprimer le concours "${name}" ?`)) return;
-  try {
-    await api('/admin/concours/' + id, 'DELETE');
-    showToast('Concours supprimé');
-    loadConcours();
-  } catch(e) { showToast('Erreur', 'error'); }
-}
-
-// Séries dynamiques selon l'examen choisi dans le modal upload exercice
-document.getElementById('ex-exam')?.addEventListener('change', async function() {
-  const examCode = this.value;
-  const exam = allExams.find(e => e.code === examCode);
-  if (!exam) return;
-  try {
-    const series = await api('/admin/series?exam_id=' + exam.id);
-    const container = document.getElementById('ex-series-checks');
-    container.innerHTML = series.map(s => `
-      <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer;
-        background:var(--surface3);padding:5px 10px;border-radius:20px">
-        <input type="checkbox" value="${s.code}" style="cursor:pointer"/> ${s.code}
-        <span style="color:var(--text3);font-size:10px">${s.description || ''}</span>
-      </label>
-    `).join('');
-  } catch(e) {}
-});
-
-// ════════════════════════════════════════════════════════════
-// EDIT — EXAMS / SERIES / CONCOURS
-// ════════════════════════════════════════════════════════════
-function editExamById(id) {
-  const e = allExams.find(x => x.id === id);
-  if (!e) return;
-  editExam(e.id, e.code, e.name, e.pays, e.niveau, e.description || '');
-}
-
-async function editSeriesById(id) {
-  const s = (window._allSeries || []).find(x => x.id === id);
-  if (!s) return;
-  document.getElementById('series-code').value = s.code;
-  document.getElementById('series-name').value = s.name;
-  document.getElementById('series-exam-id').value = s.exam_id || '';
-  document.getElementById('series-desc').value = s.description || '';
-  document.getElementById('series-matieres').value = JSON.stringify(s.matieres || {}, null, 2);
-  document.querySelector('#modal-series .btn-primary').textContent = '💾 Enregistrer';
-  document.querySelector('#modal-series .btn-primary').onclick = () => updateSeries(id);
-  document.querySelector('#modal-series .modal-title').textContent = '✏️ Modifier la série';
-  openModal('modal-series');
-}
-
-function editExam(id, code, name, pays, niveau, desc) {
-  document.getElementById('exam-code').value = code;
-  document.getElementById('exam-name').value = name;
-  document.getElementById('exam-pays').value = pays;
-  document.getElementById('exam-niveau').value = niveau;
-  document.getElementById('exam-desc').value = desc;
-  document.querySelector('#modal-exam .btn-primary').textContent = '💾 Enregistrer';
-  document.querySelector('#modal-exam .btn-primary').onclick = () => updateExam(id);
-  document.querySelector('#modal-exam .modal-title').textContent = '✏️ Modifier l\'examen';
-  openModal('modal-exam');
-}
-
-async function updateExam(id) {
-  try {
-    await api('/admin/exams/' + id, 'PUT', {
-      name: document.getElementById('exam-name').value,
-      pays: document.getElementById('exam-pays').value,
-      niveau: document.getElementById('exam-niveau').value,
-      description: document.getElementById('exam-desc').value,
-    });
-    showToast('Examen mis à jour ✅');
-    closeModal('modal-exam');
-    document.querySelector('#modal-exam .btn-primary').textContent = 'Créer l\'examen';
-    document.querySelector('#modal-exam .btn-primary').onclick = createExam;
-    document.querySelector('#modal-exam .modal-title').textContent = '🎓 Nouvel examen';
-    loadExams();
-  } catch(e) { showToast('Erreur', 'error'); }
-}
-
-async function updateSeries(id) {
-  let matieres = null;
-  const raw = document.getElementById('series-matieres').value.trim();
-  if (raw) {
-    try { matieres = JSON.parse(raw); }
-    catch(e) { showToast('JSON invalide', 'error'); return; }
-  }
-  try {
-    await api('/admin/series/' + id, 'PUT', {
-      code: document.getElementById('series-code').value,
-      name: document.getElementById('series-name').value,
-      exam_id: document.getElementById('series-exam-id').value,
-      description: document.getElementById('series-desc').value,
-      matieres,
-    });
-    showToast('Série mise à jour ✅');
-    closeModal('modal-series');
-    document.querySelector('#modal-series .btn-primary').textContent = 'Créer la série';
-    document.querySelector('#modal-series .btn-primary').onclick = createSeries;
-    document.querySelector('#modal-series .modal-title').textContent = '📋 Nouvelle série';
-    loadSeries();
-  } catch(e) { showToast('Erreur', 'error'); }
-}
-
-async function editConcours(id) {
-  const list = await api('/admin/concours');
-  const c = list.find(x => x.id === id);
-  if (!c) return;
-  document.getElementById('concours-code').value = c.code;
-  document.getElementById('concours-name').value = c.name;
-  document.getElementById('concours-pays').value = c.pays;
-  document.getElementById('concours-niveau').value = c.niveau_requis;
-  document.getElementById('concours-desc').value = c.description || '';
-  document.getElementById('concours-matieres').value = JSON.stringify(c.matieres_epreuves || {}, null, 2);
-  await loadConcoursSeriesChecks();
-  c.series_eligibles.forEach(s => {
-    const cb = document.querySelector(`#concours-series-checks input[value="${s.id}"]`);
-    if (cb) cb.checked = true;
-  });
-  document.querySelector('#modal-concours .btn-primary').textContent = '💾 Enregistrer';
-  document.querySelector('#modal-concours .btn-primary').onclick = () => updateConcours(id);
-  document.querySelector('#modal-concours .modal-title').textContent = '✏️ Modifier le concours';
-  openModal('modal-concours');
-}
-
-async function updateConcours(id) {
-  let matieres = null;
-  const raw = document.getElementById('concours-matieres').value.trim();
-  if (raw) {
-    try { matieres = JSON.parse(raw); }
-    catch(e) { showToast('JSON invalide', 'error'); return; }
-  }
-  const seriesIds = Array.from(
-    document.querySelectorAll('#concours-series-checks input:checked')
-  ).map(el => el.value);
-  try {
-    await api('/admin/concours/' + id, 'PUT', {
-      name: document.getElementById('concours-name').value,
-      pays: document.getElementById('concours-pays').value,
-      niveau_requis: document.getElementById('concours-niveau').value,
-      description: document.getElementById('concours-desc').value,
-      matieres_epreuves: matieres,
-      series_ids: seriesIds,
-    });
-    showToast('Concours mis à jour ✅');
-    closeModal('modal-concours');
-    document.querySelector('#modal-concours .btn-primary').textContent = 'Créer le concours';
-    document.querySelector('#modal-concours .btn-primary').onclick = createConcours;
-    document.querySelector('#modal-concours .modal-title').textContent = '🏆 Nouveau concours';
-    loadConcours();
-  } catch(e) { showToast('Erreur', 'error'); }
-}
-
-// ════════════════════════════════════════════════════════════
-// SIMULATIONS
-// ════════════════════════════════════════════════════════════
-async function loadSimulations() {
-  try {
-    const sims = await api('/admin/simulations');
-    renderSimulationsGrid(sims);
-  } catch(e) { showToast('Erreur chargement simulations', 'error'); }
-}
-
-function renderSimulationsGrid(sims) {
-  if (!sims.length) {
-    document.getElementById('simulations-grid').innerHTML = '<div class="empty-state"><div class="empty-icon">🎯</div><div class="empty-text">Aucune simulation</div><div class="empty-sub">Créez votre premier examen blanc</div></div>';
-    return;
-  }
-
-  const statutColors = { draft: 'gray', scheduled: 'blue', active: 'green', closed: 'purple' };
-  const statutLabels = { draft: 'Brouillon', scheduled: '⏰ Programmée', active: '🔴 En cours', closed: '✅ Terminée' };
-
-  document.getElementById('simulations-grid').innerHTML = sims.map(s => {
-    const dateDebut = new Date(s.date_debut);
-    const dateFin = new Date(dateDebut.getTime() + s.duree_minutes * 60000);
-    return `
-      <div class="card" style="border-left:3px solid ${s.statut === 'active' ? 'var(--green)' : s.statut === 'scheduled' ? 'var(--accent)' : 'var(--border)'}">
-        <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:16px">
-          <div style="flex:1">
-            <div style="font-weight:700;font-size:15px;margin-bottom:4px">${s.titre}</div>
-            <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
-              <span class="badge ${statutColors[s.statut] || 'gray'}">${statutLabels[s.statut] || s.statut}</span>
-              ${s.matiere ? `<span class="badge blue">${s.matiere}</span>` : ''}
-              ${s.serie ? `<span class="badge purple">${s.serie}</span>` : ''}
-              <span class="badge yellow">⏱ ${s.duree_minutes}min</span>
-              <span class="badge green">👥 ${s.nb_participants} inscrits</span>
-            </div>
-            <div style="font-size:12px;color:var(--text2)">
-              📅 ${dateDebut.toLocaleDateString('fr')} à ${dateDebut.toLocaleTimeString('fr',{hour:'2-digit',minute:'2-digit'})}
-              → ${dateFin.toLocaleTimeString('fr',{hour:'2-digit',minute:'2-digit'})}
-            </div>
-            <div style="font-size:11px;color:var(--text3);margin-top:4px">
-              ${s.notif_j1_sent ? '✅ Notif envoyée' : '⏳ Pas encore notifié'} &nbsp;·&nbsp;
-              ${s.notif_debut_sent ? '✅ Lancée' : '⏳ Pas encore lancée'} &nbsp;·&nbsp;
-              ${s.resultats_envoyes ? '✅ Résultats envoyés' : '⏳ Résultats en attente'}
-            </div>
-          </div>
-          <div style="display:flex;flex-direction:column;gap:6px;align-items:flex-end">
-            ${s.statut === 'scheduled' ? `
-              <button class="btn btn-success btn-sm" onclick="lancerSimulation('${s.id}','${s.titre.replace(/'/g,"\\'")}')">▶ Lancer</button>
-            ` : ''}
-            ${s.statut === 'active' ? `
-              <button class="btn btn-primary btn-sm" onclick="corrigerSimulation('${s.id}')">📝 Corriger</button>
-            ` : ''}
-            ${s.statut === 'closed' ? `
-              <button class="btn btn-ghost btn-sm" onclick="voirParticipations('${s.id}')">📊 Résultats</button>
-            ` : ''}
-            ${s.statut !== 'closed' && s.statut !== 'error' ? `
-              <button class="btn btn-warning btn-sm" onclick="ouvrirNotifSimulation('${s.id}','${s.titre.replace(/'/g,"\\'")}')">🔔 Notifier</button>
-            ` : ''}
-            <button class="btn btn-danger btn-sm btn-icon" onclick="deleteSimulation('${s.id}','${s.titre.replace(/'/g,"\\'")}')">🗑</button>
-          </div>
-        </div>
-      </div>
-    `;
-  }).join('');
-}
-
-async function loadSimSeries() {
-  const examId = document.getElementById('sim-exam-id').value;
-  if (!examId) return;
-  try {
-    const series = await api('/admin/series?exam_id=' + examId);
-    document.getElementById('sim-serie').innerHTML = '<option value="">-- Série --</option>' +
-      series.map(s => `<option value="${s.code}">${s.code} — ${s.name}</option>`).join('');
-    document.getElementById('sim-series-checks').innerHTML = series.map(s => `
-      <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer;
-        background:var(--surface3);padding:5px 10px;border-radius:20px">
-        <input type="checkbox" value="${s.code}" style="cursor:pointer"/> ${s.code}
-      </label>
-    `).join('');
-  } catch(e) {}
-}
-
-async function createSimulation() {
-  const titre = document.getElementById('sim-titre').value.trim();
-  const date = document.getElementById('sim-date').value;
-  if (!titre || !date) { showToast('Titre et date requis', 'error'); return; }
-
-  const sujetFile = document.getElementById('sim-sujet-file').files[0];
-  if (!sujetFile) { showToast('Sujet PDF requis', 'error'); return; }
-
-  const status = document.getElementById('sim-status');
-  status.textContent = '⏳ Upload en cours...';
-
-  try {
-    const sujet_b64 = await toBase64(sujetFile);
-    const corrFile = document.getElementById('sim-corr-file').files[0];
-    const correction_b64 = corrFile ? await toBase64(corrFile) : null;
-
-    const seriesEligibles = Array.from(
-      document.querySelectorAll('#sim-series-checks input:checked')
-    ).map(el => el.value);
-
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 120000);
-
-    const res = await fetch('/api/v1/admin/simulations', {
-      method: 'POST',
-      headers: { 'X-Admin-Key': API_KEY, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        titre,
-        type: document.getElementById('sim-type').value,
-        matiere: document.getElementById('sim-matiere').value || null,
-        serie: document.getElementById('sim-serie').value || null,
-        exam_id: document.getElementById('sim-exam-id').value || null,
-        date_debut: new Date(date).toISOString(),
-        duree_minutes: parseInt(document.getElementById('sim-duree').value),
-        series_eligibles: seriesEligibles,
-        sujet_b64,
-        correction_b64,
-      }),
-      signal: controller.signal,
-    });
-    clearTimeout(timeoutId);
-    const data = await res.json();
-
-    if (data.success) {
-      showToast('Simulation créée ✅');
-      closeModal('modal-simulation');
-      loadSimulations();
-    } else {
-      status.textContent = '❌ ' + (data.detail || 'Erreur');
-    }
-  } catch(e) {
-    status.textContent = e.name === 'AbortError' ? '❌ Timeout' : '❌ ' + e.message;
-  }
-}
-
-let _notifSimId = null;
-
-function ouvrirNotifSimulation(id, titre) {
-  _notifSimId = id;
-  document.getElementById('notif-sim-titre').textContent = titre;
-  document.getElementById('notif-sim-message').value = '';
-  document.getElementById('notif-sim-result').textContent = '';
-  openModal('modal-notif-simulation');
-}
-
-async function envoyerNotifSimulation() {
-  if (!_notifSimId) return;
-  const message = document.getElementById('notif-sim-message').value.trim();
-  const resultEl = document.getElementById('notif-sim-result');
-  resultEl.textContent = '⏳ Envoi en cours...';
-  try {
-    const body = message ? { message } : {};
-    const r = await api('/admin/simulations/' + _notifSimId + '/notifier', 'POST', body);
-    resultEl.style.color = 'var(--green)';
-    resultEl.textContent = `✅ ${r.message || 'Notification envoyée'} (${r.notifies} élève(s))`;
-    setTimeout(() => { closeModal('modal-notif-simulation'); loadSimulations(); }, 1500);
-  } catch(e) {
-    resultEl.style.color = 'var(--red)';
-    resultEl.textContent = '❌ Erreur lors de l\'envoi';
-  }
-}
-
-async function lancerSimulation(id, titre) {
-  if (!confirm(`Lancer "${titre}" maintenant ?`)) return;
-  try {
-    await api('/admin/simulations/' + id + '/lancer', 'POST');
-    showToast('Simulation lancée ! Sujets envoyés aux élèves 🚀');
-    loadSimulations();
-  } catch(e) { showToast('Erreur', 'error'); }
-}
-
-async function corrigerSimulation(id) {
-  if (!confirm('Lancer la correction de toutes les copies ?')) return;
-  try {
-    await api('/admin/simulations/' + id + '/corriger', 'POST');
-    showToast('Correction lancée ! Résultats en cours d\'envoi 📊');
-    loadSimulations();
-  } catch(e) { showToast('Erreur', 'error'); }
-}
-
-async function voirParticipations(id) {
-  try {
-    const parts = await api('/admin/simulations/' + id + '/participants');
-    const html = parts.map((p, i) => `
-      <div style="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--border)">
-        <span style="font-size:18px">${i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i+1}.`}</span>
-        <div style="flex:1">
-          <div style="font-weight:600">${p.user_name || p.user_phone}</div>
-          <div style="font-size:11px;color:var(--text3)">${p.statut}</div>
-        </div>
-        <div style="text-align:right">
-          <div style="font-weight:700;color:${p.score >= 70 ? 'var(--green)' : p.score >= 50 ? 'var(--yellow)' : 'var(--red)'}">${p.score ?? '—'}/100</div>
-          <div style="font-size:10px;color:var(--text3)">${p.mention || ''}</div>
-        </div>
-      </div>
-    `).join('');
-
-    const modal = document.createElement('div');
-    modal.className = 'modal-overlay open';
-    modal.innerHTML = `
-      <div class="modal">
-        <div class="modal-header">
-          <div class="modal-title">📊 Classement</div>
-          <button class="modal-close" onclick="this.closest('.modal-overlay').remove()">✕</button>
-        </div>
-        <div style="max-height:400px;overflow-y:auto">${html || '<div class="empty-state"><div class="empty-text">Aucun participant</div></div>'}</div>
-      </div>
-    `;
-    document.body.appendChild(modal);
-  } catch(e) { showToast('Erreur', 'error'); }
-}
-
-async function deleteSimulation(id, titre) {
-  if (!confirm(`Supprimer "${titre}" ?`)) return;
-  try {
-    await api('/admin/simulations/' + id, 'DELETE');
-    showToast('Simulation supprimée');
-    loadSimulations();
-  } catch(e) { showToast('Erreur', 'error'); }
-}
+// Alias utilisé par les fonctions emploi (jobs/recruteurs/candidats/scraping)
+function toast(msg, type = 'success') { showToast(msg, type); }
 
 // ════════════════════════════════════════════════════════════
 // JOBS

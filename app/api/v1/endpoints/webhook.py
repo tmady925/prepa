@@ -1120,7 +1120,7 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession, msg_t
                 from app.services.whatsapp import media_download as _md
                 _media = await _md.download_media(message)
                 if _media and _media.get("bytes"):
-                    from app.services.cv_processor_service import cv_processor
+                    from app.services.cv_processor_service import cv_processor_service as cv_processor
                     _res = await cv_processor.process_cv(
                         db=db, user=user,
                         file_bytes=_media["bytes"],

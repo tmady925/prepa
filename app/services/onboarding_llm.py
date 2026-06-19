@@ -295,12 +295,12 @@ async def _call_llm_json(prompt: str, system: str = None) -> dict | None:
     ]
 
     providers = []
-    if getattr(settings, "groq_api_key", None):
-        providers.append(("groq", "https://api.groq.com/openai/v1/chat/completions",
-                          "llama-3.3-70b-versatile", settings.groq_api_key))
     if getattr(settings, "mistral_api_key", None):
         providers.append(("mistral", "https://api.mistral.ai/v1/chat/completions",
                           "mistral-small-latest", settings.mistral_api_key))
+    if getattr(settings, "groq_api_key", None):
+        providers.append(("groq", "https://api.groq.com/openai/v1/chat/completions",
+                          "llama-3.3-70b-versatile", settings.groq_api_key))
 
     for name, url, model, key in providers:
         try:

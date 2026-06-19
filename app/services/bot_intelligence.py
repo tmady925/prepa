@@ -33,10 +33,6 @@ from app.core.settings import get_settings
 
 settings = get_settings()
 
-# ─── Règles plateforme injectées dans chaque prompt ──────────────────────────
-
-PLATFORM_RULES = PLATFORM_RULES_EMPLOI  # alias — plateforme emploi uniquement
-
 # ─── Variante EMPLOI UNIQUEMENT ──────────────────────────────────────────────
 
 PLATFORM_RULES_EMPLOI = """
@@ -64,6 +60,9 @@ IMPORTANT : Cette plateforme ne traite PAS les études, examens scolaires (BAC, 
 ni les concours. Tu n'en parles jamais. Si l'utilisateur évoque ces sujets,
 tu le recentres avec bienveillance sur sa recherche d'emploi.
 """
+
+# alias — plateforme emploi uniquement (défini APRÈS la variante pour éviter NameError)
+PLATFORM_RULES = PLATFORM_RULES_EMPLOI
 
 SYSTEM_PROMPT_EMPLOI = """Tu es Prepa, un assistant emploi intelligent pour les jeunes en Afrique.
 Tu accompagnes les utilisateurs UNIQUEMENT sur leur recherche d'emploi et leur carrière.
@@ -169,7 +168,7 @@ async def build_user_context(user, db=None) -> str:
     if db:
         try:
             from sqlalchemy import select
-            from app.models.job_match import JobMatch
+            from app.models.candidate_profile import JobMatch
             from app.models.job_opportunity import JobOpportunity
 
             result = await db.execute(
@@ -179,7 +178,7 @@ async def build_user_context(user, db=None) -> str:
                     JobMatch.user_id == user.id,
                     JobOpportunity.statut == "active",
                 )
-                .order_by(JobMatch.score.desc())
+                .order_by(JobMatch.score_match.desc())
                 .limit(5)
             )
             rows = result.all()
@@ -195,7 +194,7 @@ async def build_user_context(user, db=None) -> str:
                                 deadline = f" — deadline {dl.strftime('%d/%m/%Y')}"
                         except Exception:
                             pass
-                    jobs_ctx += f"- {job.titre} chez {job.entreprise or 'N/A'}{deadline} (score matching: {match.score:.0f}%)\n"
+                    jobs_ctx += f"- {job.titre} chez {job.entreprise or 'N/A'}{deadline} (score matching: {match.score_match:.0f}%)\n"
                 ctx_parts.append(jobs_ctx.strip())
             else:
                 ctx_parts.append("OFFRES D'EMPLOI : Aucune offre matchée pour l'instant")
@@ -215,12 +214,12 @@ async def _call_llm_json(system: str, user_message: str) -> dict | None:
     ]
 
     providers = []
-    if getattr(settings, "groq_api_key", None):
-        providers.append(("groq", "https://api.groq.com/openai/v1/chat/completions",
-                          "llama-3.3-70b-versatile", settings.groq_api_key))
     if getattr(settings, "mistral_api_key", None):
         providers.append(("mistral", "https://api.mistral.ai/v1/chat/completions",
                           "mistral-small-latest", settings.mistral_api_key))
+    if getattr(settings, "groq_api_key", None):
+        providers.append(("groq", "https://api.groq.com/openai/v1/chat/completions",
+                          "llama-3.3-70b-versatile", settings.groq_api_key))
 
     for name, url, model, key in providers:
         try:
@@ -328,12 +327,12 @@ async def _call_llm_text(system: str, user_message: str) -> str | None:
         {"role": "user", "content": user_message},
     ]
     providers = []
-    if getattr(settings, "groq_api_key", None):
-        providers.append(("groq", "https://api.groq.com/openai/v1/chat/completions",
-                          "llama-3.3-70b-versatile", settings.groq_api_key))
     if getattr(settings, "mistral_api_key", None):
         providers.append(("mistral", "https://api.mistral.ai/v1/chat/completions",
                           "mistral-large-latest", settings.mistral_api_key))
+    if getattr(settings, "groq_api_key", None):
+        providers.append(("groq", "https://api.groq.com/openai/v1/chat/completions",
+                          "llama-3.3-70b-versatile", settings.groq_api_key))
 
     for name, url, model, key in providers:
         try:

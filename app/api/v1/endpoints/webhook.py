@@ -259,13 +259,13 @@ async def handle_command(command: str, phone: str, user, db: AsyncSession):
         # Affiche les offres d'emploi matchées pour ce user
         try:
             from sqlalchemy import select as _sel_off
-            from app.models.job_match import JobMatch as _JM
+            from app.models.candidate_profile import JobMatch as _JM
             from app.models.job_opportunity import JobOpportunity as _JO
             _rows = (await db.execute(
                 _sel_off(_JM, _JO)
                 .join(_JO, _JM.job_id == _JO.id)
                 .where(_JM.user_id == user.id, _JO.statut == "active")
-                .order_by(_JM.score.desc())
+                .order_by(_JM.score_match.desc())
                 .limit(5)
             )).all()
 
@@ -284,7 +284,7 @@ async def handle_command(command: str, phone: str, user, db: AsyncSession):
                             _deadline = f"\n  📅 Deadline : {_job.date_limite.strftime('%d/%m/%Y')}"
                         except Exception:
                             pass
-                    _score = f"{_match.score:.0f}%" if _match.score else "N/A"
+                    _score = f"{_match.score_match:.0f}%" if _match.score_match else "N/A"
                     _msg += (
                         f"*{_job.titre}*\n"
                         f"  🏢 {_job.entreprise or 'N/A'}{_deadline}\n"
@@ -1249,81 +1249,76 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession, msg_t
             await user_service.increment_message_count(db, user)
             return
 
-        # ── Intelligence LLM universelle ──────────────────────────────
-        # Analyse le message avec contexte complet (profil, offres, simulations, règles)
-        # avant tout traitement rigide. N'intervient que si le message est ambigu
-        # ou nécessite des données de la plateforme pour être traité intelligemment.
+        # ── Cerveau conversationnel (post-onboarding) ──────────────────
+        # Le LLM décide + extrait ; le code valide, persiste, exécute et rend
+        # les faits. Une erreur du LLM ne peut produire qu'une phrase maladroite,
+        # jamais une fausse offre ni un champ invalide. Si le cerveau échoue
+        # (None), on retombe sur answer_emploi puis le message générique.
         if msg_type == "text" and text and len(text.strip()) > 2:
             try:
-                from app.services.bot_intelligence import analyze_message as _bot_analyze, should_analyze as _bot_should
-                if _bot_should(text, user):
-                    _hist = await message_repo.get_history(db, user.id, limit=6)
-                    _decision = await _bot_analyze(text=text, user=user, db=db, history=_hist)
-                    if _decision:
-                        _action = _decision.get("action", "passthrough")
-                        _msg = _decision.get("message")
+                from app.services import conversation_brain as _brain
+                _hist = await message_repo.get_history(db, user.id, limit=6)
+                _decision = await _brain.brain_decide(text=text, user=user, db=db, history=_hist)
+            except Exception as _brain_err:
+                print(f"  [conversation_brain] erreur ignorée: {_brain_err}")
+                _decision = None
 
-                        if _action == "answer" and _msg:
-                            await whatsapp_sender.send_text(phone, _msg)
-                            await user_service.increment_message_count(db, user)
-                            await message_repo.save(db=db, user_id=user.id, direction="inbound", content=text, intent="question")
-                            await message_repo.save(db=db, user_id=user.id, direction="outbound", content=_msg, intent="answer")
-                            return
+            if _decision:
+                _action = _decision.get("action", "none")
+                _reply = _decision.get("reply")
+                _updates = _decision.get("profile_updates") or {}
 
-                        elif _action == "show_jobs":
-                            # Déclenche l'affichage des offres via commande interne
-                            await handle_command("mes_offres", phone, user, db)
-                            await user_service.increment_message_count(db, user)
-                            return
+                # 1) Persiste les champs profil validés
+                _profile_changed = False
+                if _updates:
+                    _profile_changed = await _brain.apply_profile_updates(db, user, _updates)
 
-                        elif _action == "show_profile":
-                            await handle_command("profil", phone, user, db)
-                            await user_service.increment_message_count(db, user)
-                            return
+                # 2) Si le profil a changé, relance le matching (notifie les
+                #    nouvelles offres) AVANT d'afficher quoi que ce soit.
+                if _profile_changed:
+                    await _brain.rematch(db, user)
 
-                        elif _action == "show_plan":
-                            await handle_command("plan", phone, user, db)
-                            await user_service.increment_message_count(db, user)
-                            return
+                # 3) Message humain
+                if _reply:
+                    await whatsapp_sender.send_text(phone, _reply)
 
-                        elif _action == "guide_emploi" and _msg:
-                            await whatsapp_sender.send_text(phone, _msg)
-                            await user_service.increment_message_count(db, user)
-                            return
+                # 4) Action métier (réutilise les handlers existants)
+                if _action == "show_jobs":
+                    await handle_command("mes_offres", phone, user, db)
+                elif _action == "show_petit_jobs":
+                    from app.services.petit_job_service import petit_job_service as _pjs
+                    _jobs = await _pjs.list_active(db, lieu=getattr(user, "localisation_emploi", None))
+                    await whatsapp_sender.send_text(phone, messages.petit_job_list(_jobs, user.name or ""))
+                elif _action == "show_profile":
+                    await handle_command("profil", phone, user, db)
+                elif _action == "show_plan":
+                    await handle_command("plan", phone, user, db)
+                elif _action == "post_job":
+                    from app.services.petit_job_service import petit_job_service as _pjs
+                    _draft = await _pjs.extract_from_text(text, user)
+                    if _draft:
+                        _conv = user.conversation_state or {}
+                        _conv["awaiting_petit_job_confirm"] = True
+                        _conv["petit_job_draft"] = _draft
+                        user.conversation_state = _conv
+                        await db.flush()
+                        await whatsapp_sender.send_buttons(
+                            phone,
+                            messages.petit_job_confirm(_draft, user.name or ""),
+                            messages.PETIT_JOB_CONFIRM_BUTTONS,
+                        )
+                    elif not _reply:
+                        await whatsapp_sender.send_text(
+                            phone,
+                            f"📝 Décris le travail que tu proposes *{user.name or ''}* !\n\n"
+                            "_Exemple : J'ai besoin de 2 livreurs à moto demain à Dakar Plateau, 5000F la journée_"
+                        )
 
-                        elif _action == "show_petit_jobs":
-                            from app.services.petit_job_service import petit_job_service as _pjs
-                            _jobs = await _pjs.list_active(db, lieu=getattr(user, "localisation_emploi", None))
-                            await whatsapp_sender.send_text(phone, messages.petit_job_list(_jobs, user.name or ""))
-                            await user_service.increment_message_count(db, user)
-                            return
-
-                        elif _action == "post_job":
-                            from app.services.petit_job_service import petit_job_service as _pjs
-                            _draft = await _pjs.extract_from_text(text, user)
-                            if _draft:
-                                _conv = user.conversation_state or {}
-                                _conv["awaiting_petit_job_confirm"] = True
-                                _conv["petit_job_draft"] = _draft
-                                user.conversation_state = _conv
-                                await db.flush()
-                                await whatsapp_sender.send_buttons(
-                                    phone,
-                                    messages.petit_job_confirm(_draft, user.name or ""),
-                                    messages.PETIT_JOB_CONFIRM_BUTTONS,
-                                )
-                            else:
-                                await whatsapp_sender.send_text(
-                                    phone,
-                                    f"📝 Décris le travail que tu proposes *{user.name or ''}* !\n\n"
-                                    "_Exemple : J'ai besoin de 2 livreurs à moto demain à Dakar Plateau, 5000F la journée_"
-                                )
-                            await user_service.increment_message_count(db, user)
-                            return
-
-                        # "exercise" et "passthrough" → continuent vers le flow normal
-            except Exception as _bi_err:
-                print(f"  [bot_intelligence] erreur ignorée: {_bi_err}")
+                await user_service.increment_message_count(db, user)
+                await message_repo.save(db=db, user_id=user.id, direction="inbound", content=text, intent=_decision.get("intent") or "emploi")
+                if _reply:
+                    await message_repo.save(db=db, user_id=user.id, direction="outbound", content=_reply, intent="emploi")
+                return
         # ─────────────────────────────────────────────────────────────
 
         # ── Réponse emploi fallback ──────────────────────────────────

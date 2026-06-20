@@ -1,5 +1,6 @@
 import uuid
 from datetime import date, datetime, timezone
+from pydantic import BaseModel
 from fastapi import APIRouter, Request, Depends, HTTPException, Header
 from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -1548,6 +1549,116 @@ async def run_scraping_now(
         return {"success": True, **result}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Erreur scraping: {e}")
+
+
+# ── PETITS JOBS ───────────────────────────────────────────────────────
+
+@router.get("/admin/petit-jobs")
+async def list_petit_jobs(
+    db: AsyncSession = Depends(get_db),
+    _: bool = Depends(verify_admin),
+):
+    from app.models.petit_job import PetitJob
+    from sqlalchemy import select
+    result = await db.execute(select(PetitJob).order_by(PetitJob.created_at.desc()))
+    jobs = result.scalars().all()
+    return [
+        {
+            "id": str(j.id),
+            "titre": j.titre,
+            "type_travail": j.type_travail,
+            "lieu": j.lieu,
+            "date_debut_str": j.date_debut_str,
+            "duree": j.duree,
+            "remuneration": j.remuneration,
+            "nb_postes": j.nb_postes,
+            "statut": j.statut,
+            "nb_candidats_notifies": j.nb_candidats_notifies,
+            "description": j.description,
+            "created_at": j.created_at.isoformat() if j.created_at else None,
+            "expires_at": j.expires_at.isoformat() if j.expires_at else None,
+        }
+        for j in jobs
+    ]
+
+
+class PetitJobCreate(BaseModel):
+    titre: str
+    type_travail: str | None = None
+    lieu: str | None = None
+    date_debut_str: str | None = None
+    duree: str | None = None
+    remuneration: str | None = None
+    nb_postes: int = 1
+    description: str | None = None
+
+
+@router.post("/admin/petit-jobs", status_code=201)
+async def create_petit_job(
+    body: PetitJobCreate,
+    db: AsyncSession = Depends(get_db),
+    _: bool = Depends(verify_admin),
+):
+    from app.models.petit_job import PetitJob
+    from app.services.petit_job_service import PetitJobService
+    job = PetitJob(
+        employeur_user_id=None,
+        titre=body.titre,
+        type_travail=body.type_travail,
+        lieu=body.lieu,
+        date_debut_str=body.date_debut_str,
+        duree=body.duree,
+        remuneration=body.remuneration,
+        nb_postes=body.nb_postes,
+        description=body.description,
+        statut="ouvert",
+    )
+    db.add(job)
+    await db.commit()
+    await db.refresh(job)
+    # Notifier les candidats matchés
+    try:
+        svc = PetitJobService()
+        nb = await svc.notify_candidates(db, job)
+        job.nb_candidats_notifies = nb
+        await db.commit()
+    except Exception:
+        pass
+    return {"id": str(job.id), "nb_candidats_notifies": job.nb_candidats_notifies}
+
+
+@router.post("/admin/petit-jobs/{job_id}/expire")
+async def expire_petit_job(
+    job_id: str,
+    db: AsyncSession = Depends(get_db),
+    _: bool = Depends(verify_admin),
+):
+    from app.models.petit_job import PetitJob
+    from sqlalchemy import select
+    result = await db.execute(select(PetitJob).where(PetitJob.id == job_id))
+    job = result.scalar_one_or_none()
+    if not job:
+        raise HTTPException(status_code=404, detail="Petit job introuvable")
+    job.statut = "expiré"
+    await db.commit()
+    return {"success": True}
+
+
+@router.delete("/admin/petit-jobs/{job_id}")
+async def delete_petit_job(
+    job_id: str,
+    db: AsyncSession = Depends(get_db),
+    _: bool = Depends(verify_admin),
+):
+    from app.models.petit_job import PetitJob
+    from sqlalchemy import select
+    result = await db.execute(select(PetitJob).where(PetitJob.id == job_id))
+    job = result.scalar_one_or_none()
+    if not job:
+        raise HTTPException(status_code=404, detail="Petit job introuvable")
+    await db.delete(job)
+    await db.commit()
+    return {"success": True}
 
 
 # ── DASHBOARD ─────────────────────────────────────────────────────────

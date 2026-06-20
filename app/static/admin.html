@@ -614,6 +614,9 @@ tr:hover td { background: rgba(255,255,255,0.02); }
     <a class="nav-item" onclick="showPage('scraping')" data-page="scraping">
       <span class="icon">🔍</span> Scraping
     </a>
+    <a class="nav-item" onclick="showPage('petit-jobs')" data-page="petit-jobs">
+      <span class="icon">💼</span> Petits Jobs
+    </a>
 
     <div class="sidebar-footer">
       <div class="admin-card">
@@ -1255,6 +1258,36 @@ tr:hover td { background: rgba(255,255,255,0.02); }
       </div>
     </div>
 
+    <!-- ── PAGE PETITS JOBS ───────────────────────────── -->
+    <div id="page-petit-jobs" class="page">
+      <div class="section-header">
+        <div>
+          <div class="section-title">💼 Petits Jobs</div>
+          <div class="section-sub">Jobs informels / gig economy</div>
+        </div>
+        <button class="btn btn-primary" onclick="showModal('modal-create-petit-job')">+ Créer un petit job</button>
+      </div>
+      <div class="card" style="padding:0;overflow:hidden">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>Titre</th>
+              <th>Type</th>
+              <th>Lieu</th>
+              <th>Rémunération</th>
+              <th>Postes</th>
+              <th>Notifiés</th>
+              <th>Statut</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="petit-jobs-tbody">
+            <tr><td colspan="8" class="empty">Chargement...</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
   </main>
 </div>
 
@@ -1294,6 +1327,60 @@ tr:hover td { background: rgba(255,255,255,0.02); }
   </div>
 </div>
 
+<!-- Modal: Créer petit job -->
+<div class="modal-overlay" id="modal-create-petit-job">
+  <div class="modal" style="max-width:560px;width:95%">
+    <div class="modal-header">
+      <div class="modal-title">💼 Créer un petit job</div>
+      <button class="modal-close" onclick="closeModal('modal-create-petit-job')">✕</button>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:12px;padding:4px 0">
+      <div>
+        <label style="font-size:12px;color:var(--text2);margin-bottom:4px;display:block">Titre *</label>
+        <input id="pj-titre" class="input" placeholder="ex: Gardien de nuit, Manutentionnaire..." style="width:100%">
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+        <div>
+          <label style="font-size:12px;color:var(--text2);margin-bottom:4px;display:block">Type de travail</label>
+          <input id="pj-type" class="input" placeholder="ex: Temps partiel, CDD..." style="width:100%">
+        </div>
+        <div>
+          <label style="font-size:12px;color:var(--text2);margin-bottom:4px;display:block">Lieu</label>
+          <input id="pj-lieu" class="input" placeholder="ex: Dakar, Pikine..." style="width:100%">
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+        <div>
+          <label style="font-size:12px;color:var(--text2);margin-bottom:4px;display:block">Date de début</label>
+          <input id="pj-date" class="input" placeholder="ex: Dès lundi, 01/07..." style="width:100%">
+        </div>
+        <div>
+          <label style="font-size:12px;color:var(--text2);margin-bottom:4px;display:block">Durée</label>
+          <input id="pj-duree" class="input" placeholder="ex: 1 semaine, 3 mois..." style="width:100%">
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+        <div>
+          <label style="font-size:12px;color:var(--text2);margin-bottom:4px;display:block">Rémunération</label>
+          <input id="pj-remuneration" class="input" placeholder="ex: 50 000 FCFA/mois..." style="width:100%">
+        </div>
+        <div>
+          <label style="font-size:12px;color:var(--text2);margin-bottom:4px;display:block">Nb postes</label>
+          <input id="pj-postes" class="input" type="number" min="1" value="1" style="width:100%">
+        </div>
+      </div>
+      <div>
+        <label style="font-size:12px;color:var(--text2);margin-bottom:4px;display:block">Description</label>
+        <textarea id="pj-description" class="input" rows="3" placeholder="Détails du poste, tâches, profil recherché..." style="width:100%;resize:vertical"></textarea>
+      </div>
+    </div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px">
+      <button class="btn btn-ghost" onclick="closeModal('modal-create-petit-job')">Annuler</button>
+      <button class="btn btn-primary" onclick="createPetitJob()">Créer & notifier</button>
+    </div>
+  </div>
+</div>
+
 <!-- Toast -->
 <div id="toast"></div>
 
@@ -1315,6 +1402,7 @@ const PAGE_TITLES = {
   recruiters: 'Recruteurs',
   candidates: 'Candidats',
   scraping: 'Scraping',
+  'petit-jobs': 'Petits Jobs',
 };
 const TEMPLATES = {
   motivation: "🔥 Salut {nom} !\n\nTon engagement est impressionnant !\n\nDe nouvelles offres d'emploi t'attendent. Continue comme ça 💪",
@@ -1439,7 +1527,7 @@ function showPage(name) {
   if (name === 'recruiters') loadRecruiters();
   if (name === 'candidates') loadCandidates();
   if (name === 'config') { loadNotifBlockerState(); loadEmploiOnlyState(); }
-  // scraping: statique, pas de chargement auto
+  if (name === 'petit-jobs') loadPetitJobs();
 }
 
 // ════════════════════════════════════════════════════════════
@@ -2183,6 +2271,77 @@ async function runScraping() {
   }
 }
 function showAddJobModal() { switchImportTab('manual'); }
+
+// ════════════════════════════════════════════════════════════
+// PETITS JOBS
+// ════════════════════════════════════════════════════════════
+const STATUT_BADGE = {
+  'ouvert': '<span style="color:var(--green);font-weight:600">● Ouvert</span>',
+  'pourvu': '<span style="color:var(--accent);font-weight:600">● Pourvu</span>',
+  'expiré': '<span style="color:var(--text2);font-weight:600">● Expiré</span>',
+};
+
+async function loadPetitJobs() {
+  const tbody = document.getElementById('petit-jobs-tbody');
+  tbody.innerHTML = '<tr><td colspan="8" class="empty">Chargement...</td></tr>';
+  const jobs = await api('/admin/petit-jobs');
+  if (!jobs || !jobs.length) {
+    tbody.innerHTML = '<tr><td colspan="8" class="empty">Aucun petit job pour l\'instant</td></tr>';
+    return;
+  }
+  tbody.innerHTML = jobs.map(j => `
+    <tr>
+      <td style="font-weight:500">${j.titre}</td>
+      <td>${j.type_travail || '—'}</td>
+      <td>${j.lieu || '—'}</td>
+      <td>${j.remuneration || '—'}</td>
+      <td style="text-align:center">${j.nb_postes}</td>
+      <td style="text-align:center">${j.nb_candidats_notifies}</td>
+      <td>${STATUT_BADGE[j.statut] || j.statut}</td>
+      <td>
+        <div style="display:flex;gap:6px">
+          ${j.statut === 'ouvert' ? `<button class="btn btn-warning" style="padding:4px 10px;font-size:12px" onclick="expirePetitJob('${j.id}')">Expirer</button>` : ''}
+          <button class="btn btn-danger" style="padding:4px 10px;font-size:12px" onclick="deletePetitJob('${j.id}')">Suppr.</button>
+        </div>
+      </td>
+    </tr>
+  `).join('');
+}
+
+async function createPetitJob() {
+  const titre = document.getElementById('pj-titre').value.trim();
+  if (!titre) { toast('Le titre est obligatoire', 'error'); return; }
+  const body = {
+    titre,
+    type_travail: document.getElementById('pj-type').value.trim() || null,
+    lieu: document.getElementById('pj-lieu').value.trim() || null,
+    date_debut_str: document.getElementById('pj-date').value.trim() || null,
+    duree: document.getElementById('pj-duree').value.trim() || null,
+    remuneration: document.getElementById('pj-remuneration').value.trim() || null,
+    nb_postes: parseInt(document.getElementById('pj-postes').value) || 1,
+    description: document.getElementById('pj-description').value.trim() || null,
+  };
+  const r = await api('/admin/petit-jobs', 'POST', body);
+  if (r) {
+    closeModal('modal-create-petit-job');
+    toast(`Petit job créé — ${r.nb_candidats_notifies} candidat(s) notifié(s) ✅`);
+    ['pj-titre','pj-type','pj-lieu','pj-date','pj-duree','pj-remuneration','pj-description'].forEach(id => document.getElementById(id).value = '');
+    document.getElementById('pj-postes').value = '1';
+    loadPetitJobs();
+  }
+}
+
+async function expirePetitJob(id) {
+  if (!confirm('Marquer ce petit job comme expiré ?')) return;
+  const r = await api(`/admin/petit-jobs/${id}/expire`, 'POST');
+  if (r) { toast('Job expiré ✅'); loadPetitJobs(); }
+}
+
+async function deletePetitJob(id) {
+  if (!confirm('Supprimer définitivement ce petit job ?')) return;
+  const r = await api(`/admin/petit-jobs/${id}`, 'DELETE');
+  if (r) { toast('Job supprimé'); loadPetitJobs(); }
+}
 
 // ── Import offre : tabs ────────────────────────────────────────
 let currentPdfData = null;

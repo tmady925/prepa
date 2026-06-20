@@ -1396,7 +1396,7 @@ async function loadDashboard() {
     renderLLMStats(stats);
 
     // Charts
-    renderActivityChart(stats);
+    renderActivityChart(stats, users);
     renderRevenueChart(stats);
 
     // Students table
@@ -1413,6 +1413,9 @@ async function loadDashboard() {
 
     // Notif count
     updateNotifCount();
+
+    // Overview employment KPIs
+    loadOverviewEmploymentKpis();
 
   } catch(e) {
     if (!e.message.includes('Unauthorized')) {
@@ -1501,27 +1504,31 @@ const CHART_DEFAULTS = {
   }
 };
 
-function renderActivityChart(stats) {
+function renderActivityChart(stats, users) {
   const ctx = document.getElementById('chart-activity');
   if (!ctx) return;
   if (charts.activity) charts.activity.destroy();
-  const labels = Array.from({length: 7}, (_, i) => {
-    const d = new Date(); d.setDate(d.getDate() - (6-i));
-    return d.toLocaleDateString('fr', {weekday:'short'});
+
+  // Build last-7-days labels
+  const days = Array.from({length: 7}, (_, i) => {
+    const d = new Date(); d.setDate(d.getDate() - (6-i)); return d;
   });
+  const labels = days.map(d => d.toLocaleDateString('fr', {weekday:'short', day:'numeric'}));
+
+  // Count real signups per day from users list
+  const signups = days.map(d => {
+    const ds = d.toDateString();
+    return (users || allStudents).filter(u => u.created_at && new Date(u.created_at).toDateString() === ds).length;
+  });
+
   charts.activity = new Chart(ctx, {
     type: 'bar',
     data: {
       labels,
       datasets: [{
-        label: 'Messages',
-        data: labels.map(() => Math.floor(Math.random() * 50 + 10)),
-        backgroundColor: 'rgba(59,130,246,0.3)',
-        borderColor: '#3b82f6', borderWidth: 1, borderRadius: 4,
-      }, {
         label: 'Inscriptions',
-        data: labels.map(() => Math.floor(Math.random() * 5)),
-        backgroundColor: 'rgba(139,92,246,0.3)',
+        data: signups,
+        backgroundColor: 'rgba(139,92,246,0.4)',
         borderColor: '#8b5cf6', borderWidth: 1, borderRadius: 4,
       }]
     },
@@ -1533,23 +1540,31 @@ function renderRevenueChart(stats) {
   const ctx = document.getElementById('chart-revenue');
   if (!ctx) return;
   if (charts.revenue) charts.revenue.destroy();
-  const months = ['Jan','Fév','Mar','Avr','Mai','Jun'];
+  // No time-series endpoint yet — show total as single bar
+  const total = stats?.total_revenue_fcfa || 0;
   charts.revenue = new Chart(ctx, {
-    type: 'line',
+    type: 'bar',
     data: {
-      labels: months,
+      labels: ['Revenus cumulés'],
       datasets: [{
-        data: months.map(() => Math.floor(Math.random() * 50000 + 10000)),
-        borderColor: '#10b981', backgroundColor: 'rgba(16,185,129,0.1)',
-        fill: true, tension: 0.4, pointRadius: 3
+        data: [total],
+        backgroundColor: 'rgba(16,185,129,0.4)',
+        borderColor: '#10b981', borderWidth: 1, borderRadius: 6,
       }]
     },
-    options: CHART_DEFAULTS
+    options: {
+      ...CHART_DEFAULTS,
+      plugins: { legend: { display: false } },
+      scales: {
+        ...CHART_DEFAULTS.scales,
+        y: { ...CHART_DEFAULTS.scales.y, ticks: { ...CHART_DEFAULTS.scales.y.ticks, callback: v => v.toLocaleString() + ' F' } }
+      }
+    }
   });
 }
 
 function setChartPeriod(period) {
-  renderActivityChart({});
+  renderActivityChart({}, allStudents);
 }
 
 // ════════════════════════════════════════════════════════════
@@ -1693,9 +1708,10 @@ async function sendNotification() {
 async function loadPayments() {
   try {
     const data = await api('/admin/subscriptions');
-    document.getElementById('pay-total').textContent = (data.total_revenue_fcfa || 0).toLocaleString();
-    document.getElementById('pay-active').textContent = data.active_count || 0;
-    document.getElementById('pay-rate').textContent = data.conversion_rate || '—';
+    const s = data.stats || {};
+    document.getElementById('pay-total').textContent = (s.total_revenue_fcfa || 0).toLocaleString();
+    document.getElementById('pay-active').textContent = s.active_count || 0;
+    document.getElementById('pay-rate').textContent = s.conversion_rate || '—';
 
     const html = (data.subscriptions || []).map(s => `
       <tr>
@@ -1879,6 +1895,31 @@ function showToast(msg, type = 'success') {
 }
 // Alias utilisé par les fonctions emploi (jobs/recruteurs/candidats/scraping)
 function toast(msg, type = 'success') { showToast(msg, type); }
+
+// ════════════════════════════════════════════════════════════
+// OVERVIEW EMPLOYMENT KPIS
+// ════════════════════════════════════════════════════════════
+async function loadOverviewEmploymentKpis() {
+  try {
+    const [jobsStats, recruiters, candidates] = await Promise.allSettled([
+      api('/admin/jobs/stats'),
+      api('/admin/recruiters'),
+      api('/admin/candidates'),
+    ]);
+    if (jobsStats.status === 'fulfilled') {
+      const s = jobsStats.value;
+      document.getElementById('jobs-count').textContent = s.statuts?.active || 0;
+    }
+    if (recruiters.status === 'fulfilled') {
+      document.getElementById('recruiters-count').textContent =
+        recruiters.value.filter(r => r.statut === 'active').length;
+    }
+    if (candidates.status === 'fulfilled') {
+      document.getElementById('candidates-count').textContent =
+        candidates.value.filter(c => c.has_cv).length;
+    }
+  } catch(e) {}
+}
 
 // ════════════════════════════════════════════════════════════
 // JOBS

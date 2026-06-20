@@ -1713,15 +1713,15 @@ async function loadPayments() {
     document.getElementById('pay-active').textContent = s.active_count || 0;
     document.getElementById('pay-rate').textContent = s.conversion_rate || '—';
 
-    const html = (data.subscriptions || []).map(s => `
+    const html = (data.subscriptions || []).map(sub => `
       <tr>
-        <td>${s.user_name || s.user_phone || '—'}</td>
-        <td><span class="badge purple">⭐ ${s.plan}</span></td>
-        <td><span style="font-family:'JetBrains Mono',monospace">${(s.amount_fcfa||0).toLocaleString()} FCFA</span></td>
-        <td>${s.payment_method || '—'}</td>
-        <td>${s.started_at ? new Date(s.started_at).toLocaleDateString('fr') : '—'}</td>
-        <td>${s.expires_at ? new Date(s.expires_at).toLocaleDateString('fr') : '—'}</td>
-        <td><span class="badge ${s.status === 'active' ? 'green' : 'gray'}">${s.status}</span></td>
+        <td>${sub.user_name || sub.user_phone || '—'}</td>
+        <td><span class="badge purple">⭐ ${sub.plan}</span></td>
+        <td><span style="font-family:'JetBrains Mono',monospace">${(sub.amount_fcfa||0).toLocaleString()} FCFA</span></td>
+        <td>${sub.payment_method || '—'}</td>
+        <td>${sub.started_at ? new Date(sub.started_at).toLocaleDateString('fr') : '—'}</td>
+        <td>${sub.expires_at ? new Date(sub.expires_at).toLocaleDateString('fr') : '—'}</td>
+        <td><span class="badge ${sub.status === 'active' ? 'green' : 'gray'}">${sub.status}</span></td>
       </tr>
     `).join('');
     document.getElementById('payments-table').innerHTML = html || '<tr><td colspan="7"><div class="empty-state"><div class="empty-icon">💰</div><div class="empty-text">Aucune transaction</div></div></td></tr>';

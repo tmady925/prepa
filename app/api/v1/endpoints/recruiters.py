@@ -213,23 +213,33 @@ async def create_job(
     if not titre:
         raise HTTPException(status_code=400, detail="titre requis")
 
+    now_utc = datetime.now(timezone.utc)
+
     # Vérifie expiration abonnement payant → repassage en gratuit si expiré
     if recruiter.plan in ("starter", "pro") and recruiter.abonnement_expire_at:
-        from datetime import datetime, timezone
-        if recruiter.abonnement_expire_at < datetime.now(timezone.utc):
+        if recruiter.abonnement_expire_at < now_utc:
             recruiter.plan = "gratuit"
-            recruiter.annonces_restantes = 0
+            recruiter.annonces_restantes = 2
+            recruiter.annonces_month_reset_at = now_utc + timedelta(days=30)
+            await db.flush()
+
+    # Reset mensuel quota gratuit
+    if recruiter.plan == "gratuit":
+        reset_at = recruiter.annonces_month_reset_at
+        if reset_at and reset_at.replace(tzinfo=timezone.utc) <= now_utc:
+            recruiter.annonces_restantes = 2
+            recruiter.annonces_month_reset_at = now_utc + timedelta(days=30)
             await db.flush()
 
     # Vérifie quota (None = illimité pour les plans payants actifs)
     if recruiter.plan == "gratuit" and (recruiter.annonces_restantes is None or recruiter.annonces_restantes <= 0):
         raise HTTPException(
             status_code=403,
-            detail="Limite atteinte. Passez au plan Starter ou Pro pour publier plus d'annonces.",
+            detail="Limite atteinte (2 offres/mois en gratuit). Passez au plan Starter ou Pro.",
         )
 
-    # Durée selon plan
-    duree = 30 if recruiter.plan in ("starter", "pro") else 15
+    # Durée selon plan : 7j gratuit, 30j payant
+    duree = 30 if recruiter.plan in ("starter", "pro") else 7
     expires = datetime.now(timezone.utc) + timedelta(days=duree)
 
     job = JobOpportunity(
@@ -250,9 +260,11 @@ async def create_job(
     )
     db.add(job)
 
-    # Décrémente quota gratuit
+    # Décrémente quota gratuit + init reset mensuel si besoin
     if recruiter.plan == "gratuit":
         recruiter.annonces_restantes = max(0, recruiter.annonces_restantes - 1)
+        if not recruiter.annonces_month_reset_at:
+            recruiter.annonces_month_reset_at = now_utc + timedelta(days=30)
 
     try:
         await db.commit()
@@ -429,4 +441,142 @@ async def recruiter_subscribe(
     return {
         "success": False,
         "error": result_data.get("response_text", "Erreur PayDunya inconnue"),
+    }
+
+
+# ── Candidats matchés pour une offre ──────────────────────────────────
+
+@router.get("/recruiters/jobs/{job_id}/matches")
+async def get_job_matches(
+    job_id: str,
+    recruiter: Recruiter = Depends(get_recruiter),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Candidats matchés pour une offre du recruteur.
+    - Profil complet toujours visible (nom, phone, niveau, secteur, localisation).
+    - CV (url + texte extrait) uniquement pour les plans starter et pro.
+    """
+    from app.models.candidate_profile import CandidateProfile, JobMatch
+    from app.models.user import User
+
+    try:
+        job_uuid = uuid.UUID(job_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="job_id invalide")
+
+    # Vérifie ownership
+    job_result = await db.execute(
+        select(JobOpportunity).where(
+            JobOpportunity.id == job_uuid,
+            JobOpportunity.recruiter_id == recruiter.id,
+        )
+    )
+    job = job_result.scalar_one_or_none()
+    if not job:
+        raise HTTPException(status_code=404, detail="Offre introuvable")
+
+    can_see_cv = recruiter.plan in ("starter", "pro")
+
+    result = await db.execute(
+        select(JobMatch, CandidateProfile, User)
+        .join(CandidateProfile, CandidateProfile.user_id == JobMatch.user_id)
+        .join(User, User.id == JobMatch.user_id)
+        .where(JobMatch.job_id == job_uuid)
+        .order_by(JobMatch.score_match.desc())
+    )
+    rows = result.all()
+
+    out = []
+    for match, cp, user in rows:
+        item = {
+            "match_id": str(match.id),
+            "score": round(match.score_match or 0),
+            "statut": match.statut,
+            "notifie_at": match.notifie_at.isoformat() if match.notifie_at else None,
+            "nom": user.name or "—",
+            "phone": user.phone_number,
+            "niveau_etudes": cp.niveau_etudes,
+            "secteurs": cp.secteurs_interets or [],
+            "localisation": cp.localisation,
+            "annees_experience": cp.annees_experience or 0,
+            "disponibilite": cp.disponibilite,
+            "competences": (cp.competences_normalisees or cp.competences or [])[:8],
+            "resume_profil": cp.resume_profil or "",
+            "cv_url": cp.cv_url if can_see_cv else None,
+            "cv_disponible": bool(cp.cv_url or cp.cv_text),
+        }
+        out.append(item)
+
+    return {
+        "job_titre": job.titre,
+        "total": len(out),
+        "can_see_cv": can_see_cv,
+        "candidats": out,
+    }
+
+
+# ── KPI recruteur (pro/starter uniquement) ─────────────────────────────
+
+@router.get("/recruiters/kpi")
+async def get_recruiter_kpi(
+    recruiter: Recruiter = Depends(get_recruiter),
+    db: AsyncSession = Depends(get_db),
+):
+    """Stats des propres offres du recruteur. Réservé aux plans starter et pro."""
+    if recruiter.plan == "gratuit":
+        raise HTTPException(status_code=403, detail="KPI disponibles à partir du plan Starter.")
+
+    from app.models.candidate_profile import JobMatch
+
+    jobs_result = await db.execute(
+        select(JobOpportunity).where(JobOpportunity.recruiter_id == recruiter.id)
+    )
+    jobs = jobs_result.scalars().all()
+    job_ids = [j.id for j in jobs]
+
+    total_jobs = len(jobs)
+    active_jobs = sum(1 for j in jobs if j.statut == "active")
+    expired_jobs = sum(1 for j in jobs if j.statut == "expired")
+    total_vues = sum(j.vues or 0 for j in jobs)
+    total_notifications = sum(j.nb_notifications_sent or 0 for j in jobs)
+
+    total_matches = 0
+    scores = []
+    if job_ids:
+        matches_result = await db.execute(
+            select(JobMatch).where(JobMatch.job_id.in_(job_ids))
+        )
+        all_matches = matches_result.scalars().all()
+        total_matches = len(all_matches)
+        scores = [m.score_match for m in all_matches if m.score_match]
+
+    score_moyen = round(sum(scores) / len(scores)) if scores else 0
+
+    # Stats par offre
+    jobs_stats = []
+    for j in jobs:
+        nb = await db.scalar(
+            select(func.count(JobMatch.id)).where(JobMatch.job_id == j.id)
+        ) or 0
+        jobs_stats.append({
+            "id": str(j.id),
+            "titre": j.titre,
+            "statut": j.statut,
+            "vues": j.vues or 0,
+            "nb_notifications": j.nb_notifications_sent or 0,
+            "nb_matches": nb,
+            "created_at": j.created_at.isoformat() if j.created_at else None,
+            "expires_at": j.expires_at.isoformat() if j.expires_at else None,
+        })
+
+    return {
+        "total_offres": total_jobs,
+        "offres_actives": active_jobs,
+        "offres_expirees": expired_jobs,
+        "total_vues": total_vues,
+        "total_notifications_envoyees": total_notifications,
+        "total_candidats_matches": total_matches,
+        "score_moyen_matching": score_moyen,
+        "offres": jobs_stats,
     }

@@ -19,6 +19,7 @@ class Recruiter(Base, TimestampMixin):
     # Plan & abonnement
     plan: Mapped[str] = mapped_column(String(20), default="gratuit")  # gratuit/starter/pro
     annonces_restantes: Mapped[int] = mapped_column(Integer, default=2)
+    annonces_month_reset_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     abonnement_expire_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     paydunya_token: Mapped[str | None] = mapped_column(String(255), nullable=True)
 

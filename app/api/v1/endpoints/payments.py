@@ -152,6 +152,85 @@ async def recruiter_paydunya_webhook(
     return {"status": "ok"}
 
 
+@router.post("/payments/offreur-ipn")
+async def offreur_paydunya_webhook(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Callback PayDunya après paiement offreur (contact_unlock ou offreur_plan)."""
+    try:
+        data = await request.json()
+    except Exception:
+        return {"status": "invalid_payload"}
+
+    if data.get("status", "").lower() != "completed":
+        return {"status": "ignored"}
+
+    custom = data.get("custom_data", {}) or {}
+    payment_type = custom.get("type")
+    phone = custom.get("phone")
+    token = data.get("token", "")
+
+    if not phone or not token:
+        return {"status": "missing_data"}
+
+    result = await db.execute(select(User).where(User.phone_number == phone))
+    offreur = result.scalar_one_or_none()
+    if not offreur:
+        return {"status": "user_not_found"}
+
+    from app.services.petit_job_service import petit_job_service
+    from app.services.whatsapp.messages import messages
+
+    try:
+        if payment_type == "contact_unlock":
+            import uuid as _uuid
+            interest_id_str = custom.get("interest_id")
+            if not interest_id_str:
+                return {"status": "missing_interest_id"}
+            interest_id = _uuid.UUID(interest_id_str)
+            interest, candidat, job = await petit_job_service.unlock_contact(
+                db, interest_id, paydunya_token=token
+            )
+            if not interest or not candidat or not job:
+                return {"status": "interest_not_found"}
+            await db.commit()
+            # Envoie le numéro au offreur
+            await whatsapp_sender.send_text(
+                phone,
+                messages.offreur_contact_unlocked(candidat.name, candidat.phone_number, job.titre)
+            )
+
+        elif payment_type == "offreur_plan":
+            from datetime import datetime, timezone, timedelta
+            offreur.offreur_plan_expires_at = datetime.now(timezone.utc) + timedelta(days=30)
+            # Débloquer tous les contacts intéressés en attente
+            unlocked = await petit_job_service.unlock_all_for_offreur(db, offreur, paydunya_token=token)
+            await db.commit()
+            await whatsapp_sender.send_text(
+                phone,
+                messages.offreur_plan_activated(len(unlocked))
+            )
+            # Envoyer les numéros déjà débloqués
+            for candidat, job in unlocked:
+                try:
+                    await whatsapp_sender.send_text(
+                        phone,
+                        messages.offreur_contact_unlocked(candidat.name, candidat.phone_number, job.titre)
+                    )
+                except Exception:
+                    pass
+        else:
+            return {"status": "unknown_type"}
+
+    except Exception as e:
+        await db.rollback()
+        print(f"Offreur IPN erreur: {e}")
+        return {"status": "error"}
+
+    return {"status": "ok"}
+
+
 @router.post("/payments/create")
 async def create_payment(
     request: Request,

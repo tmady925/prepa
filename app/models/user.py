@@ -72,3 +72,6 @@ class User(Base, TimestampMixin):
     type_contrat_souhaite: Mapped[str | None] = mapped_column(String(20), nullable=True)
     localisation_emploi: Mapped[str | None] = mapped_column(String(100), nullable=True)
     niveau_etudes: Mapped[str | None] = mapped_column(String(20), nullable=True)
+
+    # Plan offreur (petits jobs) — abonnement mensuel contact illimité
+    offreur_plan_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

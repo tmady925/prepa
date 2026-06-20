@@ -129,6 +129,84 @@ class PaymentService:
         print(f"Pro active pour {user.phone_number}")
         return subscription
 
+    async def create_offreur_invoice(
+        self,
+        offreur: User,
+        payment_type: str,          # "contact_unlock" | "offreur_plan"
+        interest_id: str | None,    # UUID de PetitJobInterest (pour contact_unlock)
+        job_titre: str = "",
+    ) -> dict:
+        """
+        Crée une facture PayDunya pour l'offreur.
+        - contact_unlock : 500 FCFA, 1 contact
+        - offreur_plan   : 2 000 FCFA, 30 jours illimité
+        """
+        if payment_type == "contact_unlock":
+            amount = 500
+            label = f"Contact candidat — {job_titre}"
+            description = "Déblocage d'un contact candidat (1 numéro)"
+        else:
+            amount = 2000
+            label = "Offreur Mensuel"
+            description = "Abonnement mensuel — contacts candidats illimités (30j)"
+
+        payload = {
+            "invoice": {
+                "items": {
+                    "item_0": {
+                        "name": label,
+                        "quantity": 1,
+                        "unit_price": str(amount),
+                        "total_price": str(amount),
+                        "description": description,
+                    }
+                },
+                "taxes": {},
+                "total_amount": str(amount),
+                "description": f"{label} pour {offreur.name or offreur.phone_number}",
+            },
+            "store": {
+                "name": "Prepa",
+                "tagline": "Ton assistant emploi",
+                "phone": settings.whatsapp_number,
+            },
+            "actions": {
+                "cancel_url": "https://prepa.app/cancel",
+                "return_url": "https://prepa.app/success",
+                "callback_url": f"{settings.app_base_url}/api/v1/payments/offreur-ipn",
+            },
+            "custom_data": {
+                "phone": offreur.phone_number,
+                "type": payment_type,
+                "interest_id": interest_id,
+            },
+        }
+
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            try:
+                response = await client.post(
+                    f"{PAYDUNYA_BASE_URL}/checkout-invoice/create",
+                    json=payload,
+                    headers=_paydunya_headers(),
+                )
+                if not response.text.strip():
+                    return {"success": False, "error": "Réponse vide PayDunya"}
+                data = response.json()
+            except httpx.TimeoutException:
+                return {"success": False, "error": "Timeout PayDunya"}
+            except Exception as e:
+                return {"success": False, "error": str(e)}
+
+        if data.get("response_code") == "00":
+            return {
+                "success": True,
+                "token": data.get("token"),
+                "payment_url": data.get("response_text"),
+            }
+
+        print(f"PayDunya offreur error: {data}")
+        return {"success": False, "error": data}
+
     async def verify_payment(self, token: str) -> dict:
         """Verifie le statut d'un paiement PayDunya."""
         async with httpx.AsyncClient(timeout=30.0) as client:

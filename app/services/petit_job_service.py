@@ -211,9 +211,12 @@ class PetitJobService:
         Notifie les candidats par score décroissant.
         Score = géo (40%) + emploi_type (30%) + type_travail (30%).
         Les candidats 'entreprise' stricts sont exclus.
+        Crée un enregistrement PetitJobInterest par candidat notifié.
         """
         from app.services.queue_service import send_or_queue
         from app.models.candidate_profile import CandidateProfile
+        from app.models.petit_job_interest import PetitJobInterest
+        from sqlalchemy.dialects.postgresql import insert as pg_insert
 
         # Charge candidats + leurs profils en une seule requête
         stmt = (
@@ -249,6 +252,15 @@ class PetitJobService:
             try:
                 msg = self._build_notification(job, candidate)
                 await send_or_queue(db, candidate, msg)
+                # Crée l'enregistrement d'intérêt (ON CONFLICT DO NOTHING — idempotent)
+                await db.execute(
+                    pg_insert(PetitJobInterest).values(
+                        id=uuid.uuid4(),
+                        petit_job_id=job.id,
+                        candidat_user_id=candidate.id,
+                        statut="notified",
+                    ).on_conflict_do_nothing(constraint="uq_pji_job_candidat")
+                )
                 nb_sent += 1
             except Exception as e:
                 print(f"  [petit_job] notify {candidate.phone_number}: {e}")
@@ -257,6 +269,104 @@ class PetitJobService:
         await db.flush()
         print(f"  [petit_job] {nb_sent} candidats notifiés pour '{job.titre}'")
         return nb_sent
+
+    async def mark_interested(self, db: AsyncSession, candidat: User) -> "PetitJob | None":
+        """
+        Marque le candidat comme intéressé pour le dernier job ouvert où il a été notifié.
+        Retourne le PetitJob concerné, ou None si aucun trouvé.
+        """
+        from app.models.petit_job_interest import PetitJobInterest
+        from datetime import timezone
+
+        # Dernier intérêt notified/interested de ce candidat (le plus récent)
+        stmt = (
+            select(PetitJobInterest, PetitJob)
+            .join(PetitJob, PetitJobInterest.petit_job_id == PetitJob.id)
+            .where(
+                PetitJobInterest.candidat_user_id == candidat.id,
+                PetitJobInterest.statut.in_(["notified", "interested"]),
+                PetitJob.statut == "ouvert",
+            )
+            .order_by(PetitJobInterest.created_at.desc())
+            .limit(1)
+        )
+        row = (await db.execute(stmt)).first()
+        if not row:
+            return None
+
+        interest, job = row
+        interest.statut = "interested"
+        interest.interested_at = datetime.now(timezone.utc)
+        await db.flush()
+        return job
+
+    async def unlock_contact(
+        self,
+        db: AsyncSession,
+        interest_id: uuid.UUID,
+        paydunya_token: str | None = None,
+    ) -> tuple["PetitJobInterest | None", User | None, "PetitJob | None"]:
+        """
+        Débloque le contact d'un candidat après paiement.
+        Retourne (interest, candidat, job) ou (None, None, None).
+        """
+        from app.models.petit_job_interest import PetitJobInterest
+        from datetime import timezone
+
+        result = await db.execute(
+            select(PetitJobInterest).where(PetitJobInterest.id == interest_id)
+        )
+        interest = result.scalar_one_or_none()
+        if not interest:
+            return None, None, None
+
+        # Charger candidat et job
+        candidat = (await db.execute(select(User).where(User.id == interest.candidat_user_id))).scalar_one_or_none()
+        job = (await db.execute(select(PetitJob).where(PetitJob.id == interest.petit_job_id))).scalar_one_or_none()
+
+        interest.statut = "unlocked"
+        interest.unlocked_at = datetime.now(timezone.utc)
+        if paydunya_token:
+            interest.paydunya_token = paydunya_token
+        await db.flush()
+        return interest, candidat, job
+
+    async def unlock_all_for_offreur(
+        self,
+        db: AsyncSession,
+        offreur: User,
+        paydunya_token: str | None = None,
+    ) -> list[tuple[User, "PetitJob"]]:
+        """
+        Débloque tous les contacts intéressés pour tous les jobs de cet offreur.
+        Utilisé lors de l'activation de l'abonnement mensuel.
+        """
+        from app.models.petit_job_interest import PetitJobInterest
+        from datetime import timezone
+
+        now = datetime.now(timezone.utc)
+
+        stmt = (
+            select(PetitJobInterest, User, PetitJob)
+            .join(PetitJob, PetitJobInterest.petit_job_id == PetitJob.id)
+            .join(User, PetitJobInterest.candidat_user_id == User.id)
+            .where(
+                PetitJob.employeur_user_id == offreur.id,
+                PetitJobInterest.statut == "interested",
+            )
+        )
+        rows = (await db.execute(stmt)).all()
+
+        unlocked = []
+        for interest, candidat, job in rows:
+            interest.statut = "unlocked"
+            interest.unlocked_at = now
+            if paydunya_token:
+                interest.paydunya_token = paydunya_token
+            unlocked.append((candidat, job))
+
+        await db.flush()
+        return unlocked
 
     def _build_notification(self, job: PetitJob, user: User) -> str:
         lines = [f"🔔 *Nouveau petit job, {user.name or 'toi'} !*\n"]

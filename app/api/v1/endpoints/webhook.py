@@ -153,6 +153,12 @@ def detect_command(text: str) -> str | None:
         "petits_jobs": "petits_jobs",
         "petit_job_oui": "petit_job_oui",
         "petit_job_non": "petit_job_non",
+        "je suis intéressé": "job_interest",
+        "je suis interesse": "job_interest",
+        "intéressé": "job_interest",
+        "interesse": "job_interest",
+        "je suis interessé": "job_interest",
+        "job_interest": "job_interest",
     }
     return commands.get(text.lower().strip())
 
@@ -254,6 +260,102 @@ async def handle_command(command: str, phone: str, user, db: AsyncSession):
         user.conversation_state = {}
         await db.flush()
         await whatsapp_sender.send_text(phone, messages.petit_job_cancelled(user.name or ""))
+
+    elif command == "job_interest":
+        # Candidat dit "je suis intéressé" → marquer l'intérêt + notifier l'offreur
+        try:
+            from app.services.petit_job_service import petit_job_service as _pji_svc
+            from app.services.payment_service import payment_service as _pmt_svc
+            from datetime import datetime, timezone
+
+            _job = await _pji_svc.mark_interested(db, user)
+            if not _job:
+                await whatsapp_sender.send_text(
+                    phone,
+                    "❓ Aucune annonce trouvée pour ta réponse. Si tu vois une offre qui t'intéresse, réponds directement à ce message."
+                )
+                return
+
+            await db.flush()
+
+            # Confirmer au candidat
+            await whatsapp_sender.send_text(
+                phone,
+                messages.petit_job_candidat_interested_ack(_job.titre)
+            )
+
+            # Notifier l'offreur si on a son numéro
+            if not _job.employeur_user_id:
+                return  # job créé par l'admin — pas d'offreur WhatsApp
+
+            from sqlalchemy import select as _sel_offreur
+            from app.models.user import User as _User
+            _offreur_r = await db.execute(_sel_offreur(_User).where(_User.id == _job.employeur_user_id))
+            _offreur = _offreur_r.scalar_one_or_none()
+            if not _offreur:
+                return
+
+            # Compter le total d'intéressés pour ce job
+            from app.models.petit_job_interest import PetitJobInterest as _PJI
+            from sqlalchemy import select as _sel_count, func as _func
+            _nb_res = await db.execute(
+                _sel_count(_func.count()).select_from(_PJI).where(
+                    _PJI.petit_job_id == _job.id,
+                    _PJI.statut == "interested",
+                )
+            )
+            _nb_interesses = _nb_res.scalar() or 1
+
+            # Vérifier si l'offreur a déjà un plan actif
+            _now = datetime.now(timezone.utc)
+            if _offreur.offreur_plan_expires_at and _offreur.offreur_plan_expires_at > _now:
+                # Plan actif → débloquer directement
+                from app.models.petit_job_interest import PetitJobInterest as _PJI2
+                _interest_r = await db.execute(
+                    _sel_offreur(_PJI2).where(
+                        _PJI2.petit_job_id == _job.id,
+                        _PJI2.candidat_user_id == user.id,
+                    )
+                )
+                _interest = _interest_r.scalar_one_or_none()
+                if _interest:
+                    _interest.statut = "unlocked"
+                    _interest.unlocked_at = _now
+                await db.flush()
+                await whatsapp_sender.send_text(
+                    _offreur.phone_number,
+                    messages.offreur_contact_unlocked(user.name, user.phone_number, _job.titre)
+                )
+            else:
+                # Pas de plan → envoyer les liens de paiement
+                # Récupérer l'interest_id pour le lien contact_unlock
+                _interest_r2 = await db.execute(
+                    _sel_offreur(_PJI).where(
+                        _PJI.petit_job_id == _job.id,
+                        _PJI.candidat_user_id == user.id,
+                    )
+                )
+                _interest = _interest_r2.scalar_one_or_none()
+                _interest_id_str = str(_interest.id) if _interest else None
+
+                _inv_single = await _pmt_svc.create_offreur_invoice(
+                    _offreur, "contact_unlock", _interest_id_str, _job.titre
+                )
+                _inv_plan = await _pmt_svc.create_offreur_invoice(
+                    _offreur, "offreur_plan", None, _job.titre
+                )
+                _url_single = _inv_single.get("payment_url") or "❌ lien indisponible"
+                _url_plan = _inv_plan.get("payment_url") or "❌ lien indisponible"
+
+                await whatsapp_sender.send_text(
+                    _offreur.phone_number,
+                    messages.offreur_candidat_interested_notify(
+                        _job.titre, _nb_interesses, _url_single, _url_plan
+                    )
+                )
+
+        except Exception as _e_ji:
+            print(f"  [job_interest] erreur: {_e_ji}")
 
     elif command == "mes_offres":
         # Affiche les offres d'emploi matchées pour ce user

@@ -687,6 +687,46 @@ class Messages:
     def petit_job_cancelled(self, name: str) -> str:
         return f"❌ Annonce annulée *{name}*. Tape *j'ai besoin de quelqu'un* quand tu veux réessayer."
 
+    def petit_job_candidat_interested_ack(self, job_titre: str) -> str:
+        return (
+            f"✅ *Ta réponse a été envoyée !*\n\n"
+            f"L'employeur pour *{job_titre}* va être notifié.\n\n"
+            f"_S'il est intéressé, il te contactera directement sur WhatsApp. Bonne chance ! 🤞_"
+        )
+
+    def offreur_candidat_interested_notify(
+        self,
+        job_titre: str,
+        nb_interesses: int,
+        payment_url_single: str,
+        payment_url_plan: str,
+    ) -> str:
+        s = "s" if nb_interesses > 1 else ""
+        return (
+            f"🔔 *{nb_interesses} candidat{s} intéressé{s}* pour ton annonce :\n"
+            f"*{job_titre}*\n\n"
+            f"Pour recevoir le numéro du candidat, choisis une option :\n\n"
+            f"💳 *500F — 1 contact* :\n{payment_url_single}\n\n"
+            f"📦 *2 000F/mois — contacts illimités* :\n{payment_url_plan}\n\n"
+            f"_Paiement sécurisé : Wave, Orange Money, Free Money_"
+        )
+
+    def offreur_contact_unlocked(self, candidat_name: str, candidat_phone: str, job_titre: str) -> str:
+        return (
+            f"✅ *Contact débloqué !*\n\n"
+            f"Voici le numéro du candidat pour *{job_titre}* :\n\n"
+            f"👤 *{candidat_name or 'Candidat'}*\n"
+            f"📱 *{candidat_phone}*\n\n"
+            f"_Tu peux le contacter directement sur WhatsApp._"
+        )
+
+    def offreur_plan_activated(self, nb_unlocked: int) -> str:
+        extra = f"\n\n🎁 *{nb_unlocked} contact(s) déjà intéressé(s) débloqué(s) !*" if nb_unlocked else ""
+        return (
+            f"🎉 *Abonnement Offreur activé — 30 jours !*\n\n"
+            f"Tu peux maintenant débloquer tous les contacts de tes candidats sans limite.{extra}"
+        )
+
     def petit_job_list(self, jobs: list, name: str) -> str:
         if not jobs:
             return (

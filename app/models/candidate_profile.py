@@ -39,8 +39,9 @@ class CandidateProfile(Base, TimestampMixin):
     resume_profil: Mapped[str | None] = mapped_column(Text, nullable=True)
     type_contrat_souhaite: Mapped[str | None] = mapped_column(String(20), nullable=True)
     secteur_prioritaire: Mapped[str | None] = mapped_column(String(100), nullable=True)
-    nb_notifs_semaine: Mapped[int] = mapped_column(Integer, default=0)
+    nb_notifs_semaine: Mapped[int] = mapped_column(Integer, default=0)  # compteur mensuel (renommage progressif)
     last_notif_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    job_offers_month_reset_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     # Type d'emploi préféré — déduit par LLM à la fin de l'onboarding
     # "petit_job" | "entreprise" | "les_deux"

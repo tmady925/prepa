@@ -2,19 +2,13 @@
 Service de queue de notifications.
 
 Principe :
-- Si le user est dans un processus actif (exercice, correction, simulation),
-  les notifications (offres emploi, campagnes admin, résultats simulation...)
-  sont stockées dans user.notification_queue (JSONB).
-- Dès que le user sort du processus, flush_queue() envoie tous les messages
-  en attente dans l'ordre.
-
-Processus "occupé" détectés via conversation_state :
-  - awaiting_simulation_copy  → simulation en cours
-  - awaiting_copy             → correction exercice en attente
-  - exercise_path             → exercice en cours
-  - awaiting_copy_for_free_correction → correction libre en attente
+- Si le user est dans un processus actif, les notifications sont stockées dans
+  user.notification_queue (JSONB) pour envoi différé.
+- Les offres emploi FREE sont aussi stockées avec send_after=+24h.
+- flush_queue() envoie les messages dont send_after <= now (ou pas de send_after).
+- Un cron /tasks/flush-delayed-notifications appelle flush_delayed_all() toutes les heures.
 """
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.user import User
 from app.services.whatsapp.sender import whatsapp_sender
@@ -94,3 +88,67 @@ async def flush_queue(db: AsyncSession, user: User) -> int:
     if sent:
         print(f"  📬 Queue flushée pour {user.phone_number} : {sent}/{len(queue)} message(s) envoyé(s)")
     return sent
+
+
+async def queue_delayed(db: AsyncSession, user: User, message: str, delay_hours: int = 24) -> None:
+    """Place un message en queue avec envoi différé (delay_hours)."""
+    if not getattr(user, "phone_number", None):
+        return
+    send_after = (datetime.now(timezone.utc) + timedelta(hours=delay_hours)).isoformat()
+    queue = list(user.notification_queue or [])
+    queue.append({
+        "message": message,
+        "queued_at": datetime.now(timezone.utc).isoformat(),
+        "send_after": send_after,
+    })
+    user.notification_queue = queue
+    await db.flush()
+    print(f"  ⏳ Message différé +{delay_hours}h → {user.phone_number} (send_after={send_after[:16]})")
+
+
+async def flush_delayed_all(db: AsyncSession) -> int:
+    """
+    Parcourt tous les users avec des messages en queue dont send_after <= now.
+    Appelé par le cron /tasks/flush-delayed-notifications (toutes les heures).
+    """
+    from sqlalchemy import select, cast
+    from sqlalchemy.dialects.postgresql import JSONB
+    from app.models.user import User
+
+    now = datetime.now(timezone.utc)
+    result = await db.execute(
+        select(User).where(User.notification_queue != [])
+    )
+    users = result.scalars().all()
+
+    total_sent = 0
+    for user in users:
+        queue = list(user.notification_queue or [])
+        remaining = []
+        for item in queue:
+            send_after_str = item.get("send_after")
+            if send_after_str:
+                try:
+                    send_after = datetime.fromisoformat(send_after_str)
+                    if send_after.tzinfo is None:
+                        send_after = send_after.replace(tzinfo=timezone.utc)
+                    if send_after > now:
+                        remaining.append(item)
+                        continue
+                except Exception:
+                    pass
+            # Pas de send_after ou délai écoulé → envoyer
+            try:
+                await whatsapp_sender.send_text(user.phone_number, item["message"])
+                total_sent += 1
+            except Exception as e:
+                print(f"  ⚠️ flush_delayed erreur {user.phone_number}: {e}")
+                remaining.append(item)
+
+        if len(remaining) != len(queue):
+            user.notification_queue = remaining
+            await db.flush()
+
+    if total_sent:
+        print(f"  📬 flush_delayed_all: {total_sent} message(s) envoyé(s)")
+    return total_sent

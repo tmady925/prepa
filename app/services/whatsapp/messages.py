@@ -430,8 +430,8 @@ class Messages:
     def _pro_benefits_intro(self, context: str) -> str:
         if context == "emploi":
             return (
-                "💼 *En gratuit* : 1 offre d'emploi par semaine.\n"
-                "⭐ *En Pro* : offres d'emploi *illimitées*, dès qu'une correspond à ton profil."
+                "💼 *En gratuit* : 30 offres/mois, reçues avec 24h de délai.\n"
+                "⭐ *En Pro* : offres *illimitées*, reçues *immédiatement* dès qu'elles matchent ton profil."
             )
         if context == "concours":
             return (
@@ -444,8 +444,8 @@ class Messages:
                 "⭐ *En Pro* : messages *illimités* + corrections détaillées + simulations d'examen complètes."
             )
         return (
-            "🆓 *En gratuit* : 10 messages/jour (études & concours) + 1 offre d'emploi/semaine.\n"
-            "⭐ *En Pro* : tout en illimité."
+            "🆓 *En gratuit* : 10 messages/jour + 30 offres emploi/mois (délai 24h).\n"
+            "⭐ *En Pro* : tout en illimité, offres emploi *immédiates*."
         )
 
     def wave_fallback_block(self) -> str:

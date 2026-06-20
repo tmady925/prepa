@@ -62,7 +62,7 @@ class MatchingService:
                         pass
                     await whatsapp_sender.send_text(
                         user.phone_number,
-                        "💼 Tu as déjà reçu ton offre gratuite de la semaine !\n\n"
+                        "💼 Tu as atteint tes 30 offres gratuites du mois !\n\n"
                         + messages.pro_upsell(user.name or "toi", "emploi", payment_url)
                     )
                 except Exception as e:
@@ -132,9 +132,9 @@ class MatchingService:
                 except Exception:
                     pass
                 upsell_msg = (
-                    "💼 *Tu viens de recevoir ton offre gratuite de la semaine !*\n\n"
-                    "Passe en *Pro* pour recevoir toutes les offres qui correspondent à ton profil, "
-                    "dès qu'elles sont disponibles — sans attendre.\n\n"
+                    "💼 *Cette offre t'arrive avec 24h de délai (plan gratuit).*\n\n"
+                    "Passe en *Pro* pour recevoir les offres *immédiatement* — "
+                    "avant les autres candidats.\n\n"
                     + messages.pro_upsell(user.name or "toi", "emploi", payment_url)
                 )
                 await send_or_queue(db, user, upsell_msg)
@@ -344,24 +344,26 @@ class MatchingService:
     # Quota
     # ═══════════════════════════════════════════════════════════════
 
+    _FREE_MONTHLY_QUOTA = 30  # ~1/jour si disponible
+
     def _check_quota(self, candidate, user) -> bool:
         plan = getattr(user, "plan", "free")
         if plan == "pro":
             return True
-        max_notifs = 1 + (getattr(user, "extra_job_offers_bonus", 0) or 0)
         now = datetime.now(timezone.utc)
-        last_notif = candidate.last_notif_at
-        if last_notif:
-            week_ago = now - timedelta(days=7)
-            if last_notif > week_ago and (candidate.nb_notifs_semaine or 0) >= max_notifs:
-                return False
-        return True
+        # Réinitialise le compteur si le mois est écoulé
+        reset_at = getattr(candidate, "job_offers_month_reset_at", None)
+        if reset_at and reset_at.replace(tzinfo=timezone.utc) <= now:
+            candidate.nb_notifs_semaine = 0
+            candidate.job_offers_month_reset_at = now + timedelta(days=30)
+        max_notifs = self._FREE_MONTHLY_QUOTA + (getattr(user, "extra_job_offers_bonus", 0) or 0)
+        return (candidate.nb_notifs_semaine or 0) < max_notifs
 
     async def _update_quota(self, db: AsyncSession, candidate, nb_sent: int):
         now = datetime.now(timezone.utc)
-        # Réinitialise le compteur si la dernière notif date de plus d'une semaine
-        if candidate.last_notif_at and candidate.last_notif_at < (now - timedelta(days=7)):
-            candidate.nb_notifs_semaine = 0
+        # Initialise le reset mensuel si jamais défini
+        if not getattr(candidate, "job_offers_month_reset_at", None):
+            candidate.job_offers_month_reset_at = now + timedelta(days=30)
         candidate.nb_notifs_semaine = (candidate.nb_notifs_semaine or 0) + nb_sent
         candidate.last_notif_at = now
         await db.flush()
@@ -439,12 +441,18 @@ class MatchingService:
             for c in conseils[:3]:
                 msg += f"• {c}\n"
 
-        from app.services.queue_service import send_or_queue
-        sent = await send_or_queue(db, user, msg)
-        if sent:
-            print(f"  → Notif emploi → {user.phone_number}: {job.titre} ({score}%)")
+        from app.services.queue_service import send_or_queue, queue_delayed
+        plan = getattr(user, "plan", "free")
+        if plan == "pro":
+            sent = await send_or_queue(db, user, msg)
+            if sent:
+                print(f"  → Notif emploi PRO → {user.phone_number}: {job.titre} ({score}%)")
+            else:
+                print(f"  📬 Offre emploi PRO mise en queue → {user.phone_number}: {job.titre} ({score}%)")
         else:
-            print(f"  📬 Offre emploi mise en queue → {user.phone_number}: {job.titre} ({score}%)")
+            # Gratuit : délai 24h
+            await queue_delayed(db, user, msg, delay_hours=24)
+            print(f"  ⏳ Notif emploi FREE (24h) → {user.phone_number}: {job.titre} ({score}%)")
 
 
 matching_service = MatchingService()

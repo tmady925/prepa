@@ -37,15 +37,29 @@ async def notify_expiring(
     return {"notified": count}
 
 
+@router.post("/tasks/flush-delayed-notifications")
+async def flush_delayed_notifications(
+    db: AsyncSession = Depends(get_db),
+    _: bool = Depends(verify_cron),
+):
+    """Envoie les notifications en attente dont le délai est écoulé. Appelé chaque heure."""
+    from app.services.queue_service import flush_delayed_all
+    sent = await flush_delayed_all(db)
+    return {"sent": sent}
+
+
 @router.post("/tasks/daily")
 async def daily_tasks(
     db: AsyncSession = Depends(get_db),
     _: bool = Depends(verify_cron),
 ):
     """Tâches quotidiennes — appelées chaque matin à 8h."""
+    from app.services.queue_service import flush_delayed_all
     expired = await subscription_service.expire_subscriptions(db)
     notified = await subscription_service.notify_expiring_soon(db, days=3)
+    flushed = await flush_delayed_all(db)
     return {
         "expired": expired,
         "notified": notified,
+        "delayed_sent": flushed,
     }

@@ -177,6 +177,9 @@ tr:hover td { background:var(--surface2); }
       <a class="nav-item" onclick="showPage('my-jobs')">
         <span class="icon">📝</span> Mes annonces
       </a>
+      <a class="nav-item" id="nav-kpi" style="display:none" onclick="showPage('kpi')">
+        <span class="icon">📈</span> Statistiques
+      </a>
       <a class="nav-item" onclick="showPage('profile')">
         <span class="icon">👤</span> Mon profil
       </a>
@@ -352,6 +355,27 @@ tr:hover td { background:var(--surface2); }
       </div>
     </div>
 
+    <!-- ── CANDIDATS ── -->
+    <div id="page-candidats" class="page">
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:4px">
+        <button class="btn btn-secondary" style="font-size:12px;padding:6px 12px" onclick="showPage('my-jobs')">← Retour</button>
+        <div class="page-title" id="candidats-job-titre">Candidats</div>
+      </div>
+      <div class="page-sub" id="candidats-job-sub"></div>
+      <div id="candidats-list" class="card">
+        <div style="color:var(--text2);font-size:13px">Chargement...</div>
+      </div>
+    </div>
+
+    <!-- ── KPI ── -->
+    <div id="page-kpi" class="page">
+      <div class="page-title">📈 Statistiques</div>
+      <div class="page-sub">Performance de vos offres</div>
+      <div id="kpi-content">
+        <div style="color:var(--text2);font-size:13px">Chargement...</div>
+      </div>
+    </div>
+
     <!-- ── PROFILE ── -->
     <div id="page-profile" class="page">
       <div class="page-title">👤 Mon profil & Abonnement</div>
@@ -369,9 +393,11 @@ tr:hover td { background:var(--surface2); }
             <div style="font-size:22px;font-weight:700;margin-bottom:8px">0 FCFA</div>
             <div style="font-size:12px;color:var(--text2);margin-bottom:12px">
               ✅ 2 annonces/mois<br>
-              ✅ Matching basique<br>
-              ❌ Annonces illimitées<br>
-              ❌ Matching prioritaire
+              ✅ Offre visible 7 jours<br>
+              ✅ Profils matchés (nom + phone)<br>
+              ❌ Accès CV candidats<br>
+              ❌ Statistiques<br>
+              ❌ Annonces illimitées
             </div>
             <div style="font-size:12px;color:var(--text3)">Plan actuel</div>
           </div>
@@ -380,9 +406,10 @@ tr:hover td { background:var(--surface2); }
             <div style="font-size:22px;font-weight:700;margin-bottom:8px">15 000 <span style="font-size:13px;color:var(--text2)">FCFA/mois</span></div>
             <div style="font-size:12px;color:var(--text2);margin-bottom:12px">
               ✅ Annonces illimitées<br>
-              ✅ Matching actif WhatsApp<br>
-              ✅ Stats candidats<br>
-              ✅ Logo entreprise
+              ✅ Offre visible 30 jours<br>
+              ✅ Profils matchés complets<br>
+              ✅ Accès CV candidats<br>
+              ✅ Statistiques & KPI
             </div>
             <button class="btn btn-primary btn-full" onclick="subscribe('starter')">Passer Starter →</button>
           </div>
@@ -392,7 +419,6 @@ tr:hover td { background:var(--surface2); }
             <div style="font-size:12px;color:var(--text2);margin-bottom:12px">
               ✅ Tout Starter<br>
               ✅ Matching prioritaire<br>
-              ✅ Remontée annonces 48h<br>
               ✅ Support 7j/7
             </div>
             <button class="btn btn-primary btn-full" onclick="subscribe('pro')">Passer Pro →</button>
@@ -502,6 +528,10 @@ async function loadMe() {
   if (r.plan === 'gratuit') {
     document.getElementById('upgrade-banner').style.display = 'flex';
   }
+  // KPI nav : visible uniquement pour starter/pro
+  if (r.plan !== 'gratuit') {
+    document.getElementById('nav-kpi').style.display = 'flex';
+  }
 }
 
 // ── API helper ────────────────────────────────────────────────
@@ -525,10 +555,12 @@ async function apiCall(path, options = {}) {
 
 // ── Navigation ────────────────────────────────────────────────
 const PAGE_TITLES = {
-  'overview':  'Vue d\'ensemble',
-  'post-job':  'Publier une annonce',
-  'my-jobs':   'Mes annonces',
-  'profile':   'Mon profil & Abonnement',
+  'overview':   'Vue d\'ensemble',
+  'post-job':   'Publier une annonce',
+  'my-jobs':    'Mes annonces',
+  'candidats':  'Candidats matchés',
+  'kpi':        'Statistiques',
+  'profile':    'Mon profil & Abonnement',
 };
 
 function showPage(name) {
@@ -542,6 +574,7 @@ function showPage(name) {
   if (name === 'my-jobs')  loadMyJobs();
   if (name === 'profile')  loadProfile();
   if (name === 'overview') loadOverview();
+  if (name === 'kpi')      loadKpi();
   document.getElementById('sidebar').classList.remove('open');
 }
 
@@ -586,6 +619,7 @@ async function loadMyJobs() {
     container.innerHTML = '<div style="color:var(--text2);font-size:13px;text-align:center;padding:20px">Aucune annonce.<br><br><button class="btn btn-primary" onclick="showPage(\'post-job\')">Publier ma première offre →</button></div>';
     return;
   }
+  const isPro = recruiterData?.plan !== 'gratuit';
   container.innerHTML = `
     <div class="table-wrap">
       <table>
@@ -603,8 +637,13 @@ async function loadMyJobs() {
               <td style="font-size:12px">${j.localisation || '—'}</td>
               <td>${j.type_contrat || '—'}</td>
               <td><span class="badge badge-${j.statut === 'active' ? 'green' : j.statut === 'pending' ? 'yellow' : 'red'}">${j.statut}</span></td>
-              <td>${j.nb_matches || 0}</td>
               <td>
+                ${j.nb_matches > 0
+                  ? `<span style="cursor:pointer;color:var(--accent2);text-decoration:underline" onclick="loadCandidats('${j.id}','${j.titre.replace(/'/g,"\\'")}',${j.nb_matches})">${j.nb_matches} candidat${j.nb_matches > 1 ? 's' : ''}</span>`
+                  : '0'}
+              </td>
+              <td style="display:flex;gap:6px;flex-wrap:wrap">
+                ${j.nb_matches > 0 ? `<button class="btn btn-secondary" style="font-size:11px;padding:4px 8px" onclick="loadCandidats('${j.id}','${j.titre.replace(/'/g,"\\'")}',${j.nb_matches})">👥 Voir</button>` : ''}
                 <button class="btn btn-danger" style="font-size:11px;padding:4px 8px" onclick="deleteJob('${j.id}')">🗑 Retirer</button>
               </td>
             </tr>`).join('')}
@@ -617,6 +656,103 @@ async function deleteJob(id) {
   if (!confirm('Retirer cette annonce ?')) return;
   const r = await apiCall(`/recruiters/jobs/${id}`, {method:'DELETE'});
   if (r?.success) { toast('Annonce retirée'); loadMyJobs(); loadOverview(); }
+}
+
+// ── Candidats matchés ─────────────────────────────────────────
+async function loadCandidats(jobId, jobTitre, nbMatchs) {
+  document.getElementById('candidats-job-titre').textContent = jobTitre;
+  document.getElementById('candidats-job-sub').textContent = `${nbMatchs} candidat${nbMatchs > 1 ? 's' : ''} correspondant${nbMatchs > 1 ? 's' : ''} à cette offre`;
+  showPage('candidats');
+  const container = document.getElementById('candidats-list');
+  container.innerHTML = '<div style="color:var(--text2);font-size:13px">Chargement...</div>';
+
+  const data = await apiCall(`/recruiters/jobs/${jobId}/matches`);
+  if (!data) return;
+
+  const canCV = data.can_see_cv;
+  if (!data.candidats.length) {
+    container.innerHTML = '<div style="color:var(--text2);font-size:13px;padding:20px;text-align:center">Aucun candidat matché pour cette offre.</div>';
+    return;
+  }
+
+  container.innerHTML = `
+    ${!canCV ? `<div style="background:var(--yellow-dim);border:1px solid var(--yellow);border-radius:var(--radius-sm);padding:10px 14px;font-size:12px;margin-bottom:16px">
+      ⭐ Passez au plan <strong>Starter</strong> pour accéder aux CV des candidats.
+      <button class="btn btn-primary" style="font-size:11px;padding:4px 10px;margin-left:10px" onclick="showPage('profile')">Voir les plans →</button>
+    </div>` : ''}
+    <div class="table-wrap">
+      <table>
+        <thead><tr>
+          <th>Score</th><th>Candidat</th><th>Niveau</th><th>Secteur</th>
+          <th>Localisation</th><th>Expérience</th><th>CV</th>
+        </tr></thead>
+        <tbody>
+          ${data.candidats.map(c => `
+            <tr>
+              <td>
+                <div style="display:flex;align-items:center;gap:8px">
+                  <div style="width:36px;height:36px;border-radius:50%;background:conic-gradient(var(--accent) ${c.score * 3.6}deg,var(--surface3) 0);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700">${c.score}%</div>
+                </div>
+              </td>
+              <td>
+                <div style="font-weight:500">${c.nom}</div>
+                <div style="font-size:11px;color:var(--accent2)">${c.phone}</div>
+                ${c.resume_profil ? `<div style="font-size:11px;color:var(--text2);margin-top:2px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${c.resume_profil}">${c.resume_profil}</div>` : ''}
+              </td>
+              <td style="font-size:12px">${c.niveau_etudes || '—'}</td>
+              <td style="font-size:12px">${(c.secteurs || []).slice(0,2).join(', ') || '—'}</td>
+              <td style="font-size:12px">${c.localisation || '—'}</td>
+              <td style="font-size:12px">${c.annees_experience > 0 ? c.annees_experience + ' an' + (c.annees_experience > 1 ? 's' : '') : '—'}</td>
+              <td>
+                ${canCV && c.cv_url
+                  ? `<a href="${c.cv_url}" target="_blank" class="btn btn-secondary" style="font-size:11px;padding:4px 8px;text-decoration:none">📄 Voir CV</a>`
+                  : c.cv_disponible
+                    ? `<span style="font-size:11px;color:var(--text2)">✅ Disponible</span>`
+                    : `<span style="font-size:11px;color:var(--text3)">—</span>`}
+              </td>
+            </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>`;
+}
+
+// ── KPI ───────────────────────────────────────────────────────
+async function loadKpi() {
+  const container = document.getElementById('kpi-content');
+  const data = await apiCall('/recruiters/kpi');
+  if (!data) return;
+  if (data.detail) {
+    container.innerHTML = `<div class="upgrade-banner"><div><h3>📈 Statistiques disponibles en Starter</h3><p>Passez au plan Starter pour accéder aux KPI de vos offres.</p></div><button class="btn btn-primary" onclick="showPage('profile')">Voir les plans →</button></div>`;
+    return;
+  }
+  container.innerHTML = `
+    <div class="stats-grid" style="grid-template-columns:repeat(auto-fit,minmax(140px,1fr))">
+      <div class="stat-card"><div style="font-size:20px">📋</div><div class="stat-value">${data.total_offres}</div><div class="stat-label">Total offres</div></div>
+      <div class="stat-card"><div style="font-size:20px">✅</div><div class="stat-value">${data.offres_actives}</div><div class="stat-label">Offres actives</div></div>
+      <div class="stat-card"><div style="font-size:20px">👁</div><div class="stat-value">${data.total_vues}</div><div class="stat-label">Vues total</div></div>
+      <div class="stat-card"><div style="font-size:20px">📨</div><div class="stat-value">${data.total_notifications_envoyees}</div><div class="stat-label">Notifications envoyées</div></div>
+      <div class="stat-card"><div style="font-size:20px">🎯</div><div class="stat-value">${data.total_candidats_matches}</div><div class="stat-label">Candidats matchés</div></div>
+      <div class="stat-card"><div style="font-size:20px">⭐</div><div class="stat-value">${data.score_moyen_matching}%</div><div class="stat-label">Score moyen</div></div>
+    </div>
+    <div class="card">
+      <div class="card-title">Performance par offre</div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Offre</th><th>Statut</th><th>Vues</th><th>Notifs</th><th>Matchs</th><th>Expire</th></tr></thead>
+          <tbody>
+            ${data.offres.map(o => `
+              <tr>
+                <td style="font-weight:500">${o.titre}</td>
+                <td><span class="badge badge-${o.statut === 'active' ? 'green' : o.statut === 'pending' ? 'yellow' : 'red'}">${o.statut}</span></td>
+                <td>${o.vues}</td>
+                <td>${o.nb_notifications}</td>
+                <td>${o.nb_matches}</td>
+                <td style="font-size:11px;color:var(--text2)">${o.expires_at ? new Date(o.expires_at).toLocaleDateString('fr-FR') : '—'}</td>
+              </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>
+    </div>`;
 }
 
 // ── Post Job ──────────────────────────────────────────────────

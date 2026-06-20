@@ -1136,10 +1136,19 @@ async def handle_onboarding(phone: str, text: str, user, db: AsyncSession, msg_t
                 print(f"  [cv upload] erreur: {_cv_dl_err}")
 
             if _cv_ok:
-                await whatsapp_sender.send_text(
-                    phone,
-                    "✅ CV reçu et analysé ! Je cherche les opportunités correspondant à ton profil. 🎯"
-                )
+                _profil = (_res or {}).get("profil", {})
+                _competences = (_profil.get("competences_normalisees") or _profil.get("competences") or [])
+                _secteurs = _profil.get("secteurs_interets") or []
+                _niveau = _profil.get("niveau_etudes") or ""
+                _lines = ["✅ CV analysé ! Voici ce que j'ai retenu :\n"]
+                if _niveau:
+                    _lines.append(f"🎓 Niveau : {_niveau}")
+                if _secteurs:
+                    _lines.append(f"📂 Secteur(s) : {', '.join(_secteurs[:3])}")
+                if _competences:
+                    _lines.append(f"🛠️ Compétences : {', '.join(_competences[:5])}")
+                _lines.append("\nJe cherche les meilleures offres pour toi. 🎯")
+                await whatsapp_sender.send_text(phone, "\n".join(_lines))
                 await _finish_emploi()
             else:
                 # Honnête + DIAGNOSTIC TEMPORAIRE (à retirer une fois réglé).

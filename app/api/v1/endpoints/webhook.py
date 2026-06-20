@@ -284,9 +284,16 @@ async def handle_command(command: str, phone: str, user, db: AsyncSession):
                 messages.petit_job_candidat_interested_ack(_job.titre)
             )
 
-            # Notifier l'offreur si on a son numéro
+            # Job créé par l'admin avec un numéro offreur → envoyer le contact directement au candidat
             if not _job.employeur_user_id:
-                return  # job créé par l'admin — pas d'offreur WhatsApp
+                if _job.offreur_phone:
+                    await whatsapp_sender.send_text(
+                        phone,
+                        f"📱 *Contact de l'employeur pour {_job.titre} :*\n\n"
+                        f"*{_job.offreur_phone}*\n\n"
+                        f"_Tu peux le contacter directement sur WhatsApp. Bonne chance ! 🤞_"
+                    )
+                return
 
             from sqlalchemy import select as _sel_offreur
             from app.models.user import User as _User

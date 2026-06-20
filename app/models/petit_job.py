@@ -23,6 +23,9 @@ class PetitJob(Base, TimestampMixin):
     remuneration: Mapped[str | None] = mapped_column(String(200), nullable=True)
     nb_postes: Mapped[int] = mapped_column(Integer, default=1)
 
+    # Pour les jobs créés par l'admin : numéro WhatsApp de l'offreur (envoyé direct au candidat)
+    offreur_phone: Mapped[str | None] = mapped_column(String(30), nullable=True)
+
     statut: Mapped[str] = mapped_column(String(20), default="ouvert", index=True)  # ouvert | pourvu | expiré
     nb_candidats_notifies: Mapped[int] = mapped_column(Integer, default=0)
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

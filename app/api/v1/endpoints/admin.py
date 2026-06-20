@@ -1590,6 +1590,7 @@ class PetitJobCreate(BaseModel):
     duree: str | None = None
     remuneration: str | None = None
     nb_postes: int = 1
+    offreur_phone: str | None = None
     description: str | None = None
 
 
@@ -1610,6 +1611,7 @@ async def create_petit_job(
         duree=body.duree,
         remuneration=body.remuneration,
         nb_postes=body.nb_postes,
+        offreur_phone=body.offreur_phone,
         description=body.description,
         statut="ouvert",
     )

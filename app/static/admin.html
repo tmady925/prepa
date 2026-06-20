@@ -1370,6 +1370,10 @@ tr:hover td { background: rgba(255,255,255,0.02); }
         </div>
       </div>
       <div>
+        <label style="font-size:12px;color:var(--text2);margin-bottom:4px;display:block">Téléphone offreur <span style="color:var(--text2);font-weight:400">(WhatsApp — envoyé au candidat intéressé)</span></label>
+        <input id="pj-offreur-phone" class="input" placeholder="ex: +221771234567" style="width:100%">
+      </div>
+      <div>
         <label style="font-size:12px;color:var(--text2);margin-bottom:4px;display:block">Description</label>
         <textarea id="pj-description" class="input" rows="3" placeholder="Détails du poste, tâches, profil recherché..." style="width:100%;resize:vertical"></textarea>
       </div>
@@ -2319,13 +2323,14 @@ async function createPetitJob() {
     duree: document.getElementById('pj-duree').value.trim() || null,
     remuneration: document.getElementById('pj-remuneration').value.trim() || null,
     nb_postes: parseInt(document.getElementById('pj-postes').value) || 1,
+    offreur_phone: document.getElementById('pj-offreur-phone').value.trim() || null,
     description: document.getElementById('pj-description').value.trim() || null,
   };
   const r = await api('/admin/petit-jobs', 'POST', body);
   if (r) {
     closeModal('modal-create-petit-job');
     toast(`Petit job créé — ${r.nb_candidats_notifies} candidat(s) notifié(s) ✅`);
-    ['pj-titre','pj-type','pj-lieu','pj-date','pj-duree','pj-remuneration','pj-description'].forEach(id => document.getElementById(id).value = '');
+    ['pj-titre','pj-type','pj-lieu','pj-date','pj-duree','pj-remuneration','pj-offreur-phone','pj-description'].forEach(id => document.getElementById(id).value = '');
     document.getElementById('pj-postes').value = '1';
     loadPetitJobs();
   }

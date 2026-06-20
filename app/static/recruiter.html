@@ -875,13 +875,20 @@ async function loadProfile() {
     </div>`;
 }
 
+let _subscribing = false;
 async function subscribe(plan) {
+  if (_subscribing) return;
+  _subscribing = true;
   toast('Création du lien de paiement...');
-  const r = await apiCall('/recruiters/subscribe', {method:'POST', body: JSON.stringify({plan})});
-  if (r?.success && r.payment_url) {
-    window.open(r.payment_url, '_blank');
-  } else {
-    toast('❌ Erreur lors de la création du lien');
+  try {
+    const r = await apiCall('/recruiters/subscribe', {method:'POST', body: JSON.stringify({plan})});
+    if (r?.success && r.payment_url) {
+      window.open(r.payment_url, '_blank');
+    } else {
+      toast('❌ Erreur lors de la création du lien');
+    }
+  } finally {
+    _subscribing = false;
   }
 }
 
